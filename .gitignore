@@ -1,0 +1,28 @@
+# Local environment and credentials
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node dependencies
+node_modules/
+**/node_modules/
+
+# Local browser/debug artifacts and editor settings
+.playwright-mcp/
+.vscode/
+
+# Local databases, logs, and OS files
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.DS_Store

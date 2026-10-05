@@ -1,0 +1,113 @@
+services:
+  primary-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-weather}
+      POSTGRES_USER: ${POSTGRES_USER:-bi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bi_dev_password}
+    volumes:
+      - primary_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bi} -d ${POSTGRES_DB:-weather}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  seed-data:
+    build:
+      context: ./primary_db
+    command: ["python", "/app/seed_data.py"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bi}:${POSTGRES_PASSWORD:-bi_dev_password}@primary-db:5432/${POSTGRES_DB:-weather}
+    depends_on:
+      primary-db:
+        condition: service_healthy
+    restart: "no"
+
+  ingest:
+    build:
+      context: ./primary_db
+    command: ["python", "/app/ingest_data.py"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bi}:${POSTGRES_PASSWORD:-bi_dev_password}@primary-db:5432/${POSTGRES_DB:-weather}
+    depends_on:
+      seed-data:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  superset-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${SUPERSET_DB:-superset}
+      POSTGRES_USER: ${SUPERSET_DB_USER:-superset}
+      POSTGRES_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_dev_password}
+    volumes:
+      - superset_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SUPERSET_DB_USER:-superset} -d ${SUPERSET_DB:-superset}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  superset-init:
+    image: text-to-bi-superset:6.1.0
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    command: >-
+      sh -c 'superset db upgrade && superset init && python /app/pythonpath/create_admin.py'
+    env_file:
+      - ./extensions/ai-agents/.env
+    environment:
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-development-secret-change-me}
+      SUPERSET_DB: ${SUPERSET_DB:-superset}
+      SUPERSET_DB_USER: ${SUPERSET_DB_USER:-superset}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_dev_password}
+      SUPERSET_ADMIN_USERNAME: ${SUPERSET_ADMIN_USERNAME:-admin}
+      SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD:-admin}
+      SUPERSET_ADMIN_FIRST_NAME: ${SUPERSET_ADMIN_FIRST_NAME:-Superset}
+      SUPERSET_ADMIN_LAST_NAME: ${SUPERSET_ADMIN_LAST_NAME:-Admin}
+      SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@example.com}
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/create_admin.py:/app/pythonpath/create_admin.py:ro
+      - ./extensions:/app/superset_home/extensions:ro
+    depends_on:
+      superset-db:
+        condition: service_healthy
+    restart: "no"
+
+  superset:
+    image: text-to-bi-superset:6.1.0
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    command: ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:8088 --workers 2 --timeout 120 'superset.app:create_app()'"]
+    env_file:
+      - ./extensions/ai-agents/.env
+    environment:
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-development-secret-change-me}
+      SUPERSET_DB: ${SUPERSET_DB:-superset}
+      SUPERSET_DB_USER: ${SUPERSET_DB_USER:-superset}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD:-superset_dev_password}
+    ports:
+      - "${SUPERSET_PORT:-8089}:8088"
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./extensions:/app/superset_home/extensions:ro
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+      primary-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  primary_db_data:
+  superset_db_data:
