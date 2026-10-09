@@ -5,5 +5,5 @@
     "esModuleInterop": true, "skipLibCheck": true, "noEmit": true,
     "baseUrl": ".", "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src"]
+  "include": ["src/**/*"]
 }

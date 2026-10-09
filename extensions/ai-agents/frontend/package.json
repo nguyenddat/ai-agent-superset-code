@@ -1,30 +1,30 @@
 {
-  "name": "ai-agents-frontend",
+  "name": "@text-to-bi/text-to-bi-code",
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node node_modules/webpack-cli/bin/cli.js --stats-error-details --mode production",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
-    "@base-ui/react": "^1.8.0",
-    "@shadcn/react": "^0.3.1",
-    "class-variance-authority": "^0.7.1",
-    "cn": "^0.4.0",
     "lucide-react": "^1.49.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1",
-    "tw-animate-css": "^1.4.0"
+    "react-markdown": "8.0.7",
+    "remark-gfm": "^4.0.1"
+  },
+  "peerDependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.3.3",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
-    "esbuild": "0.25.12",
-    "shadcn": "^4.21.1",
-    "tailwindcss": "^4.3.3",
-    "typescript": "5.7.3"
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2",
+    "@types/react": "^17.0.83",
+    "@types/react-dom": "^17.0.26",
+    "css-loader": "^7.1.2",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.2",
+    "webpack": "^5.98.0",
+    "webpack-cli": "^6.0.1"
   }
 }

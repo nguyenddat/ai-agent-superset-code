@@ -34,6 +34,17 @@ This first increment shows the Superset dataset-level semantic metadata. It does
 not yet read a MetricFlow project or infer metric-to-metric dependencies from
 SQL expressions.
 
+The backend owns `text_to_bi_dataset_dictionary` and
+`text_to_bi_column_dictionary` tables. A dataset dictionary row uses the matching
+Superset dataset ID as its `id` (`id -> tables.id`). Column dictionary rows point
+to the dataset dictionary through `dataset_id -> text_to_bi_dataset_dictionary.id`,
+and `referenced_column` points to another column dictionary row. Audit timestamps
+follow Superset's nullable audit mixin. The tables are created idempotently the
+first time an administrator opens the extension, after Superset's core schema is
+available. Existing column dictionary installations are upgraded from `table_id`
+to `dataset_id` in place, with a dataset dictionary row backfilled for each
+existing dataset reference.
+
 ## Build
 
 Install frontend dependencies in `frontend/`, then bundle the extension from

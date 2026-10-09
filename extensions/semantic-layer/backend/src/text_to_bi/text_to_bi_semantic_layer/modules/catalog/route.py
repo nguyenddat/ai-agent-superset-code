@@ -3,14 +3,105 @@ import json
 from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
+from sqlalchemy import inspect, text
 from superset import db
 from superset.connectors.sqla.models import SqlaTable
 from superset.models.dashboard import Dashboard
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
+from ...models.column_dictionary import ColumnDictionary
+from ...models.dataset_dictionary import DatasetDictionary
+
 
 SEMANTIC_LAYER_DATASET_IDS_KEY = "text_to_bi_semantic_layer_dataset_ids"
+
+
+def _ensure_dictionary_tables():
+    """Create extension tables and upgrade the earlier column dictionary schema."""
+    inspector = inspect(db.engine)
+    if inspector.has_table(ColumnDictionary.__tablename__):
+        columns = {column["name"] for column in inspector.get_columns(ColumnDictionary.__tablename__)}
+        if "table_id" in columns and "dataset_id" not in columns:
+            with db.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE text_to_bi_column_dictionary "
+                        "RENAME COLUMN table_id TO dataset_id"
+                    )
+                )
+                unique_constraints = {
+                    constraint["name"]
+                    for constraint in inspect(connection).get_unique_constraints(
+                        ColumnDictionary.__tablename__
+                    )
+                }
+                old_constraint = "uq_text_to_bi_column_table_display_name"
+                if old_constraint in unique_constraints:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE text_to_bi_column_dictionary "
+                            "RENAME CONSTRAINT uq_text_to_bi_column_table_display_name "
+                            "TO uq_text_to_bi_column_dataset_display_name"
+                        )
+                    )
+
+    DatasetDictionary.__table__.create(bind=db.engine, checkfirst=True)
+    ColumnDictionary.__table__.create(bind=db.engine, checkfirst=True)
+
+    with db.engine.begin() as connection:
+        # Seed a basic dictionary record for every existing Superset dataset.
+        connection.execute(
+            text(
+                "INSERT INTO text_to_bi_dataset_dictionary "
+                "(id, dataset_name, display_name, description) "
+                "SELECT id, table_name, table_name, description "
+                "FROM tables "
+                "ON CONFLICT (id) DO NOTHING"
+            )
+        )
+
+        constraints = inspect(connection).get_foreign_keys(ColumnDictionary.__tablename__)
+        dataset_constraints = [
+            constraint
+            for constraint in constraints
+            if constraint.get("constrained_columns") == ["dataset_id"]
+        ]
+        has_dictionary_fk = any(
+            constraint.get("referred_table") == DatasetDictionary.__tablename__
+            and constraint.get("referred_columns") == ["id"]
+            for constraint in dataset_constraints
+        )
+        preparer = connection.dialect.identifier_preparer
+        for constraint in dataset_constraints:
+            if constraint.get("referred_table") != DatasetDictionary.__tablename__:
+                constraint_name = preparer.quote(constraint["name"])
+                connection.execute(
+                    text(
+                        f"ALTER TABLE text_to_bi_column_dictionary "
+                        f"DROP CONSTRAINT {constraint_name}"
+                    )
+                )
+        if not has_dictionary_fk:
+            connection.execute(
+                text(
+                    "ALTER TABLE text_to_bi_column_dictionary "
+                    "ADD CONSTRAINT fk_text_to_bi_column_dataset_dictionary "
+                    "FOREIGN KEY (dataset_id) "
+                    "REFERENCES text_to_bi_dataset_dictionary (id) ON DELETE CASCADE"
+                )
+            )
+
+        indexes = {index["name"] for index in inspect(connection).get_indexes(ColumnDictionary.__tablename__)}
+        old_index = "ix_text_to_bi_column_dictionary_table_id"
+        if old_index in indexes:
+            old_index_name = preparer.quote(old_index)
+            connection.execute(
+                text(
+                    f"ALTER INDEX {old_index_name} "
+                    "RENAME TO ix_text_to_bi_column_dictionary_dataset_id"
+                )
+            )
 
 
 @api(
@@ -35,6 +126,7 @@ class SemanticLayerAPI(RestApi):
         """Return whether the authenticated user is a Superset administrator."""
         if not self._is_admin():
             return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
         return self.response(200, is_admin=True)
 
     @expose("/dashboard/<int:dashboard_id>/datasets", methods=("GET",))

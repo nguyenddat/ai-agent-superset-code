@@ -70,6 +70,48 @@ def init_database(connection: psycopg.Connection) -> None:
             ON thoitiet (thanhpho_id, thoi_gian_ghi_nhan DESC)
         """)
 
+        # Older imports could create multiple rows for one city and timestamp.
+        # Preserve those rows for reference, then keep the latest inserted row
+        # in the fact table so the ingest upsert has a valid conflict target.
+        cursor.execute("CREATE SCHEMA IF NOT EXISTS maintenance")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maintenance.thoitiet_duplicate_archive
+            AS SELECT * FROM thoitiet WITH NO DATA
+        """)
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_thoitiet_duplicate_archive_id
+            ON maintenance.thoitiet_duplicate_archive (id)
+        """)
+        cursor.execute("""
+            INSERT INTO maintenance.thoitiet_duplicate_archive
+            SELECT id, thanhpho_id, nhiet_do_c, do_am_phan_tram,
+                   toc_do_gio_kmh, thoi_gian_ghi_nhan
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY thanhpho_id, thoi_gian_ghi_nhan
+                    ORDER BY id DESC
+                ) AS duplicate_rank
+                FROM thoitiet
+            ) ranked
+            WHERE duplicate_rank > 1
+            ON CONFLICT (id) DO NOTHING
+        """)
+        cursor.execute("""
+            DELETE FROM thoitiet AS weather
+            USING (
+                SELECT id
+                FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY thanhpho_id, thoi_gian_ghi_nhan
+                        ORDER BY id DESC
+                    ) AS duplicate_rank
+                    FROM thoitiet
+                ) ranked
+                WHERE duplicate_rank > 1
+            ) AS duplicates
+            WHERE weather.id = duplicates.id
+        """)
+
         cursor.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_thoitiet_city_timestamp
             ON thoitiet (thanhpho_id, thoi_gian_ghi_nhan)

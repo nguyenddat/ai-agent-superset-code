@@ -3,6 +3,12 @@ name = "text_to_bi-semantic_layer"
 version = "0.1.0"
 license = "Apache-2.0"
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+ignore = ["D100"]
+
 [tool.apache_superset_extensions.build]
 include = [
     "src/text_to_bi/text_to_bi_semantic_layer/**/*.py",

@@ -1,0 +1,8 @@
+{
+  "publisher": "text-to-bi",
+  "name": "text-to-bi-code",
+  "displayName": "Text to BI AI Agent",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "permissions": []
+}

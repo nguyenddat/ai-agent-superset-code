@@ -6,5 +6,6 @@ RUN uv pip install --python /app/.venv/bin/python \
     'pydantic-settings>=2.0,<3' \
     'langchain>=1.1,<2' \
     'langchain-openai>=1.1,<2' \
-    'langgraph>=1.1,<2'
+    'langgraph>=1.1,<2' \
+    'fastmcp>=2.13,<3'
 USER superset

@@ -1,0 +1,148 @@
+{
+  "catalog": [
+    {
+      "name": "superset_charts",
+      "category": "documentation",
+      "description": "Tài liệu hướng dẫn API và quy trình đọc, tham chiếu, preview hoặc tạo chart trong Apache Superset.",
+      "when_to_use": "Đọc trước khi chọn chart có sẵn, xây dựng Explore preview hoặc thiết kế tool tạo chart Python/API.",
+      "how_to_use": "Gọi get_tool_documentation với tool_name=\"superset_charts\"; coi đây là tài liệu tham khảo, vẫn phải xác thực schema và quyền trên instance hiện tại.",
+      "parameters": [
+        {
+          "name": "tool_name",
+          "type": "string",
+          "required": true,
+          "description": "Giá trị cố định: superset_charts."
+        }
+      ],
+      "limitations": [
+        "Chỉ đọc Markdown được đóng gói trong extension; không tự truy cập website hoặc Swagger.",
+        "Không cấp thêm quyền tạo, sửa hoặc lưu chart."
+      ]
+    },
+    {
+      "name": "get_dataset_catalog",
+      "category": "metadata",
+      "description": "Liệt kê các dataset có trên dashboard hiện tại cùng tên và ID; chỉ trả metadata, không trả dữ liệu từng dòng.",
+      "when_to_use": "Dùng khi chưa xác định được dataset liên quan hoặc cần làm mới danh sách sau lỗi allowed_dataset_ids.",
+      "how_to_use": "Gọi công cụ không cần tham số do người dùng cung cấp. Chọn đúng dataset ID từ kết quả trước khi xem cột, metric hoặc truy vấn dữ liệu.",
+      "parameters": [],
+      "limitations": [
+        "Không tính toán, tổng hợp hoặc trả về giá trị dữ liệu.",
+        "Không dùng chart ID thay cho dataset ID."
+      ]
+    },
+    {
+      "name": "get_column_catalog",
+      "category": "metadata",
+      "description": "Liệt kê các cột của dataset với tên vật lý, tên hiển thị, kiểu dữ liệu, khả năng truy vấn, trạng thái nhạy cảm và thông tin cột thời gian.",
+      "when_to_use": "Dùng khi cần ánh xạ khái niệm trong câu hỏi sang cột thực tế hoặc cần xác minh cột cho columns, filters hay group_by.",
+      "how_to_use": "Truyền dataset_id nếu đã biết. Khi xây dựng truy vấn, dùng đúng column_name; verbose_name chỉ để hiểu ngữ nghĩa hoặc hiển thị.",
+      "parameters": [
+        {
+          "name": "dataset_id",
+          "type": "integer|null",
+          "required": false,
+          "description": "ID dataset trên dashboard hiện tại; nên truyền khi đã xác định được dataset."
+        }
+      ],
+      "limitations": [
+        "Chỉ trả metadata, không trả giá trị dữ liệu.",
+        "Không tự dịch hoặc phỏng đoán tên cột vật lý."
+      ]
+    },
+    {
+      "name": "get_metric_catalog",
+      "category": "metadata",
+      "description": "Liệt kê các metric đã lưu của dataset cùng tên, biểu thức, mô tả và các phép tổng hợp được cho phép.",
+      "when_to_use": "Dùng khi người dùng nhắc đến metric đã lưu hoặc cần xác minh metric và phép tính trước khi truy vấn.",
+      "how_to_use": "Truyền dataset_id nếu đã biết. Chỉ dùng metric và phép tổng hợp được catalog xác nhận.",
+      "parameters": [
+        {
+          "name": "dataset_id",
+          "type": "integer|null",
+          "required": false,
+          "description": "ID dataset trên dashboard hiện tại; nên truyền khi đã xác định được dataset."
+        }
+      ],
+      "limitations": [
+        "Chỉ trả metadata, không tính hoặc trả giá trị metric.",
+        "Không tự tạo metric hay thay đổi phép tổng hợp được cho phép."
+      ]
+    },
+    {
+      "name": "get_chart_catalog",
+      "category": "metadata",
+      "description": "Liệt kê chart trên dashboard cùng cấu hình metric, chiều phân tích và các thông tin hiển thị liên quan.",
+      "when_to_use": "Dùng khi người dùng hỏi về chart cụ thể hoặc cấu hình chart hiện có giúp làm rõ metric hay chiều họ muốn phân tích.",
+      "how_to_use": "Gọi công cụ không cần tham số do người dùng cung cấp; đối chiếu chart trong kết quả với câu hỏi.",
+      "parameters": [],
+      "limitations": [
+        "Không trả giá trị dữ liệu thực tế của chart.",
+        "Khi người dùng cần số liệu, tiếp tục dùng query_dataset với dataset và trường đã xác minh."
+      ]
+    },
+    {
+      "name": "query_dataset",
+      "category": "data_query",
+      "description": "Thực hiện truy vấn dữ liệu có cấu trúc, chỉ đọc, trên dataset được phép của dashboard hiện tại.",
+      "when_to_use": "Dùng khi người dùng cần giá trị, bản ghi, phép tính, so sánh, phân nhóm, xu hướng hoặc dữ liệu để dựng biểu đồ.",
+      "how_to_use": "Trước tiên xác định dataset và tra cứu các cột hoặc metric cần thiết. Chỉ truyền tên trường, metric và bộ lọc đã xác minh trong catalog. Không truyền SQL.",
+      "parameters": [
+        {
+          "name": "dataset_id",
+          "type": "integer",
+          "required": true,
+          "description": "ID chính xác của dataset thuộc dashboard hiện tại."
+        },
+        {
+          "name": "columns",
+          "type": "string[]",
+          "required": false,
+          "description": "Tên vật lý các cột cần lấy cho từng bản ghi; không dùng SQL hoặc ký tự đại diện."
+        },
+        {
+          "name": "metrics",
+          "type": "MetricRequest[]",
+          "required": false,
+          "description": "Metric đã lưu hoặc cột số đã xác minh kèm aggregation sum, avg, count, min hoặc max khi cần."
+        },
+        {
+          "name": "filters",
+          "type": "FilterRequest[]",
+          "required": false,
+          "description": "Bộ lọc trên trường đã xác minh; operator được hỗ trợ gồm =, !=, >, >=, <, <=, in, not_in, contains, between và relative_time."
+        },
+        {
+          "name": "group_by",
+          "type": "string[]",
+          "required": false,
+          "description": "Tên vật lý các cột đã xác minh dùng để phân nhóm hoặc so sánh."
+        },
+        {
+          "name": "time_range",
+          "type": "string|null",
+          "required": false,
+          "description": "Khoảng thời gian Superset. Bắt buộc nếu câu hỏi hoặc phân tích ngữ nghĩa có giới hạn thời gian; Today và Yesterday dùng ngày lịch theo Asia/Ho_Chi_Minh mặc định."
+        },
+        {
+          "name": "order_by",
+          "type": "string[]",
+          "required": false,
+          "description": "Tên trường đã xác minh để sắp xếp; thêm dấu - đầu tên để sắp xếp giảm dần."
+        },
+        {
+          "name": "limit",
+          "type": "integer",
+          "required": false,
+          "description": "Giới hạn số dòng từ 1 đến 100; mặc định 100."
+        }
+      ],
+      "limitations": [
+        "Chỉ truy vấn dataset thuộc dashboard hiện tại và allowed_dataset_ids.",
+        "Không nhận SQL; không được tự tạo cột, metric, bộ lọc hay kết quả.",
+        "Nếu truy vấn theo thời gian không có dòng, không bỏ bộ lọc và không thay bằng dữ liệu giai đoạn khác.",
+        "Chỉ khẳng định kết quả được trả về từ công cụ này."
+      ]
+    }
+  ]
+}
