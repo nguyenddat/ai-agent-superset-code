@@ -1,7 +1,7 @@
 {
   "publisher": "text-to-bi",
-  "name": "text-to-bi-semantic-layer",
-  "displayName": "Text to BI Semantic Layer",
+  "name": "superset-semantic-layer",
+  "displayName": "Superset Semantic Layer",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "permissions": []

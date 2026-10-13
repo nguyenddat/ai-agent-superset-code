@@ -57,9 +57,13 @@ export type ChatStreamEvent = {
   dashboard_title?: string;
   authorized_dataset_count?: number;
   datasets?: Record<string, string>;
+  agent?: string;
+  from_agent?: string;
+  to_agent?: string;
+  iteration?: number;
 };
 
-const CHAT_ENDPOINT = '/extensions/text-to-bi/text-to-bi-code/chat/stream';
+const CHAT_ENDPOINT = '/extensions/text-to-bi/superset-ai-agent/chat/stream';
 
 export function currentDashboardRef(): string | null {
   const match = window.location.pathname.match(/\/dashboard\/([^/?#]+)/);

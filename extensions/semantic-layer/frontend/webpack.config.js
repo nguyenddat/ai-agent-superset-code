@@ -24,7 +24,7 @@ module.exports = {
   },
   plugins: [
     new ModuleFederationPlugin({
-      name: 'textToBi_textToBiSemanticLayer',
+      name: 'textToBi_supersetSemanticLayer',
       filename: 'remoteEntry.[contenthash].js',
       exposes: { './index': './src/index.tsx' },
       shared: {

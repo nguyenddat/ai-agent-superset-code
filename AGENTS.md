@@ -61,13 +61,13 @@ conda activate ai-agent-superset
 
 cd extensions/ai-agents
 superset-extensions bundle
-cp text-to-bi-code-0.1.0.supx ..
-rm -f text-to-bi-code-0.1.0.supx
+cp superset-ai-agent-0.1.0.supx ..
+rm -f superset-ai-agent-0.1.0.supx
 
 cd ../semantic-layer
 superset-extensions bundle
-cp text-to-bi-semantic-layer-0.1.0.supx ..
-rm -f text-to-bi-semantic-layer-0.1.0.supx
+cp superset-semantic-layer-0.1.0.supx ..
+rm -f superset-semantic-layer-0.1.0.supx
 
 cd ../..
 docker compose up -d --build superset

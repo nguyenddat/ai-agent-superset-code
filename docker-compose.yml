@@ -1,6 +1,6 @@
 services:
   primary-db:
-    image: postgres:17-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-weather}
       POSTGRES_USER: ${POSTGRES_USER:-bi}

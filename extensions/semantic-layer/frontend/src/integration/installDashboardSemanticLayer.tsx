@@ -1,244 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM, { createPortal } from 'react-dom';
-import { Background, BackgroundVariant, BaseEdge, Controls, Edge, EdgeProps, EdgeTypes, Handle, Node, NodeProps, NodeTypes, Position, ReactFlow, ReactFlowProvider, addEdge, useEdgesState, useNodesState, useReactFlow } from '@xyflow/react';
-import { Boxes, Braces, CalendarClock, Check, ChevronDown, Database, Layers3, LoaderCircle, PanelRightClose, PanelRightOpen, Plus, Search, Trash2, X } from 'lucide-react';
+import { BookOpen, Boxes, Braces, CalendarClock, Check, ChevronDown, Database, GitBranch, Layers3, LoaderCircle, PanelRightClose, PanelRightOpen, Plus, Search, X } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
+import { DataDictionary } from '../features/semantic-layer/DataDictionary';
+import { SemanticCanvas } from '../features/semantic-layer/SemanticCanvas';
+import { semanticLayerApi, supersetApi } from '../features/semantic-layer/api';
+import { semanticLayerEvents, semanticLayerSelectors } from '../features/semantic-layer/constants';
+import { getDatasetName, getDatasetSourceTable, getDatasetTableLabel } from '../features/semantic-layer/datasets';
+import type { DashboardDataset, DatasetDictionary, SemanticField, ThemeMode } from '../features/semantic-layer/types';
 
-type DatasetColumn = {
-  column_name: string;
-  verbose_name?: string | null;
-  type?: string | null;
-  description?: string | null;
-  is_dttm?: boolean;
-};
-
-type DatasetMetric = {
-  metric_name: string;
-  verbose_name?: string | null;
-  expression?: string | null;
-  description?: string | null;
-};
-
-type DashboardDataset = {
-  id: number;
-  name?: string | null;
-  datasource_name?: string | null;
-  schema?: string | null;
-  table_name?: string | null;
-  description?: string | null;
-  database?: { database_name?: string | null };
-  columns?: DatasetColumn[];
-  metrics?: DatasetMetric[];
-};
-
-const SEMANTIC_LAYER_API = '/extensions/text-to-bi/text-to-bi-semantic-layer/semantic-layer';
-const TABLE_FIELD_ROW_STEP = 68;
-
-type SemanticField = {
-  id: string;
-  name: string;
-  kind: 'column' | 'metric';
-  type?: string | null;
-  expression?: string | null;
-  sourceTable?: string;
-};
-
-type SemanticNodeData = SemanticField & {
-  fields?: SemanticField[];
-  onRemove: (id: string) => void;
-  onRemoveField: (nodeId: string, fieldId: string) => void;
-};
-type SemanticNode = Node<SemanticNodeData, 'semanticField'>;
-
-function SemanticFieldNode({ id, data }: NodeProps<SemanticNode>) {
-  if (data.kind === 'column' && data.sourceTable && data.fields) {
-    return (
-      <div className="sl-flow-node sl-table-node">
-        <div className="sl-table-node-header">
-          <div className="sl-item-icon"><Database /></div>
-          <strong title={data.sourceTable}>{data.sourceTable}</strong>
-          <span>{data.fields.length} cột</span>
-        </div>
-        <div className="sl-table-node-fields">
-          {data.fields.map(field => (
-            <div className="sl-table-node-field" key={field.id}>
-              <Handle id={`column-${field.id}-target`} type="target" position={Position.Left} />
-              <Braces />
-              <span title={field.name}>{field.name}</span>
-              <small>{field.type || 'UNKNOWN'}</small>
-              <button className="nodrag nopan" type="button" aria-label={`Xóa ${field.name} khỏi ${data.sourceTable}`} title="Xóa cột" onClick={event => { event.stopPropagation(); data.onRemoveField(id, field.id); }}><X /></button>
-              <Handle id={`column-${field.id}-source`} type="source" position={Position.Right} />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`sl-flow-node${data.kind === 'metric' ? ' is-metric' : ''}`}>
-      <Handle type="target" position={Position.Left} />
-      <div className="sl-item-icon">{data.kind === 'metric' ? <Layers3 /> : <Braces />}</div>
-      <div className="sl-item-copy">
-        <strong>{data.name}</strong>
-        {data.kind === 'column' && data.sourceTable ? <span className="sl-flow-node-table">BẢNG · {data.sourceTable}</span> : null}
-        <span>{data.kind === 'metric' ? data.expression || 'METRIC' : `COLUMN · ${data.type || 'UNKNOWN'}`}</span>
-      </div>
-      <button className="nodrag nopan" type="button" aria-label={`Xóa ${data.name} khỏi canvas`} title="Xóa khỏi canvas" onClick={() => data.onRemove(id)}><Trash2 /></button>
-      <Handle type="source" position={Position.Right} />
-    </div>
-  );
-}
-
-const semanticNodeTypes: NodeTypes = { semanticField: SemanticFieldNode };
-
-function BundledSemanticEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd }: EdgeProps) {
-  // Edges with the same target share this final horizontal segment, creating
-  // a compact visual bundle while retaining each source-to-target relation.
-  const bundleX = Math.max(sourceX + 24, targetX - 34);
-  const curveX = sourceX + (bundleX - sourceX) * 0.55;
-  const path = `M ${sourceX},${sourceY} C ${curveX},${sourceY} ${bundleX},${targetY} ${bundleX},${targetY} L ${targetX},${targetY}`;
-  return <BaseEdge path={path} markerEnd={markerEnd} style={{ ...style, strokeWidth: 5 }} />;
-}
-
-const semanticEdgeTypes: EdgeTypes = { semantic: BundledSemanticEdge };
-
-function isValidSemanticConnection(connection: { sourceHandle?: string | null; targetHandle?: string | null }) {
-  if (!connection.sourceHandle || !connection.targetHandle) return true;
-  const sourceColumn = connection.sourceHandle.replace(/-source$/, '');
-  const targetColumn = connection.targetHandle.replace(/-target$/, '');
-  return sourceColumn !== targetColumn;
-}
-
-function SemanticFlowCanvas({ themeMode }: { themeMode: 'light' | 'dark' }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<SemanticNode>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const { screenToFlowPosition } = useReactFlow<SemanticNode>();
-
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent('semantic-fields-change', {
-      detail: nodes.flatMap(node => node.data.fields?.map(field => field.id) ?? [node.data.id]),
-    }));
-  }, [nodes]);
-
-  const removeNode = (nodeId: string) => {
-    setNodes(current => current.filter(node => node.id !== nodeId));
-    setEdges(current => current.filter(edge => edge.source !== nodeId && edge.target !== nodeId));
-  };
-
-  const removeField = (nodeId: string, fieldId: string) => {
-    const currentNode = nodes.find(node => node.id === nodeId);
-    if ((currentNode?.data.fields?.length ?? 0) <= 1) {
-      removeNode(nodeId);
-      return;
-    }
-    setNodes(current => current.flatMap(node => {
-      if (node.id !== nodeId || !node.data.fields) return [node];
-      const fields = node.data.fields.filter(field => field.id !== fieldId);
-      if (fields.length === 0) return [];
-      return [{ ...node, data: { ...node.data, fields } }];
-    }));
-  };
-
-  const addField = (item: SemanticField, clientX: number, clientY: number) => {
-    const position = screenToFlowPosition({ x: clientX, y: clientY });
-    if (item.kind === 'column' && item.sourceTable) {
-      const sourceTable = item.sourceTable;
-      const tableNodeId = `table-${sourceTable}`;
-      setNodes(current => {
-        const existing = current.find(node => node.id === tableNodeId);
-        if (existing) {
-          if (existing.data.fields?.some(field => field.id === item.id)) return current;
-          return current.map(node => node.id === tableNodeId
-            ? {
-              ...node,
-              position: { ...node.position, y: node.position.y - TABLE_FIELD_ROW_STEP / 2 },
-              data: { ...node.data, fields: [...(node.data.fields ?? []), item] },
-            }
-            : node);
-        }
-        return [...current, {
-          id: tableNodeId,
-          type: 'semanticField',
-          position,
-          data: { ...item, id: tableNodeId, name: sourceTable, fields: [item], onRemove: removeNode, onRemoveField: removeField },
-        }];
-      });
-      return;
-    }
-    setNodes(current => current.some(node => node.id === item.id) ? current : [...current, {
-      id: item.id,
-      type: 'semanticField',
-      position,
-      data: { ...item, onRemove: removeNode, onRemoveField: removeField },
-    }]);
-  };
-
-  useEffect(() => {
-    const handlePointerDrop = (event: Event) => {
-      const detail = (event as CustomEvent<{ item: SemanticField; clientX: number; clientY: number }>).detail;
-      if (detail?.item) addField(detail.item, detail.clientX, detail.clientY);
-    };
-    window.addEventListener('semantic-field-pointer-drop', handlePointerDrop);
-    return () => window.removeEventListener('semantic-field-pointer-drop', handlePointerDrop);
-  }, [screenToFlowPosition]);
-
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const raw = event.dataTransfer.getData('application/x-semantic-field');
-    if (!raw) return;
-    try {
-      const item = JSON.parse(raw) as SemanticField;
-      addField(item, event.clientX, event.clientY);
-    } catch {
-      // Ignore malformed drag data.
-    }
-  };
-
-  return (
-    <div className="sl-flow-canvas" onDrop={handleDrop} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={semanticNodeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={connection => {
-          if (!isValidSemanticConnection(connection)) return;
-          setEdges(current => addEdge({ ...connection, type: 'semantic', style: { stroke: 'var(--sl-accent)', strokeWidth: 5 }, interactionWidth: 22, zIndex: 10 }, current));
-        }}
-        isValidConnection={isValidSemanticConnection}
-        edgeTypes={semanticEdgeTypes}
-        colorMode={themeMode}
-        fitView
-        fitViewOptions={{ padding: 0.25 }}
-        minZoom={0.25}
-        maxZoom={2}
-        snapToGrid
-        snapGrid={[24, 24]}
-        deleteKeyCode={['Backspace', 'Delete']}
-        aria-label="Canvas semantic layer"
-      >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.8} color="var(--sl-grid-dot)" />
-        <Controls position="bottom-right" showInteractive={false} />
-        {nodes.length === 0 ? (
-          <div className="sl-empty-canvas">
-            <Plus />
-            <strong>Kéo cột vào đây</strong>
-            <span>Thả columns hoặc metrics lên canvas, rồi nối các mục để biểu diễn quan hệ.</span>
-          </div>
-        ) : null}
-      </ReactFlow>
-      <span className="sl-canvas-count">{nodes.length} mục</span>
-    </div>
-  );
-}
-
-function SemanticCanvasHost({ themeMode }: { themeMode: 'light' | 'dark' }) {
-  return <ReactFlowProvider><SemanticFlowCanvas themeMode={themeMode} /></ReactFlowProvider>;
-}
-
-function activeSupersetTheme(): 'light' | 'dark' {
+function activeSupersetTheme(): ThemeMode {
   const luminance = (color: string) => {
     const match = color.match(/rgba?\(([^)]+)\)/i);
     if (!match) return null;
@@ -256,6 +27,8 @@ function activeSupersetTheme(): 'light' | 'dark' {
 
 function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
   const [datasets, setDatasets] = useState<DashboardDataset[]>([]);
+  const [dictionaryByDataset, setDictionaryByDataset] = useState<Record<number, DatasetDictionary>>({});
+  const [dictionariesReady, setDictionariesReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedDataset, setSelectedDataset] = useState<number | null>(null);
@@ -271,6 +44,24 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
   const [datasetPickerLoading, setDatasetPickerLoading] = useState(false);
   const [datasetPickerError, setDatasetPickerError] = useState('');
   const [savingDataset, setSavingDataset] = useState(false);
+  const [activeModule, setActiveModule] = useState<'dictionary' | 'semantic'>('dictionary');
+  const [dictionaryDirty, setDictionaryDirty] = useState(false);
+
+  const canLeaveDictionary = () => (
+    !dictionaryDirty || window.confirm('Bạn có thay đổi chưa lưu trong Data Dictionary. Tiếp tục và bỏ các thay đổi này?')
+  );
+
+  const selectModule = (module: 'dictionary' | 'semantic') => {
+    if (module === activeModule) return;
+    if (activeModule === 'dictionary' && !canLeaveDictionary()) return;
+    setActiveModule(module);
+  };
+
+  const selectDataset = (datasetId: number) => {
+    if (datasetId === selectedDataset) return;
+    if (activeModule === 'dictionary' && !canLeaveDictionary()) return;
+    setSelectedDataset(datasetId);
+  };
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -292,13 +83,13 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
       }
       if (event.key === 'Escape') setCollapsed(true);
     };
-    window.addEventListener('text-to-bi:expand-semantic-layer', expandPanel);
-    window.addEventListener('semantic-fields-change', syncCanvasFields);
+    window.addEventListener(semanticLayerEvents.expand, expandPanel);
+    window.addEventListener(semanticLayerEvents.fieldsChange, syncCanvasFields);
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       observer.disconnect();
-      window.removeEventListener('text-to-bi:expand-semantic-layer', expandPanel);
-      window.removeEventListener('semantic-fields-change', syncCanvasFields);
+      window.removeEventListener(semanticLayerEvents.expand, expandPanel);
+      window.removeEventListener(semanticLayerEvents.fieldsChange, syncCanvasFields);
       window.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = previousOverflow;
     };
@@ -307,11 +98,11 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
   useEffect(() => {
     let active = true;
     Promise.all([
-      fetch(`/api/v1/dashboard/${encodeURIComponent(dashboardId)}/datasets`, {
+      fetch(supersetApi.dashboardDatasets(dashboardId), {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       }),
-      fetch(`${SEMANTIC_LAYER_API}/dashboard/${encodeURIComponent(dashboardId)}/datasets`, {
+      fetch(semanticLayerApi.dashboardDatasets(dashboardId), {
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       }),
@@ -328,7 +119,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
         const extraIds = linkedIds.filter((id: number) => Number.isInteger(id) && !result.some(dataset => dataset.id === id));
         const extraDatasets = await Promise.all(extraIds.map(async (id: number) => {
           try {
-            const response = await fetch(`/api/v1/dataset/${encodeURIComponent(id)}`, {
+            const response = await fetch(supersetApi.dataset(id), {
               credentials: 'same-origin',
               headers: { Accept: 'application/json' },
             });
@@ -343,7 +134,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
         const hydrated = await Promise.all(allDatasets.map(async dataset => {
           if ((dataset.columns?.length ?? 0) > 0) return dataset;
           try {
-            const detailResponse = await fetch(`/api/v1/dataset/${encodeURIComponent(dataset.id)}`, {
+            const detailResponse = await fetch(supersetApi.dataset(dataset.id), {
               credentials: 'same-origin',
               headers: { Accept: 'application/json' },
             });
@@ -368,15 +159,34 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
   }, [dashboardId]);
 
   const currentDataset = datasets.find(dataset => dataset.id === selectedDataset);
-  const datasetName = (dataset: DashboardDataset) => dataset.name || dataset.datasource_name || dataset.table_name || `Dataset ${dataset.id}`;
-  const datasetTableLabel = (dataset: DashboardDataset) => {
-    const table = dataset.table_name || dataset.datasource_name || dataset.name || `Dataset ${dataset.id}`;
-    return dataset.schema && !table.startsWith(`${dataset.schema}.`) ? `${dataset.schema}.${table}` : table;
-  };
-  const rawTableName = currentDataset?.table_name || currentDataset?.datasource_name || currentDataset?.name || '';
-  const sourceTable = currentDataset?.schema && !rawTableName.startsWith(`${currentDataset.schema}.`)
-    ? `${currentDataset.schema}.${rawTableName}`
-    : rawTableName;
+  const sourceTable = getDatasetSourceTable(currentDataset);
+
+  useEffect(() => {
+    let active = true;
+    if (datasets.length === 0) {
+      setDictionaryByDataset({});
+      setDictionariesReady(true);
+      return () => { active = false; };
+    }
+    setDictionariesReady(false);
+    Promise.all(datasets.map(async dataset => {
+      try {
+        const response = await fetch(semanticLayerApi.datasetDictionary(dataset.id), {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) return null;
+        return await response.json() as DatasetDictionary;
+      } catch {
+        return null;
+      }
+    })).then(dictionaries => {
+      if (!active) return;
+      setDictionaryByDataset(Object.fromEntries(dictionaries.filter((item): item is DatasetDictionary => item !== null).map(item => [item.dataset_id, item])));
+      setDictionariesReady(true);
+    });
+    return () => { active = false; };
+  }, [datasets]);
   const startDrag = (event: React.PointerEvent<HTMLElement>, item: SemanticField) => {
     if (event.button !== 0) return;
     const { clientX: startX, clientY: startY, pointerId } = event;
@@ -408,7 +218,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
       if (!dragging) return;
       const targetCanvas = document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest('.sl-flow-canvas');
       if (targetCanvas) {
-        window.dispatchEvent(new CustomEvent('semantic-field-pointer-drop', {
+        window.dispatchEvent(new CustomEvent(semanticLayerEvents.pointerDrop, {
           detail: { item, clientX: upEvent.clientX, clientY: upEvent.clientY },
         }));
       }
@@ -430,8 +240,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
       let page = 0;
       let count = Number.POSITIVE_INFINITY;
       while (all.length < count) {
-        const query = encodeURIComponent(`(page:${page},page_size:100)`);
-        const response = await fetch(`/api/v1/dataset/?q=${query}`, {
+        const response = await fetch(supersetApi.datasets(page), {
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         });
@@ -443,7 +252,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
         if (results.length === 0) break;
         page += 1;
       }
-      setSystemDatasets(all.sort((left, right) => datasetTableLabel(left).localeCompare(datasetTableLabel(right))));
+      setSystemDatasets(all.sort((left, right) => getDatasetTableLabel(left).localeCompare(getDatasetTableLabel(right))));
     } catch (reason) {
       setDatasetPickerError(reason instanceof Error ? reason.message : 'Không tải được danh sách dataset.');
     } finally {
@@ -460,11 +269,11 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
       if (!selected) throw new Error('Không tìm thấy dataset đã chọn.');
 
       const [csrfResponse, detailResponse] = await Promise.all([
-        fetch('/api/v1/security/csrf_token/', {
+        fetch(supersetApi.csrfToken, {
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         }),
-        fetch(`/api/v1/dataset/${encodeURIComponent(selected.id)}`, {
+        fetch(supersetApi.dataset(selected.id), {
           credentials: 'same-origin',
           headers: { Accept: 'application/json' },
         }),
@@ -475,7 +284,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
       const [csrfPayload, detailPayload] = await Promise.all([csrfResponse.json(), detailResponse.json()]);
 
       const csrfToken = csrfPayload?.result || csrfPayload?.csrf_token;
-      const updateResponse = await fetch(`${SEMANTIC_LAYER_API}/dashboard/${encodeURIComponent(dashboardId)}/datasets`, {
+      const updateResponse = await fetch(semanticLayerApi.dashboardDatasets(dashboardId), {
         method: 'POST',
         credentials: 'same-origin',
         headers: {
@@ -504,7 +313,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
   const linkedDatasetIds = new Set(datasets.map(dataset => dataset.id));
   const normalizedSearch = datasetSearch.trim().toLocaleLowerCase();
   const filteredSystemDatasets = systemDatasets.filter(dataset => {
-    const searchText = `${datasetTableLabel(dataset)} ${dataset.database?.database_name ?? ''}`.toLocaleLowerCase();
+    const searchText = `${getDatasetTableLabel(dataset)} ${dataset.database?.database_name ?? ''}`.toLocaleLowerCase();
     return searchText.includes(normalizedSearch);
   });
 
@@ -518,6 +327,14 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
               <h2>Semantic Layer</h2>
               <p>Khám phá datasets, columns và metrics trên dashboard này</p>
             </div>
+            <nav className="sl-module-switcher" aria-label="Semantic metadata modules">
+              <button className={activeModule === 'dictionary' ? 'is-active' : ''} type="button" aria-label="Data Dictionary" title="Data Dictionary" aria-current={activeModule === 'dictionary' ? 'page' : undefined} onClick={() => selectModule('dictionary')}>
+                <BookOpen /><span>Data Dictionary</span>
+              </button>
+              <button className={activeModule === 'semantic' ? 'is-active' : ''} type="button" aria-label="Semantic Layer" title="Semantic Layer" aria-current={activeModule === 'semantic' ? 'page' : undefined} onClick={() => selectModule('semantic')}>
+                <GitBranch /><span>Semantic Layer</span>
+              </button>
+            </nav>
             <button className="sl-close" type="button" aria-label="Thu gọn Semantic Layer" title="Thu gọn" onClick={() => setCollapsed(true)}><PanelRightClose /></button>
           </header>
 
@@ -535,10 +352,10 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
                       className={`sl-dataset-option${dataset.id === selectedDataset ? ' is-selected' : ''}`}
                       key={dataset.id}
                       type="button"
-                      onClick={() => setSelectedDataset(dataset.id)}
+                      onClick={() => selectDataset(dataset.id)}
                     >
                       <Database />
-                      <span>{datasetName(dataset)}</span>
+                      <span>{getDatasetName(dataset)}</span>
                     </button>
                   ))}
                 </div>
@@ -548,6 +365,11 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
               </nav>
 
               {currentDataset ? (
+                activeModule === 'dictionary' ? (
+                  <main className="sl-dictionary-main">
+                    <DataDictionary key={currentDataset.id} dataset={currentDataset} onDirtyChange={setDictionaryDirty} />
+                  </main>
+                ) : (
                 <main className="sl-details">
                   <div className="sl-workspace">
                     <aside className="sl-field-palette" aria-label="Trường dữ liệu có thể kéo">
@@ -560,7 +382,8 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
                         <div id="sl-columns-list" className={`sl-palette-items${columnsExpanded ? ' is-expanded' : ''}`}>
                           <div className="sl-palette-items-inner">
                             {(currentDataset.columns ?? []).map(column => {
-                              const item = { id: `column-${currentDataset.id}-${column.column_name}`, name: column.verbose_name || column.column_name, kind: 'column' as const, type: column.is_dttm ? 'TIME' : column.type, sourceTable };
+                              const dictionaryColumn = dictionaryByDataset[currentDataset.id]?.columns.find(item => item.column_name === column.column_name);
+                              const item: SemanticField = { id: `column-${currentDataset.id}-${column.column_name}`, name: dictionaryColumn?.display_name || column.verbose_name || column.column_name, kind: 'column', type: column.is_dttm ? 'TIME' : column.type, sourceTable, sourceDatasetId: currentDataset.id, datasetType: dictionaryByDataset[currentDataset.id]?.dataset_type ?? null, referencedDatasetId: dictionaryColumn?.referenced_dataset_id, referencedColumnName: dictionaryColumn?.referenced_column_name };
                               const inCanvas = canvasFieldIds.includes(item.id);
                               return (
                                 <article className={`sl-field-card${inCanvas ? ' is-in-canvas' : ''}`} key={item.id} onPointerDown={event => startDrag(event, item)}>
@@ -601,10 +424,11 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
                     </aside>
 
                     <section className="sl-canvas" aria-label="Canvas semantic layer">
-                      <SemanticCanvasHost themeMode={themeMode} />
+                      <SemanticCanvas themeMode={themeMode} datasets={datasets} dictionaries={dictionaryByDataset} dictionariesReady={dictionariesReady} />
                     </section>
                   </div>
                 </main>
+                )
               ) : (
                 <div className="sl-no-dataset">
                   <Database />
@@ -649,7 +473,7 @@ function SemanticLayerPanel({ dashboardId }: { dashboardId: string }) {
                   >
                     <Database />
                     <span className="sl-dataset-picker-copy">
-                      <strong>{datasetTableLabel(dataset)}</strong>
+                      <strong>{getDatasetTableLabel(dataset)}</strong>
                       <small>{dataset.database?.database_name || 'Dataset'}</small>
                     </span>
                     {alreadyLinked ? <span className="sl-dataset-picker-linked">Đã thêm</span> : null}
@@ -690,10 +514,10 @@ function SemanticLayerHost({ dashboardId }: { dashboardId: string }) {
   useEffect(() => {
     const showPanel = () => {
       setOpen(true);
-      window.dispatchEvent(new Event('text-to-bi:expand-semantic-layer'));
+      window.dispatchEvent(new Event(semanticLayerEvents.expand));
     };
-    window.addEventListener('text-to-bi:open-semantic-layer', showPanel);
-    return () => window.removeEventListener('text-to-bi:open-semantic-layer', showPanel);
+    window.addEventListener(semanticLayerEvents.open, showPanel);
+    return () => window.removeEventListener(semanticLayerEvents.open, showPanel);
   }, []);
   return (
     open ? <SemanticLayerPanel dashboardId={dashboardId} /> : null
@@ -711,8 +535,8 @@ export function installDashboardSemanticLayer(): () => void {
   let checking = false;
 
   const removeMenuItem = () => {
-    document.querySelector('[data-test="semantic-layer-menu-item"]')?.remove();
-    document.querySelector('[data-test="semantic-layer-menu-divider"]')?.remove();
+    document.querySelector(semanticLayerSelectors.menuItem)?.remove();
+    document.querySelector(semanticLayerSelectors.menuDivider)?.remove();
   };
 
   const clear = () => {
@@ -726,8 +550,13 @@ export function installDashboardSemanticLayer(): () => void {
   };
 
   const addMenuItem = () => {
-    const menu = document.querySelector<HTMLUListElement>('ul[data-test="header-actions-menu"]');
-    if (!menu || menu.querySelector('[data-test="semantic-layer-menu-item"]')) return;
+    const menu = Array.from(document.querySelectorAll<HTMLUListElement>(semanticLayerSelectors.actionsMenu))
+      .find(candidate => {
+        const style = getComputedStyle(candidate);
+        return style.display !== 'none' && style.visibility !== 'hidden'
+          && /Share|Refresh dashboard|Download/i.test(candidate.textContent ?? '');
+      });
+    if (!menu || menu.querySelector(semanticLayerSelectors.menuItem)) return;
 
     const divider = document.createElement('li');
     divider.className = 'ant-dropdown-menu-item-divider';
@@ -760,11 +589,11 @@ export function installDashboardSemanticLayer(): () => void {
 
   const handleMenuClick = (event: MouseEvent) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.closest('[data-test="semantic-layer-menu-item"]')) return;
+    if (!(target instanceof Element) || !target.closest(semanticLayerSelectors.menuItem)) return;
     event.preventDefault();
-    window.dispatchEvent(new Event('text-to-bi:open-semantic-layer'));
+    window.dispatchEvent(new Event(semanticLayerEvents.open));
     window.requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>('button[data-test="actions-trigger"]')?.click();
+      document.querySelector<HTMLButtonElement>(semanticLayerSelectors.actionsTrigger)?.click();
     });
   };
 
@@ -785,7 +614,7 @@ export function installDashboardSemanticLayer(): () => void {
     pendingDashboard = dashboardId;
     if (checking) return;
     checking = true;
-    fetch('/extensions/text-to-bi/text-to-bi-semantic-layer/semantic-layer/access', {
+    fetch(semanticLayerApi.access, {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
     })

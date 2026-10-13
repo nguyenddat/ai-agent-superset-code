@@ -1,5 +1,5 @@
 [project]
-name = "text_to_bi-semantic_layer"
+name = "superset-semantic-layer"
 version = "0.1.0"
 license = "Apache-2.0"
 
@@ -11,8 +11,8 @@ ignore = ["D100"]
 
 [tool.apache_superset_extensions.build]
 include = [
-    "src/text_to_bi/text_to_bi_semantic_layer/**/*.py",
-    "src/text_to_bi/text_to_bi_semantic_layer/**/*.json",
-    "src/text_to_bi/text_to_bi_semantic_layer/**/*.md",
+    "src/text_to_bi/superset_semantic_layer/**/*.py",
+    "src/text_to_bi/superset_semantic_layer/**/*.json",
+    "src/text_to_bi/superset_semantic_layer/**/*.md",
 ]
 exclude = []

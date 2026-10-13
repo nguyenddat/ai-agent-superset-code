@@ -1,10 +1,10 @@
-from text_to_bi.text_to_bi_code.agent_package.context.contract import (
+from text_to_bi.superset_ai_agent.agent_package.context.contract import (
     BIContract, ChartResolve, DataMetric, DataResolve, DataSource, UserIntent,
 )
-from text_to_bi.text_to_bi_code.agent_package.context.dashboard import (
+from text_to_bi.superset_ai_agent.agent_package.context.dashboard import (
     ColumnDTO, DatasetDTO, MetricDTO,
 )
-from text_to_bi.text_to_bi_code.agent_package.tools.validate_bi_contract import BIContractValidator
+from text_to_bi.superset_ai_agent.agent_package.tools.validate_bi_contract import BIContractValidator
 
 
 def dataset(dataset_id=1):
@@ -66,7 +66,7 @@ def test_verified_join_can_be_supplied():
 
 
 def test_repair_loop_success_and_exhaustion(monkeypatch):
-    from text_to_bi.text_to_bi_code.agent_package import bi_planning
+    from text_to_bi.superset_ai_agent.agent_package import bi_planning
 
     valid = contract()
     class Agent:
@@ -85,7 +85,7 @@ def test_repair_loop_success_and_exhaustion(monkeypatch):
 
 
 def test_missing_metadata_fails_explicitly(monkeypatch):
-    from text_to_bi.text_to_bi_code.agent_package import bi_planning
+    from text_to_bi.superset_ai_agent.agent_package import bi_planning
     monkeypatch.setattr(bi_planning, "get_dashboard_datasets", lambda *_: (_ for _ in ()).throw(RuntimeError("offline")))
     result = bi_planning.plan_bi("doanh thu", {"dashboard_id": 1, "allowed_dataset_ids": [1]})
     assert not result.success and result.errors[0]["code"] == "metadata_unavailable"

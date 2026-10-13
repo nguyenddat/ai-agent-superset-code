@@ -1,14 +1,21 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, BookOpen, ChartColumn, ChartNoAxesCombined, ChevronDown, Check, ClipboardCheck, Code2, Columns3, Database, FileCheck2, ListChecks, LoaderCircle, Search, Sparkles, Table2, Wrench } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { currentDashboardRef, streamChat, type BIContract, type MetadataResolution, type ValidationError } from '@/shared/api/chat';
 
+const AgentExchangeFlow = lazy(() => import('./AgentExchangeFlow').then(module => ({ default: module.AgentExchangeFlow })));
+
 type AgentProgress = {
   id: number;
-  kind: 'status' | 'context' | 'planning_attempt' | 'validation_errors' | 'tool_start' | 'tool_result' | 'error';
+  kind: 'status' | 'context' | 'planning_attempt' | 'validation_errors' | 'tool_start' | 'tool_result' | 'error' | 'agent_start' | 'agent_message' | 'plan_revision';
   text: string;
   tool?: string;
+  agent?: string;
+  recipient?: string;
+  iteration?: number;
+  complete?: boolean;
+  active?: boolean;
 };
 
 type ChatMessage = {
@@ -55,6 +62,33 @@ const toolIcons = {
   get_tool_documentation: BookOpen,
 };
 
+const agentLabels: Record<string, string> = {
+  bi_planner: 'BI Planner',
+  planning: 'BI Planner',
+  metadata_resolution: 'Metadata Resolution',
+  metadata_resolver: 'Metadata Resolution',
+  data_builder: 'Data Builder',
+};
+
+function getAgentLabel(agent?: string) {
+  if (!agent) return 'AI Agent';
+  return agentLabels[agent] || agent.replace(/_/g, ' ').replace(/\b\w/g, (character: string) => character.toUpperCase());
+}
+
+function finishAgentWork(progress: AgentProgress[] = [], agent: string): AgentProgress[] {
+  let index = -1;
+  for (let cursor = progress.length - 1; cursor >= 0; cursor -= 1) {
+    if (progress[cursor].kind === 'agent_start' && progress[cursor].agent === agent && !progress[cursor].complete) {
+      index = cursor;
+      break;
+    }
+  }
+  if (index < 0) return progress;
+  return progress.map((item, itemIndex) => itemIndex === index
+    ? { ...item, complete: true, text: `${getAgentLabel(agent)} đã hoàn tất.` }
+    : item.kind === 'agent_message' && item.recipient === agent ? { ...item, active: false } : item);
+}
+
 function conciseToolResult(output: unknown): string {
   if (typeof output !== 'string') return 'Đã hoàn tất.';
   const value = output.trim();
@@ -75,7 +109,7 @@ function conciseToolResult(output: unknown): string {
   return value;
 }
 
-function addToolResult(progress: AgentProgress[], tool: string, output: unknown, nextId: () => number): AgentProgress[] {
+function addToolResult(progress: AgentProgress[], tool: string, output: unknown, nextId: () => number, agent?: string, iteration?: number): AgentProgress[] {
   let pendingIndex = -1;
   for (let index = progress.length - 1; index >= 0; index -= 1) {
     if (progress[index].kind === 'tool_start' && progress[index].tool === tool) {
@@ -84,8 +118,13 @@ function addToolResult(progress: AgentProgress[], tool: string, output: unknown,
     }
   }
   const text = `${toolLabels[tool] || tool || 'Kết quả công cụ'}: ${conciseToolResult(output)}`;
-  if (pendingIndex < 0) return [...progress, { id: nextId(), kind: 'tool_result', tool, text }];
+  if (pendingIndex < 0) return [...progress, { id: nextId(), kind: 'tool_result', tool, agent, iteration, text }];
   return progress.map((item, index) => index === pendingIndex ? { ...item, kind: 'tool_result', text } : item);
+}
+
+function currentAgentTurn(progress: AgentProgress[]) {
+  return [...progress].reverse().find(item => item.kind === 'agent_start'
+    && !item.complete && (item.agent === 'bi_planner' || item.agent === 'metadata_resolution'));
 }
 
 const chartTypeLabels: Record<string, string> = {
@@ -209,6 +248,56 @@ function MetadataResolutionResult({ resolution, datasetNames = {} }: { resolutio
   );
 }
 
+function AgentConversation({ progress }: { progress: AgentProgress[] }) {
+  const exchanges = progress.filter(item => item.kind === 'agent_message');
+  const activeTurn = [...progress].reverse().find(item => item.kind === 'agent_start' && !item.complete && item.agent);
+  if (!exchanges.length && !activeTurn) return null;
+
+  const toolsFor = (agent: string, iteration?: number, beforeId = Number.POSITIVE_INFINITY) => progress
+    .filter(item => (item.kind === 'tool_start' || item.kind === 'tool_result')
+      && item.agent === agent && item.iteration === iteration && item.id < beforeId)
+    .map(item => ({ name: toolLabels[item.tool || ''] || item.tool || 'Công cụ', active: item.kind === 'tool_start' }));
+  const activeAgent = activeTurn?.agent;
+  const latestExchange = exchanges[exchanges.length - 1];
+  const representedActiveRecipient = Boolean(activeAgent && latestExchange?.recipient === activeAgent && latestExchange.active);
+  const counterpart = (agent: string) => agent === 'metadata_resolution' ? 'bi_planner' : 'metadata_resolution';
+
+  return (
+    <section className={`ai-agent-conversation${activeTurn ? ' is-active' : ''}`} aria-label="Cuộc trao đổi giữa các agent">
+      <header className="ai-agent-conversation-header">
+        <span className="ai-agent-conversation-live" aria-hidden="true" />
+        <h3>BI Planner ↔ Metadata Resolution</h3>
+        <span>{activeTurn ? 'Đang trao đổi' : 'Đã chốt'}</span>
+      </header>
+      <div className="ai-agent-conversation-thread">
+        {exchanges.map(item => (
+          <AgentExchangeFlow
+            key={item.id}
+            from={item.agent || ''}
+            to={item.recipient || ''}
+            message={item.text}
+            active={Boolean(item.active && activeAgent === item.recipient)}
+            senderTools={toolsFor(item.agent || '', item.iteration, item.id)}
+            recipientTools={activeAgent === item.recipient ? toolsFor(item.recipient || '', activeTurn?.iteration) : []}
+            showRecipientThinking={Boolean(item.active && activeAgent === item.recipient)}
+          />
+        ))}
+        {activeTurn && !representedActiveRecipient ? (
+          <AgentExchangeFlow
+            key={`thinking-${activeTurn.id}`}
+            from={activeTurn.agent || ''}
+            to={counterpart(activeTurn.agent || '')}
+            message=""
+            active
+            senderTools={toolsFor(activeTurn.agent || '', activeTurn.iteration)}
+            showSenderThinking
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function AIChatSidebar({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -263,6 +352,31 @@ export function AIChatSidebar({ onClose }: { onClose: () => void }) {
           if (event === 'context') return { ...message, datasetNames: data.datasets || {}, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'context', text: `Đã xác định dashboard “${data.dashboard_title || 'hiện tại'}” và ${data.authorized_dataset_count ?? 0} bộ dữ liệu có thể sử dụng.` }] };
           if (event === 'planning_attempt') return { ...message, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'planning_attempt', text: (data.attempt || 1) > 1 ? `Đang điều chỉnh kế hoạch theo kết quả kiểm tra (lần ${data.attempt}).` : 'Đang lập kế hoạch phân tích…' }] };
           if (event === 'metadata_attempt') return { ...message, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'planning_attempt', text: (data.attempt || 1) > 1 ? `Đang điều chỉnh cấu hình biểu đồ (lần ${data.attempt}).` : 'Đang chọn biểu đồ và ánh xạ tham số theo BI Plan…' }] };
+          if (event === 'agent_start') {
+            const agent = data.agent || '';
+            const iteration = data.iteration;
+            const loop = iteration && iteration > 1 ? ` · vòng ${iteration}` : '';
+            const progress = (message.progress || []).map(item => item.kind === 'agent_message'
+              ? { ...item, active: item.recipient === agent }
+              : item);
+            return { ...message, progress: [...progress, { id: nextProgressId.current++, kind: 'agent_start', agent, iteration, text: `${getAgentLabel(agent)} đang làm việc${loop}…` }] };
+          }
+          if (event === 'agent_message') {
+            const from = data.from_agent || '';
+            const to = data.to_agent || '';
+            const iteration = data.iteration;
+            return { ...message, progress: [...(message.progress || []), {
+              id: nextProgressId.current++, kind: 'agent_message', agent: from, recipient: to, iteration, active: true,
+              text: data.message || 'Đang trao đổi để thống nhất kế hoạch.',
+            }] };
+          }
+          if (event === 'plan_revision') {
+            const iteration = data.iteration;
+            return { ...message, contract: data.contract || message.contract, progress: [...finishAgentWork(message.progress, 'bi_planner'), {
+              id: nextProgressId.current++, kind: 'plan_revision', agent: 'bi_planner', iteration,
+              text: `BI Planner đã cập nhật kế hoạch${iteration ? ` · vòng ${iteration}` : ''} theo phản hồi.`,
+            }] };
+          }
           if (event === 'validation_errors') {
             const errors = data.errors || [];
             return { ...message, planningErrors: errors, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'validation_errors', text: `Kế hoạch cần chỉnh ${errors.length} mục để khớp với dữ liệu và cấu hình dashboard.` }] };
@@ -278,14 +392,51 @@ export function AIChatSidebar({ onClose }: { onClose: () => void }) {
           }
           if (event === 'tool_start') {
             const tool = data.tool || '';
-            return { ...message, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'tool_start', tool, text: `Đang lấy ${toolLabels[tool] || tool || 'thông tin'}…` }] };
+            const activeTurn = currentAgentTurn(message.progress || []);
+            return { ...message, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'tool_start', tool, agent: activeTurn?.agent, iteration: activeTurn?.iteration, text: `Đang dùng ${toolLabels[tool] || tool || 'công cụ'}…` }] };
           }
-          if (event === 'tool_result') return { ...message, progress: addToolResult(message.progress || [], data.tool || '', data.output, () => nextProgressId.current++) };
-          if (event === 'bi_contract' && data.contract) return { ...message, contract: data.contract, planningErrors: [], content: 'Mình đã chuẩn bị kế hoạch phân tích và kiểm tra kế hoạch này với dữ liệu cùng cấu hình của dashboard.' };
-          if (event === 'metadata_resolution' && data.resolution) return { ...message, metadataResolution: data.resolution };
+          if (event === 'tool_result') {
+            const activeTurn = currentAgentTurn(message.progress || []);
+            return { ...message, progress: addToolResult(message.progress || [], data.tool || '', data.output, () => nextProgressId.current++, activeTurn?.agent, activeTurn?.iteration) };
+          }
+          if (event === 'bi_contract' && data.contract) {
+            const activeTurn = currentAgentTurn(message.progress || []);
+            const objective = data.contract.user_intent?.objective;
+            const handoff = objective ? `BI Plan đã chốt mục tiêu: ${objective}` : 'BI Plan đã được kiểm tra và chuyển sang Metadata Resolution.';
+            const lastProgress = message.progress?.[message.progress.length - 1];
+            const revisionAlreadyHasHandoff = lastProgress?.kind === 'plan_revision';
+            const progress = finishAgentWork(message.progress, 'bi_planner');
+            return {
+              ...message,
+              contract: data.contract,
+              planningErrors: [],
+              progress: revisionAlreadyHasHandoff ? progress : [...progress, {
+                id: nextProgressId.current++, kind: 'agent_message', agent: 'bi_planner', recipient: 'metadata_resolution',
+                iteration: activeTurn?.iteration || 1, active: true, text: handoff,
+              }],
+              content: 'Mình đã chuẩn bị kế hoạch phân tích và kiểm tra kế hoạch này với dữ liệu cùng cấu hình của dashboard.',
+            };
+          }
+          if (event === 'metadata_resolution' && data.resolution) {
+            const resolution = data.resolution as MetadataResolution;
+            const activeTurn = currentAgentTurn(message.progress || []);
+            const handoff = resolution.status === 'ready'
+              ? resolution.message || 'Đã ánh xạ BI Plan vào cấu hình biểu đồ Superset và xác thực thành công.'
+              : resolution.message || 'Chưa thể ánh xạ BI Plan vào cấu hình biểu đồ Superset.';
+            return {
+              ...message,
+              metadataResolution: resolution,
+              progress: [...finishAgentWork(message.progress, 'metadata_resolution'), {
+                id: nextProgressId.current++, kind: 'agent_message', agent: 'metadata_resolution', recipient: 'bi_planner',
+                iteration: activeTurn?.iteration || 1, active: false, text: handoff,
+              }],
+            };
+          }
           if (event === 'data_builder_result') {
+            const progress = finishAgentWork(message.progress, 'data_builder');
             if (data.success && data.sql) return {
               ...message,
+              progress,
               chartUrl: data.chart_url || undefined,
               chartError: data.chart_error || undefined,
               content: data.chart_url
@@ -293,14 +444,14 @@ export function AIChatSidebar({ onClose }: { onClose: () => void }) {
                 : 'SQL cuối cùng đã chạy thành công; chưa thể dựng biểu đồ Superset.',
             };
             const errors = Array.isArray(data.errors) ? data.errors.map(error => error.message).filter(Boolean).join(' ') : '';
-            return { ...message, content: `Chưa thể xác nhận SQL và biểu đồ.${errors ? ` ${errors}` : ''}` };
+            return { ...message, progress, content: `Chưa thể xác nhận SQL và biểu đồ.${errors ? ` ${errors}` : ''}` };
           }
           if (event === 'planning_failure') {
             const errors = data.errors || [];
             return { ...message, planningErrors: errors, content: 'Mình chưa thể lập kế hoạch phân tích phù hợp. Chi tiết cần làm rõ được liệt kê bên dưới.' };
           }
-          if (event === 'done') return { ...message, isComplete: true, progress: (message.progress || []).map(item => item.kind === 'status' ? { ...item, text: 'Đã hoàn tất' } : item) };
-          if (event === 'error') return { ...message, isComplete: true, progress: [...(message.progress || []), { id: nextProgressId.current++, kind: 'error', text: data.message || 'Agent gặp lỗi' }] };
+          if (event === 'done') return { ...message, isComplete: true, progress: (message.progress || []).map(item => item.kind === 'status' ? { ...item, text: 'Đã hoàn tất' } : item.kind === 'agent_start' && !item.complete ? { ...item, complete: true, text: `${getAgentLabel(item.agent)} đã hoàn tất.` } : item.kind === 'agent_message' ? { ...item, active: false } : item) };
+          if (event === 'error') return { ...message, isComplete: true, progress: [...(message.progress || []).map(item => item.kind === 'agent_start' && !item.complete ? { ...item, complete: true, text: `${getAgentLabel(item.agent)} đã dừng.` } : item.kind === 'agent_message' ? { ...item, active: false } : item), { id: nextProgressId.current++, kind: 'error', text: data.message || 'Agent gặp lỗi' }] };
           return message;
         }));
       });
@@ -320,7 +471,7 @@ export function AIChatSidebar({ onClose }: { onClose: () => void }) {
   ];
 
   return (
-    <section className="ai-chat-sidebar" aria-label="Text to BI AI Agent">
+    <section className="ai-chat-sidebar" aria-label="Superset AI Agent">
       <header className="ai-chat-header">
         <div className="ai-chat-heading">
           <span className="ai-chat-mark" aria-hidden="true">✦</span>
@@ -369,19 +520,23 @@ export function AIChatSidebar({ onClose }: { onClose: () => void }) {
                       </summary>
                       <ol className="ai-chat-progress" aria-label="Tiến trình Agent">
                         {message.progress.map(item => {
+                          if (item.kind === 'agent_message') return null;
                           const ToolIcon = item.tool ? toolIcons[item.tool as keyof typeof toolIcons] || Wrench : null;
                           return (
                             <li key={item.id} className={`is-${item.kind}`} title={item.text}>
                               {ToolIcon ? <span className="ai-chat-progress-tool-icon" aria-hidden="true"><ToolIcon /></span> : null}
                               <span className="ai-chat-progress-text">{item.text}</span>
-                              {item.kind === 'tool_start' ? <LoaderCircle className="ai-chat-progress-spinner" aria-label="Đang chạy" /> : null}
-                              {item.kind === 'tool_result' ? <Check className="ai-chat-progress-check" aria-label="Hoàn tất" /> : null}
+                              {item.kind === 'tool_start' || (item.kind === 'agent_start' && !item.complete) ? <LoaderCircle className="ai-chat-progress-spinner" aria-label="Đang chạy" /> : null}
+                              {item.kind === 'tool_result' || (item.kind === 'agent_start' && item.complete) ? <Check className="ai-chat-progress-check" aria-label="Hoàn tất" /> : null}
                             </li>
                           );
                         })}
                       </ol>
                     </details>
                   ) : null}
+                  <Suspense fallback={message.progress?.some(item => item.kind === 'agent_message') ? <div className="ai-agent-conversation-loading">Đang tải luồng phối hợp giữa các agent…</div> : null}>
+                    <AgentConversation progress={message.progress || []} />
+                  </Suspense>
                   {message.planningErrors?.length ? (
                     <ul className="ai-chat-planning-errors" aria-label="Lỗi xác thực kế hoạch">
                       {message.planningErrors.map((error, index) => <li key={`${error.code}-${index}`}><strong>{error.path}</strong>: {error.message}</li>)}

@@ -1,5 +1,5 @@
 [project]
-name = "text_to_bi-text_to_bi_code"
+name = "superset-ai-agent"
 version = "0.1.0"
 license = "Apache-2.0"
 
@@ -11,8 +11,8 @@ ignore = ["D100"]
 
 [tool.apache_superset_extensions.build]
 include = [
-    "src/text_to_bi/text_to_bi_code/**/*.py",
-    "src/text_to_bi/text_to_bi_code/**/*.json",
-    "src/text_to_bi/text_to_bi_code/**/*.md",
+    "src/text_to_bi/superset_ai_agent/**/*.py",
+    "src/text_to_bi/superset_ai_agent/**/*.json",
+    "src/text_to_bi/superset_ai_agent/**/*.md",
 ]
 exclude = []

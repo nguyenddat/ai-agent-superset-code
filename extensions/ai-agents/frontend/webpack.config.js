@@ -22,12 +22,12 @@ module.exports = {
   module: {
     rules: [
       { test: /\.tsx?$/, use: { loader: 'ts-loader', options: { transpileOnly: true } }, exclude: /node_modules/ },
-      { test: /\.css$/, use: ['style-loader', 'css-loader'] },
+      { test: /\.css$/, use: ['style-loader', 'css-loader', 'postcss-loader'] },
     ],
   },
   plugins: [
     new ModuleFederationPlugin({
-      name: 'textToBi_textToBiCode',
+      name: 'textToBi_supersetAiAgent',
       filename: 'remoteEntry.[contenthash].js',
       exposes: { './index': './src/index.tsx' },
       shared: {

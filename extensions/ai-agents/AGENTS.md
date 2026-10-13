@@ -1,4 +1,4 @@
-# Text to BI AI Agent extension
+# Superset AI Agent extension
 
 This directory follows Apache Superset's native extension layout for packaging
 and backend API registration. The Superset 6.1 frontend compatibility adapter
@@ -12,7 +12,7 @@ extensions/ai-agents/
 ├── extension.json
 ├── backend/
 │   ├── pyproject.toml
-│   └── src/text_to_bi/text_to_bi_code/
+│   └── src/text_to_bi/superset_ai_agent/
 │       ├── entrypoint.py
 │       ├── modules/chat/route.py
 │       ├── agent_package/
@@ -29,12 +29,12 @@ extensions/ai-agents/
 ## Superset integration
 
 - `extension.json` defines publisher `text-to-bi` and extension name
-  `text-to-bi-code`.
+  `superset-ai-agent`.
 - `frontend/src/index.tsx` starts the Superset 6.1 dashboard UI adapter.
-- `backend/src/text_to_bi/text_to_bi_code/entrypoint.py` imports the REST API
+- `backend/src/text_to_bi/superset_ai_agent/entrypoint.py` imports the REST API
   class so Superset's extension loader registers it.
 - The API is served at
-  `/extensions/text-to-bi/text-to-bi-code/chat/stream` and requires the
+  `/extensions/text-to-bi/superset-ai-agent/chat/stream` and requires the
   `can read on text_to_bi_chat_api` permission plus a valid CSRF token.
 - The frontend attaches its button beside the dashboard actions menu and owns
   the drawer state because Superset 6.1 does not provide `chat.registerChat`.
@@ -50,7 +50,7 @@ cd ..
 superset-extensions bundle
 ```
 
-Copy `text-to-bi-code-0.1.0.supx` into the configured `EXTENSIONS_PATH` and
+Copy `superset-ai-agent-0.1.0.supx` into the configured `EXTENSIONS_PATH` and
 restart Superset. In the local Compose stack, that path is mounted from the
 repository's `extensions/` directory.
 
