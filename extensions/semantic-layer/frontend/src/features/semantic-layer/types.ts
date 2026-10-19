@@ -15,6 +15,11 @@ export type DatasetMetric = {
   description?: string | null;
 };
 
+export type SupersetDatabase = {
+  id: number;
+  database_name: string;
+};
+
 export type DashboardDataset = {
   id: number;
   name?: string | null;

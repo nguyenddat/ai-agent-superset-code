@@ -18,7 +18,8 @@ packaged, installed, and evolved independently.
 
 ```text
 Text to BI
-├── primary_db/                  Weather analytics database and ingestion jobs
+├── data_wh/                     Weather warehouse schema and seed dimensions
+├── airflow/                     Open-Meteo warehouse ingestion DAG
 ├── superset/                    Superset image and local configuration
 ├── extensions/
 │   ├── ai-agents/               Superset AI Agent extension
@@ -31,9 +32,9 @@ Text to BI
 └── README.md
 ```
 
-At runtime, `extensions/` is mounted read-only into the Superset container at
-`/app/superset_home/extensions`. The two `.supx` files in that directory are
-the runtime bundles; source code remains in the two extension directories.
+At runtime, the two root `.supx` bundles are mounted read-only into the
+Superset container at `/app/superset_home/extensions`; extension source code
+is not mounted into the runtime container.
 
 ## Requirements
 
@@ -61,28 +62,38 @@ Superset is available at <http://localhost:8089> by default. Set
 
 The Compose stack starts:
 
-- `primary-db`: PostgreSQL 16 database named `weather`.
-- `seed-data`: creates the weather tables and loads the current observation for
-  Hanoi, Hai Phong, Da Nang, Ho Chi Minh City, and Can Tho from Open-Meteo.
-- `ingest`: refreshes weather observations every 15 minutes.
+- `warehouse-db`: PostgreSQL 16 database named `data_wh` with normalized
+  `dm_*` catalog tables, `tb_*` business tables, and dashboard tables also
+  named with the `tb_*` convention.
+- `airflow`: loads weather data for 12 Vietnamese cities from the Open-Meteo
+  Forecast API every hour and refreshes the dashboard tables.
 - `superset-db`: PostgreSQL 16 database for Superset metadata.
 - `superset-init` and `superset`: Superset database initialization and web app.
 
-In Superset, add the analytics database with:
+On startup, `superset-init` automatically creates the `Weather Warehouse`
+connection and registers every table in the warehouse `public` schema as a
+dataset. The connection URI used by the bootstrap is:
 
 ```text
-postgresql+psycopg2://bi:bi_dev_password@primary-db:5432/weather
+postgresql+psycopg2://bi:bi_dev_password@warehouse-db:5432/data_wh
 ```
 
-The analytics database is available to Compose services only and is not
-published directly on the host.
+The generated datasets include the `dm_*`, `tb_*`, `dim_*`, and `fact_*`
+tables. If the warehouse schema changes, rerun `docker compose run --rm
+superset-init` to synchronize the connection and datasets.
+
+The warehouse is also published on host port `5433` by default for local tools:
+
+```text
+postgresql+psycopg2://bi:bi_dev_password@localhost:5433/data_wh
+```
 
 Useful operational commands:
 
 ```sh
 docker compose logs -f superset
-docker compose logs -f ingest
-docker compose run --rm seed-data
+docker compose logs -f airflow
+docker compose exec airflow airflow dags trigger weather_warehouse_ingest
 docker compose down
 ```
 

@@ -1,40 +1,21 @@
 services:
-  primary-db:
+  warehouse-db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-weather}
-      POSTGRES_USER: ${POSTGRES_USER:-bi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bi_dev_password}
+      POSTGRES_DB: ${WAREHOUSE_DB:-data_wh}
+      POSTGRES_USER: ${WAREHOUSE_DB_USER:-bi}
+      POSTGRES_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-bi_dev_password}
+    ports:
+      - "${WAREHOUSE_DB_PORT:-5433}:5432"
     volumes:
-      - primary_db_data:/var/lib/postgresql/data
+      - warehouse_db_data:/var/lib/postgresql/data
+      - ./data_wh/scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bi} -d ${POSTGRES_DB:-weather}"]
+      test: ["CMD-SHELL", "pg_isready -U ${WAREHOUSE_DB_USER:-bi} -d ${WAREHOUSE_DB:-data_wh}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 5s
-    restart: unless-stopped
-
-  seed-data:
-    build:
-      context: ./primary_db
-    command: ["python", "/app/seed_data.py"]
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-bi}:${POSTGRES_PASSWORD:-bi_dev_password}@primary-db:5432/${POSTGRES_DB:-weather}
-    depends_on:
-      primary-db:
-        condition: service_healthy
-    restart: "no"
-
-  ingest:
-    build:
-      context: ./primary_db
-    command: ["python", "/app/ingest_data.py"]
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-bi}:${POSTGRES_PASSWORD:-bi_dev_password}@primary-db:5432/${POSTGRES_DB:-weather}
-    depends_on:
-      seed-data:
-        condition: service_completed_successfully
     restart: unless-stopped
 
   superset-db:
@@ -59,7 +40,9 @@ services:
       context: ./superset
       dockerfile: Dockerfile
     command: >-
-      sh -c 'superset db upgrade && superset init && python /app/pythonpath/create_admin.py'
+      sh -c 'superset db upgrade && superset init && python /app/pythonpath/create_admin.py &&
+      python /app/pythonpath/bootstrap_warehouse.py &&
+      python /app/pythonpath/bootstrap_metrics.py && python /app/pythonpath/bootstrap_dashboard.py'
     env_file:
       - ./extensions/ai-agents/.env
     environment:
@@ -73,12 +56,24 @@ services:
       SUPERSET_ADMIN_FIRST_NAME: ${SUPERSET_ADMIN_FIRST_NAME:-Superset}
       SUPERSET_ADMIN_LAST_NAME: ${SUPERSET_ADMIN_LAST_NAME:-Admin}
       SUPERSET_ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL:-admin@example.com}
+      WAREHOUSE_DB_HOST: warehouse-db
+      WAREHOUSE_DB_PORT: 5432
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB:-data_wh}
+      WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER:-bi}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-bi_dev_password}
+      WAREHOUSE_SUPERSET_NAME: ${WAREHOUSE_SUPERSET_NAME:-Weather Warehouse}
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - ./superset/create_admin.py:/app/pythonpath/create_admin.py:ro
-      - ./extensions:/app/superset_home/extensions:ro
+      - ./superset/bootstrap_warehouse.py:/app/pythonpath/bootstrap_warehouse.py:ro
+      - ./superset/bootstrap_metrics.py:/app/pythonpath/bootstrap_metrics.py:ro
+      - ./superset/bootstrap_dashboard.py:/app/pythonpath/bootstrap_dashboard.py:ro
+      - ./extensions/superset-ai-agent-0.1.0.supx:/app/superset_home/extensions/superset-ai-agent-0.1.0.supx:ro
+      - ./extensions/superset-semantic-layer-0.1.0.supx:/app/superset_home/extensions/superset-semantic-layer-0.1.0.supx:ro
     depends_on:
       superset-db:
+        condition: service_healthy
+      warehouse-db:
         condition: service_healthy
     restart: "no"
 
@@ -100,14 +95,49 @@ services:
       - "${SUPERSET_PORT:-8089}:8088"
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
-      - ./extensions:/app/superset_home/extensions:ro
+      - ./extensions/superset-ai-agent-0.1.0.supx:/app/superset_home/extensions/superset-ai-agent-0.1.0.supx:ro
+      - ./extensions/superset-semantic-layer-0.1.0.supx:/app/superset_home/extensions/superset-semantic-layer-0.1.0.supx:ro
     depends_on:
       superset-init:
         condition: service_completed_successfully
-      primary-db:
+      warehouse-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  airflow:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    command: ["bash", "/opt/airflow-bootstrap.sh"]
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
+      AIRFLOW__LOGGING__SYMLINK_LATEST_LOG: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local-airflow-secret-change-me}
+      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+      WAREHOUSE_DB_HOST: warehouse-db
+      WAREHOUSE_DB_PORT: 5432
+      WAREHOUSE_DB_NAME: ${WAREHOUSE_DB:-data_wh}
+      WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER:-bi}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-bi_dev_password}
+      WEATHER_API_URL: ${WEATHER_API_URL:-https://api.open-meteo.com/v1/forecast}
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    volumes:
+      - airflow_home:/opt/airflow
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    depends_on:
+      warehouse-db:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  primary_db_data:
+  warehouse_db_data:
   superset_db_data:
+  airflow_home:

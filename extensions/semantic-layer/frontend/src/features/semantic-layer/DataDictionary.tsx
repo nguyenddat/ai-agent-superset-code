@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -33,6 +33,18 @@ const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> 
   'business_term',
 ];
 const PAGE_SIZE = 7;
+
+// Grows with its content up to the CSS max-height, then scrolls, so long dataset text stays readable.
+function AutoGrowTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight + element.offsetHeight - element.clientHeight}px`;
+  }, [props.value]);
+  return <textarea ref={ref} {...props} />;
+}
 
 function normalizeNullableText(value: string | null): string | null {
   return value === '' ? null : value;
@@ -414,31 +426,36 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
             {suggesting ? <LoaderCircle className="sl-spin" /> : <Sparkles />}
             {suggesting ? 'Đang điền…' : 'AutoFill'}
           </button> : null}
+          <nav className="sl-dictionary-pagination" aria-label="Phân trang columns">
+            <button type="button" aria-label="Trang trước" disabled={page === 0} onClick={() => setPage(current => Math.max(0, current - 1))}><ChevronLeft /></button>
+            <span title={`Trang ${page + 1} / ${pageCount}`}>{columns.length === 0 ? '0 columns' : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, columns.length)} / ${columns.length}`} · Trang {page + 1}/{pageCount}</span>
+            <button type="button" aria-label="Trang sau" disabled={page + 1 >= pageCount} onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}><ChevronRight /></button>
+          </nav>
           <button className="is-primary" type="button" disabled={!dirty || saving || suggesting || readOnly} onClick={() => void saveChanges()}>
             {saving ? <LoaderCircle className="sl-spin" /> : <Save />}
             {saving ? 'Đang lưu…' : 'Lưu thay đổi'}
           </button>
         </div>
       </header>
-      {saveError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {saveError}</div> : null}
-      {referenceOptionsError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {referenceOptionsError}</div> : null}
-      {suggestError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {suggestError}</div> : null}
-      {suggestProgress ? <div className="sl-dictionary-suggestion-status" role="status">{suggestProgress}{suggested && !suggesting ? ' Chỉnh sửa thêm thì bấm Lưu thay đổi.' : ''}</div> : null}
-      <div className="sl-dataset-dictionary-fields">
-        <label>Dataset name<input aria-label="Dataset display name" disabled={readOnly || saving} value={dictionary.display_name} onChange={event => updateDataset('display_name', event.target.value)} /></label>
-        <label>Classification<select aria-label="Dataset classification" disabled={readOnly || saving} value={dictionary.dataset_type ?? ''} onChange={event => updateDataset('dataset_type', (event.target.value || null) as DatasetDictionary['dataset_type'])}>
-          <option value="">Chưa phân loại</option>
-          <option value="base">Base dataset</option>
-          <option value="aggregate">Aggregate dataset</option>
-        </select></label>
-        <label>Description<textarea aria-label="Dataset description" disabled={readOnly || saving} rows={2} value={dictionary.description ?? ''} onChange={event => updateDataset('description', normalizeNullableText(event.target.value))} /></label>
-        <label>Grain<textarea aria-label="Dataset grain" disabled={readOnly || saving} rows={2} value={dictionary.grain ?? ''} onChange={event => updateDataset('grain', normalizeNullableText(event.target.value))} /></label>
-        <label>Create column<select aria-label="Dataset create column" disabled={readOnly || saving} value={dictionary.create_column ?? ''} onChange={event => updateDataset('create_column', event.target.value || null)}>
-          <option value="">Chưa chọn</option>
-          {columns.map(column => <option key={column.column_name} value={column.column_name}>{column.column_name}</option>)}
-        </select></label>
-      </div>
-      <div className="sl-dictionary-table-wrap">
+      <div className="sl-dictionary-body">
+        {saveError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {saveError}</div> : null}
+        {referenceOptionsError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {referenceOptionsError}</div> : null}
+        {suggestError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {suggestError}</div> : null}
+        {suggestProgress ? <div className="sl-dictionary-suggestion-status" role="status">{suggestProgress}{suggested && !suggesting ? ' Chỉnh sửa thêm thì bấm Lưu thay đổi.' : ''}</div> : null}
+        <div className="sl-dataset-dictionary-fields">
+          <label>Dataset name<input aria-label="Dataset display name" disabled={readOnly || saving} value={dictionary.display_name} onChange={event => updateDataset('display_name', event.target.value)} /></label>
+          <label>Classification<select aria-label="Dataset classification" disabled={readOnly || saving} value={dictionary.dataset_type ?? ''} onChange={event => updateDataset('dataset_type', (event.target.value || null) as DatasetDictionary['dataset_type'])}>
+            <option value="">Chưa phân loại</option>
+            <option value="base">Base dataset</option>
+            <option value="aggregate">Aggregate dataset</option>
+          </select></label>
+          <label>Create column<select aria-label="Dataset create column" disabled={readOnly || saving} value={dictionary.create_column ?? ''} onChange={event => updateDataset('create_column', event.target.value || null)}>
+            <option value="">Chưa chọn</option>
+            {columns.map(column => <option key={column.column_name} value={column.column_name}>{column.column_name}</option>)}
+          </select></label>
+          <label className="is-description">Description<AutoGrowTextarea aria-label="Dataset description" disabled={readOnly || saving} rows={3} value={dictionary.description ?? ''} onChange={event => updateDataset('description', normalizeNullableText(event.target.value))} /></label>
+          <label>Grain<AutoGrowTextarea aria-label="Dataset grain" disabled={readOnly || saving} rows={3} value={dictionary.grain ?? ''} onChange={event => updateDataset('grain', normalizeNullableText(event.target.value))} /></label>
+        </div>
         <table className="sl-dictionary-table">
           <thead>
             <tr>
@@ -497,14 +514,6 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
           </tbody>
         </table>
       </div>
-      <footer className="sl-dictionary-pagination" aria-label="Phân trang columns">
-        <span>{columns.length === 0 ? '0 columns' : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, columns.length)} / ${columns.length} columns`}</span>
-        <div>
-          <button type="button" aria-label="Trang trước" disabled={page === 0} onClick={() => setPage(current => Math.max(0, current - 1))}><ChevronLeft /></button>
-          <span>Trang {page + 1} / {pageCount}</span>
-          <button type="button" aria-label="Trang sau" disabled={page + 1 >= pageCount} onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}><ChevronRight /></button>
-        </div>
-      </footer>
     </section>
   );
 }

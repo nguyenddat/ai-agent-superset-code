@@ -8,10 +8,12 @@ metadata database, and two Superset extensions: an AI Agent and a Semantic Layer
 
 ## Main directories
 
-- `primary_db/` builds the analytics database image. `seed_data.py` creates the
-  demo data, and `ingest_data.py` refreshes weather observations.
+- `data_wh/` defines the warehouse schema. `001_init_bang_co_so.sql` creates
+  the `dm_*` and normalized `tb_*` tables; `002_init_bang_dashboard.sql`
+  creates dashboard tables from that business layer.
+- `airflow/` contains the Open-Meteo ingestion DAG and its runtime files.
 - `superset/` contains the Superset image definition, local configuration, and
-  admin initialization script.
+  admin and warehouse bootstrap scripts.
 - `extensions/ai-agents/` contains the AI Agent frontend and backend. Its
   dashboard panel streams chat requests through the Superset extension API.
 - `extensions/semantic-layer/` contains the admin-only semantic metadata UI and
@@ -47,8 +49,8 @@ docker compose logs -f superset
 ```
 
 Superset is available at `http://localhost:8089` by default. The analytics
-database is `primary-db`; Superset metadata is stored separately in
-`superset-db`. Both databases use persistent Compose volumes.
+database is `warehouse-db` (`data_wh`); Superset metadata is stored separately
+in `superset-db`. Both databases use persistent Compose volumes.
 
 ## Build, mount, and restart extensions
 
@@ -74,10 +76,10 @@ docker compose up -d --build superset
 docker compose ps
 ```
 
-The source directories hold editable code. The root `extensions/` directory is
-mounted read-only at `/app/superset_home/extensions` and should contain the
-runtime `.supx` bundles. Bundle output created inside an extension source
-directory is temporary and can be regenerated with the build command.
+The source directories hold editable code. The two root `.supx` files are
+mounted read-only at `/app/superset_home/extensions`. Bundle output created
+inside an extension source directory is temporary and can be regenerated with
+the build command.
 
 ## Semantic metadata
 

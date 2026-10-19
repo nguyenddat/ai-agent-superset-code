@@ -1,15 +1,31 @@
 export const SEMANTIC_LAYER_API = '/extensions/text-to-bi/superset-semantic-layer/semantic-layer';
 
+export const SEMANTIC_LAYER_PAGE = '/semantic-layer/';
+
+export type SemanticLayerModule = 'dictionary' | 'semantic';
+
+export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: string; description: string }> = [
+  { id: 'dictionary', label: 'Data Dictionary', description: 'Chỉnh metadata datasets và columns' },
+  { id: 'semantic', label: 'Semantic Layer', description: 'Xây dựng quan hệ trên canvas' },
+];
+
+export function semanticLayerModuleHref(module: SemanticLayerModule): string {
+  return `${SEMANTIC_LAYER_PAGE}?module=${module}`;
+}
+
+export function semanticLayerModuleFromLocation(): SemanticLayerModule {
+  return new URLSearchParams(window.location.search).get('module') === 'semantic' ? 'semantic' : 'dictionary';
+}
+
 export const semanticLayerEvents = {
-  expand: 'text-to-bi:expand-semantic-layer',
   fieldsChange: 'semantic-fields-change',
-  open: 'text-to-bi:open-semantic-layer',
   pointerDrop: 'semantic-field-pointer-drop',
+  moduleRequest: 'semantic-layer-module-request',
 } as const;
 
 export const semanticLayerSelectors = {
-  actionsMenu: 'ul[role="menu"], ul.ant-dropdown-menu',
-  actionsTrigger: 'button[data-test="actions-trigger"], button[aria-label="Menu actions trigger"]',
-  menuDivider: '[data-test="semantic-layer-menu-divider"]',
-  menuItem: '[data-test="semantic-layer-menu-item"]',
+  header: 'header#main-menu',
+  navbar: 'ul[data-test="navbar-top"]',
+  navItem: '[data-test="semantic-layer-nav-item"]',
+  navDropdown: '[data-test="semantic-layer-nav-dropdown"]',
 } as const;

@@ -1,8 +1,12 @@
 # Superset Semantic Layer extension
 
-This extension adds an admin-only Semantic Layer item to the dashboard actions
-menu. It reads the dashboard's registered Superset datasets and displays their
-columns, descriptions, and metrics. The UI and API are a first increment toward
+This extension adds an admin-only Semantic Layer dropdown to Superset's top
+navigation bar. Its Data Dictionary and Semantic Layer entries open
+`/semantic-layer/?module=dictionary` and `/semantic-layer/?module=semantic`.
+The page header lets the administrator pick a Superset database and a dataset,
+and displays the columns, descriptions,
+and metrics of that database's datasets. The backend serves the route with
+Superset's SPA template, and the frontend renders the page below the navbar. The UI and API are a first increment toward
 visualizing semantic models and metric dependencies.
 
 ## Structure
@@ -15,9 +19,10 @@ semantic-layer/
 │   └── src/text_to_bi/superset_semantic_layer/
 │       ├── entrypoint.py
 │       ├── modules/catalog/route.py
+│       ├── modules/catalog/view.py
 │       └── services/
 └── frontend/
-    ├── src/integration/installDashboardSemanticLayer.tsx
+    ├── src/integration/installSemanticLayer.tsx
     ├── src/features/semantic-layer/
     ├── src/index.tsx
     ├── package.json
@@ -26,9 +31,9 @@ semantic-layer/
 ```
 
 The backend access endpoint checks the authenticated user's `Admin` role before the
-frontend adds the dashboard menu item. Non-admin users receive a forbidden
-response and do not see the entry point. Dataset details are fetched using
-Superset's dashboard datasets API, which continues to enforce Superset access.
+frontend adds the navigation bar item. Non-admin users receive a forbidden
+response and do not see the entry point. Datasets are fetched using
+Superset's database and dataset APIs, which continue to enforce Superset access.
 
 This first increment shows the Superset dataset-level semantic metadata. It does
 not yet read a MetricFlow project or infer metric-to-metric dependencies from

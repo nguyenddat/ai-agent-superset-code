@@ -31,3 +31,7 @@ node_modules/
 *.log
 *.supx
 .DS_Store
+
+# Airflow runtime logs
+/airflow/logs/*
+!/airflow/logs/.gitkeep

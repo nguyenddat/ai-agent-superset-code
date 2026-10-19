@@ -1,4 +1,5 @@
-.sl-overlay {
+.sl-page,
+.sl-nav-dropdown {
   --sl-surface: var(--superset-color-surface, #fff);
   --sl-surface-raised: var(--superset-color-surface-raised, #fff);
   --sl-surface-muted: var(--superset-color-surface-muted, #f5f5f5);
@@ -7,23 +8,19 @@
   --sl-muted: var(--superset-color-text-muted, #8c8c8c);
   --sl-border: var(--superset-color-border, #d9d9d9);
   --sl-accent: var(--superset-color-primary, #2893b3);
-  position: fixed;
-  z-index: 1200;
-  inset: 0;
+}
+
+.sl-page {
   display: flex;
+  height: calc(100vh - var(--sl-nav-height, 0px));
+  height: calc(100dvh - var(--sl-nav-height, 0px));
   background: var(--sl-surface);
   color: var(--sl-text);
   font-family: inherit;
-  animation: sl-overlay-in 180ms ease-out both;
 }
 
-.sl-overlay.is-collapsed {
-  pointer-events: none;
-  background: transparent;
-  animation: none;
-}
-
-.sl-overlay[data-theme-mode='dark'] {
+.sl-page[data-theme-mode='dark'],
+.sl-nav-dropdown[data-theme-mode='dark'] {
   --sl-surface: #141414;
   --sl-surface-raised: #1f1f1f;
   --sl-surface-muted: #262626;
@@ -36,24 +33,11 @@
 
 .sl-panel {
   display: flex;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
+  min-width: 0;
+  flex: 1;
   flex-direction: column;
   overflow: hidden;
   background: var(--sl-surface);
-  transform: translateX(0);
-  animation: sl-panel-in 280ms cubic-bezier(.2, .75, .25, 1) both;
-  transition: transform 280ms cubic-bezier(.2, .75, .25, 1), opacity 180ms ease, visibility 280ms;
-  will-change: transform;
-}
-
-.sl-panel.is-collapsed {
-  visibility: hidden;
-  opacity: 0;
-  transform: translateX(100%);
-  pointer-events: none;
-  animation: none;
 }
 
 .sl-panel-workspace {
@@ -62,60 +46,6 @@
   min-height: 0;
   flex: 1;
   flex-direction: column;
-}
-
-.sl-collapsed-trigger {
-  position: fixed;
-  z-index: 1;
-  top: 50%;
-  right: 0;
-  display: grid;
-  width: 40px;
-  height: 52px;
-  place-items: center;
-  border: 1px solid var(--sl-border);
-  border-right: 0;
-  border-radius: 6px 0 0 6px;
-  color: var(--sl-text-secondary);
-  background: var(--sl-surface-raised);
-  box-shadow: 0 2px 10px rgb(0 0 0 / 14%);
-  cursor: pointer;
-  pointer-events: auto;
-  animation: sl-trigger-in 220ms cubic-bezier(.2, .75, .25, 1) both;
-}
-
-.sl-collapsed-trigger:hover {
-  color: var(--sl-accent);
-  background: var(--sl-surface-muted);
-}
-
-.sl-collapsed-trigger svg {
-  width: 18px;
-  height: 18px;
-}
-
-@keyframes sl-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes sl-panel-in {
-  from { opacity: .7; transform: translateX(14px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes sl-trigger-in {
-  from { opacity: 0; transform: translateX(12px) translateY(-50%); }
-  to { opacity: 1; transform: translateX(0) translateY(-50%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sl-overlay,
-  .sl-panel,
-  .sl-collapsed-trigger {
-    animation-duration: 1ms;
-    transition-duration: 1ms;
-  }
 }
 
 .sl-header {
@@ -143,8 +73,6 @@
 }
 
 .sl-header-icon svg,
-.sl-close svg,
-.sl-dataset-option svg,
 .sl-section-heading svg,
 .sl-item-icon svg,
 .sl-state svg {
@@ -170,22 +98,6 @@
   color: var(--sl-muted);
   font-size: 12px;
   line-height: 18px;
-}
-
-.sl-close {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 0;
-  border-radius: 4px;
-  color: var(--sl-text-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.sl-close:hover {
-  background: var(--sl-surface-muted);
 }
 
 .sl-state {
@@ -217,136 +129,53 @@
   flex-direction: column;
 }
 
-.sl-module-switcher {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-}
-
-.sl-module-switcher button {
+.sl-header-select {
   display: flex;
   min-height: 34px;
+  flex: 0 1 240px;
   align-items: center;
   gap: 7px;
-  padding: 6px 10px;
-  border: 1px solid transparent;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--sl-border);
   border-radius: 6px;
-  color: var(--sl-text-secondary);
-  background: transparent;
-  cursor: pointer;
-}
-
-.sl-module-switcher button:hover { background: var(--sl-surface-muted); }
-.sl-module-switcher button:focus-visible { outline: 2px solid var(--sl-accent); outline-offset: 1px; }
-.sl-module-switcher button.is-active { border-color: color-mix(in srgb, var(--sl-accent) 35%, var(--sl-border)); color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 9%, var(--sl-surface)); }
-.sl-module-switcher svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.sl-module-switcher span { color: currentColor; font-size: 11px; font-weight: 600; white-space: nowrap; }
-
-.sl-dataset-list {
-  display: flex;
-  box-sizing: border-box;
-  height: 48px;
-  min-height: 48px;
-  flex: 0 0 48px;
-  align-items: center;
-  gap: 16px;
-  padding: 0 16px;
-  overflow: hidden;
-  border-bottom: 1px solid var(--sl-border);
-  background: var(--sl-surface-raised);
-}
-
-.sl-section-caption {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  padding: 0;
-  color: var(--sl-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .06em;
-}
-
-.sl-section-caption span {
-  padding: 2px 6px;
-  border-radius: 10px;
-  background: var(--sl-surface-muted);
-  letter-spacing: 0;
-}
-
-.sl-dataset-options {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--sl-border) transparent;
-}
-
-.sl-dataset-option {
-  display: flex;
-  width: max-content;
-  max-width: 320px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 8px 12px;
-  overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--sl-text-secondary);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.sl-dataset-option span {
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sl-dataset-option:hover {
-  background: var(--sl-surface-muted);
-}
-
-.sl-dataset-option.is-selected {
-  color: var(--sl-accent);
-  border-color: color-mix(in srgb, var(--sl-accent) 25%, var(--sl-border));
-  background: color-mix(in srgb, var(--sl-accent) 12%, var(--sl-surface));
-}
-
-.sl-add-dataset {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px dashed var(--sl-border);
-  border-radius: 5px;
   color: var(--sl-accent);
   background: var(--sl-surface-raised);
-  cursor: pointer;
-  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
 }
 
-.sl-add-dataset:hover {
-  transform: translateY(-1px);
-  border-color: var(--sl-accent);
-  background: color-mix(in srgb, var(--sl-accent) 8%, var(--sl-surface));
-}
+.sl-header-select:focus-within { border-color: var(--sl-accent); }
+.sl-header-select svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.sl-header-select select { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--sl-text); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.sl-header-select select:disabled { cursor: not-allowed; opacity: .6; }
+.sl-header-select option { color: var(--sl-text); background: var(--sl-surface-raised); }
+.sl-dataset-select { flex-basis: 360px; }
+.sl-select-caption { flex: 0 0 auto; padding-right: 7px; border-right: 1px solid var(--sl-border); color: var(--sl-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
 
-.sl-add-dataset svg { width: 17px; height: 17px; }
+/* Module dropdown under the Semantic Layer item in Superset's navbar; it lives on <body>, outside .sl-page. */
+.sl-nav-trigger { display: inline-flex; align-items: center; gap: 4px; }
+.sl-nav-trigger svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sl-nav-dropdown {
+  position: fixed;
+  z-index: 1050;
+  display: none;
+  min-width: 240px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--sl-border);
+  border-radius: 6px;
+  background: var(--sl-surface-raised);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 12%);
+  font-family: inherit;
+}
+.sl-nav-dropdown.is-open { display: flex; }
+.sl-nav-dropdown a { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 4px; color: var(--sl-text); text-decoration: none; }
+.sl-nav-dropdown a:hover,
+.sl-nav-dropdown a:focus-visible { outline: none; background: var(--sl-surface-muted); }
+.sl-nav-dropdown a.is-active { color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 10%, var(--sl-surface)); }
+.sl-nav-dropdown strong { font-size: 13px; font-weight: 600; }
+.sl-nav-dropdown span { color: var(--sl-muted); font-size: 11px; }
 
 .sl-no-dataset {
   display: flex;
@@ -362,8 +191,6 @@
 .sl-no-dataset > svg { width: 28px; height: 28px; color: var(--sl-accent); }
 .sl-no-dataset strong { color: var(--sl-text); font-size: 15px; }
 .sl-no-dataset span { font-size: 13px; }
-.sl-no-dataset button { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 8px 12px; border: 1px solid var(--sl-accent); border-radius: 5px; color: var(--sl-accent); background: var(--sl-surface-raised); cursor: pointer; }
-.sl-no-dataset button svg { width: 15px; height: 15px; }
 
 .sl-dictionary-main {
   display: flex;
@@ -457,7 +284,7 @@
 }
 .sl-dataset-dictionary-fields {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--sl-border);
@@ -481,14 +308,20 @@
   font-size: 11px;
   font-weight: 400;
 }
-.sl-dataset-dictionary-fields textarea { resize: none; }
+/* Short fields share the first row; Description and Grain get a wide second row and grow with their text. */
+.sl-dataset-dictionary-fields label { grid-column: span 2; }
+.sl-dataset-dictionary-fields label.is-description { grid-column: span 4; }
+.sl-dataset-dictionary-fields textarea { height: auto; min-height: 60px; max-height: 140px; overflow-y: auto; line-height: 1.45; resize: vertical; }
 .sl-dataset-dictionary-fields input:focus,
 .sl-dataset-dictionary-fields select:focus,
 .sl-dataset-dictionary-fields textarea:focus { border-color: var(--sl-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 13%, transparent); }
 .sl-dataset-dictionary-fields input:disabled,
 .sl-dataset-dictionary-fields select:disabled,
 .sl-dataset-dictionary-fields textarea:disabled { cursor: not-allowed; opacity: .62; background: var(--sl-surface-muted); }
-.sl-dictionary-table-wrap { min-width: 0; min-height: 0; flex: 1; overflow-x: auto; overflow-y: hidden; }
+/* The toolbar stays fixed; banners, dataset fields and the table scroll together here.
+   Banners and fields keep the visible width and stay pinned left while the wide table scrolls sideways. */
+.sl-dictionary-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; }
+.sl-dictionary-body > :not(table) { position: sticky; left: 0; }
 .sl-dictionary-table { width: 100%; min-width: 1900px; border-collapse: separate; border-spacing: 0; table-layout: fixed; color: var(--sl-text-secondary); font-size: 11px; }
 .sl-dictionary-table th,
 .sl-dictionary-table td { box-sizing: border-box; height: 53px; padding: 7px 8px; border-right: 1px solid var(--sl-border); border-bottom: 1px solid var(--sl-border); vertical-align: middle; }
@@ -609,34 +442,9 @@
 .sl-dictionary-table textarea:disabled { cursor: not-allowed; opacity: .62; background: var(--sl-surface-muted); }
 .sl-dictionary-table input:read-only { cursor: default; background: var(--sl-surface-muted); }
 .sl-dictionary-table input[type='checkbox'] { display: block; width: 16px; height: 16px; margin: auto; accent-color: var(--sl-accent); }
-.sl-dictionary-pagination {
-  display: flex;
-  min-height: 42px;
-  flex: 0 0 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px;
-  border-top: 1px solid var(--sl-border);
-  color: var(--sl-muted);
-  background: var(--sl-surface-raised);
-  font-size: 11px;
-}
-.sl-dictionary-pagination > div { display: flex; align-items: center; gap: 10px; }
-.sl-dictionary-pagination button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid var(--sl-border);
-  border-radius: 4px;
-  color: var(--sl-text-secondary);
-  background: var(--sl-surface-raised);
-  cursor: pointer;
-}
-.sl-dictionary-pagination button:disabled { cursor: not-allowed; opacity: .45; }
-.sl-dictionary-pagination button:not(:disabled):hover { border-color: var(--sl-accent); color: var(--sl-accent); }
-.sl-dictionary-pagination button svg { width: 14px; height: 14px; }
+/* Pagination sits in the toolbar between AutoFill and Save so the body below only holds dictionary content. */
+.sl-dictionary-actions .sl-dictionary-pagination { display: inline-flex; align-items: center; gap: 6px; color: var(--sl-muted); font-size: 11px; white-space: nowrap; }
+.sl-dictionary-actions .sl-dictionary-pagination button { width: 30px; min-height: 30px; flex: 0 0 auto; padding: 0; }
 
 .sl-dictionary-state {
   display: flex;
@@ -655,83 +463,6 @@
 .sl-dictionary-state strong { color: var(--sl-text); font-size: 14px; }
 .sl-dictionary-state.is-error > svg,
 .sl-dictionary-state.is-error strong { color: #cf1322; }
-
-.sl-dataset-picker-backdrop {
-  position: fixed;
-  z-index: 1300;
-  display: grid;
-  padding: 20px;
-  background: rgb(0 0 0 / 32%);
-  inset: 0;
-  place-items: center;
-  animation: sl-overlay-in 140ms ease-out both;
-}
-
-.sl-dataset-picker {
-  display: flex;
-  width: min(560px, 100%);
-  max-height: min(680px, calc(100vh - 40px));
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--sl-border);
-  border-radius: 9px;
-  background: var(--sl-surface-raised);
-  box-shadow: 0 16px 48px rgb(0 0 0 / 22%);
-  animation: sl-dialog-in 160ms ease-out both;
-}
-
-.sl-dataset-picker-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--sl-border);
-}
-
-.sl-dataset-picker-header h3 { margin: 0; color: var(--sl-text); font-size: 16px; font-weight: 600; }
-.sl-dataset-picker-header p { margin: 5px 0 0; color: var(--sl-text-secondary); font-size: 12px; line-height: 1.5; }
-.sl-dataset-picker-header > button { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 4px; color: var(--sl-muted); background: transparent; cursor: pointer; }
-.sl-dataset-picker-header > button:hover { color: var(--sl-text); background: var(--sl-surface-muted); }
-.sl-dataset-picker-header > button svg { width: 17px; height: 17px; }
-
-.sl-dataset-picker-search {
-  display: flex;
-  height: 38px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  margin: 14px 18px 10px;
-  padding: 0 10px;
-  border: 1px solid var(--sl-border);
-  border-radius: 5px;
-  color: var(--sl-muted);
-  background: var(--sl-surface);
-}
-
-.sl-dataset-picker-search:focus-within { border-color: var(--sl-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 14%, transparent); }
-.sl-dataset-picker-search svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.sl-dataset-picker-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--sl-text); background: transparent; font: inherit; font-size: 12px; }
-.sl-dataset-picker-search input::placeholder { color: var(--sl-muted); }
-
-.sl-dataset-picker-list { min-height: 130px; flex: 1; overflow: auto; padding: 0 12px 10px; }
-.sl-dataset-picker-option { display: flex; width: 100%; min-height: 54px; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid transparent; border-radius: 5px; color: var(--sl-text-secondary); background: transparent; text-align: left; cursor: pointer; }
-.sl-dataset-picker-option:hover:not(:disabled) { background: var(--sl-surface-muted); }
-.sl-dataset-picker-option.is-selected { border-color: color-mix(in srgb, var(--sl-accent) 45%, var(--sl-border)); color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 9%, var(--sl-surface)); }
-.sl-dataset-picker-option:disabled { cursor: default; opacity: .58; }
-.sl-dataset-picker-option > svg { width: 17px; height: 17px; flex: 0 0 auto; color: var(--sl-accent); }
-.sl-dataset-picker-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
-.sl-dataset-picker-copy strong { overflow: hidden; color: var(--sl-text); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.sl-dataset-picker-copy small { color: var(--sl-muted); font-size: 11px; }
-.sl-dataset-picker-linked { flex: 0 0 auto; color: var(--sl-muted); font-size: 10px; }
-.sl-dataset-picker-state { display: flex; min-height: 120px; align-items: center; justify-content: center; gap: 8px; color: var(--sl-muted); font-size: 12px; }
-.sl-dataset-picker-state svg { width: 16px; height: 16px; }
-.sl-dataset-picker-error { margin: 0 18px 10px; color: #cf1322; font-size: 12px; }
-.sl-dataset-picker-footer { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--sl-border); }
-.sl-dataset-picker-footer button { display: flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; padding: 0 12px; border: 1px solid var(--sl-border); border-radius: 5px; color: var(--sl-text-secondary); background: var(--sl-surface-raised); font: inherit; font-size: 12px; cursor: pointer; }
-.sl-dataset-picker-footer button svg { width: 15px; height: 15px; }
-.sl-dataset-picker-footer .sl-picker-submit { border-color: var(--sl-accent); color: #fff; background: var(--sl-accent); }
-.sl-dataset-picker-footer .sl-picker-submit:disabled { opacity: .5; cursor: not-allowed; }
 
 .sl-details {
   display: flex;
@@ -1259,12 +990,12 @@ body.sl-dragging-field * {
 
 @media (max-width: 700px) {
   .sl-dataset-dictionary-fields { grid-template-columns: 1fr; }
+  .sl-dataset-dictionary-fields label,
+  .sl-dataset-dictionary-fields label.is-description { grid-column: auto; }
   .sl-header { gap: 7px; padding-inline: 10px; }
   .sl-header p { display: none; }
-  .sl-module-switcher { gap: 2px; }
-  .sl-module-switcher button { width: 32px; min-height: 32px; justify-content: center; padding: 6px; }
-  .sl-module-switcher button span { display: none; }
-  .sl-dataset-list { height: auto; min-height: 64px; flex: 0 0 auto; align-items: flex-start; flex-direction: column; gap: 7px; padding: 9px 12px; }
+  .sl-header-select { flex-basis: 0; flex-grow: 1; }
+  .sl-select-caption { display: none; }
   .sl-workspace { grid-template-columns: 1fr; }
   .sl-field-palette { max-height: 260px; }
   .sl-drop-grid { grid-template-columns: 1fr; }

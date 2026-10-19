@@ -145,7 +145,7 @@ export function ReferenceColumnPicker({
             </div>
           ) : null}
         </div>,
-        document.querySelector('.sl-overlay') || document.body,
+        document.querySelector('.sl-page') || document.body,
       ) : null}
     </>
   );
