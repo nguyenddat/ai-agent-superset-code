@@ -6,6 +6,7 @@ import '@/styles/globals.css';
 import { PortalContainerContext } from '@/lib/portal-container';
 import { DataDictionary } from '../features/semantic-layer/DataDictionary';
 import { BusinessCanvas } from '../features/semantic-layer/BusinessCanvas';
+import { Glossary } from '../features/semantic-layer/Glossary';
 import { requestJson, semanticLayerApi, supersetApi } from '../features/semantic-layer/api';
 import {
   SEMANTIC_LAYER_PAGE,
@@ -276,7 +277,9 @@ function SemanticLayerPage() {
             <div className="sl-state sl-error"><p>{error}</p></div>
           ) : (
             <div className="sl-content">
-              {currentDataset ? (
+              {activeModule === 'glossary' ? (
+                <main className="sl-details"><Glossary datasets={datasets} /></main>
+              ) : currentDataset ? (
                 activeModule === 'dictionary' ? (
                   <main className="sl-dictionary-main">
                     <DataDictionary key={currentDataset.id} dataset={currentDataset} layers={layers} onDirtyChange={setDictionaryDirty} onSaved={onDictionarySaved} onManageLayers={() => setLayersDialogOpen(true)} />

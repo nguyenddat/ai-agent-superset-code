@@ -28,6 +28,7 @@ from ...models.business_domain import BusinessDomain, business_domain_dataset
 from ...models.column_dictionary import ColumnDictionary
 from ...models.data_layer import DataLayer
 from ...models.dataset_dictionary import DatasetDictionary
+from ...models.glossary_term import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
 from ...models.lineage_canvas import LineageCanvas
 from ...models.lineage_edge import LineageEdge
 from ...models.metric_contract import MetricContract
@@ -45,6 +46,15 @@ from ..business_model.service import (
 )
 from ..data_dictionary.repository.repo_column_dictionary import ColumnDictionaryRepository
 from ..data_dictionary.repository.repo_dataset_dictionary import DatasetDictionaryRepository
+from ..glossary.service import (
+    GlossaryConflictError,
+    GlossaryValidationError,
+    approve_revision,
+    create_draft,
+    glossary_link_fingerprint,
+    revoke_revision,
+    update_draft,
+)
 from ..semantic_query.catalog import build_semantic_catalog
 from ..semantic_query.compiler import SemanticQueryError, compile_semantic_query
 from ..semantic_query.contracts import (
@@ -462,6 +472,11 @@ def _migrate_dictionary_tables():
     LineageCanvas.__table__.create(bind=db.engine, checkfirst=True)
     MetricContract.__table__.create(bind=db.engine, checkfirst=True)
     RelationshipContract.__table__.create(bind=db.engine, checkfirst=True)
+    # Glossary parent tables must exist before immutable revisions, links, and audit evidence.
+    GlossaryTerm.__table__.create(bind=db.engine, checkfirst=True)
+    GlossaryTermRevision.__table__.create(bind=db.engine, checkfirst=True)
+    GlossaryTermLink.__table__.create(bind=db.engine, checkfirst=True)
+    GlossaryTermAuditEvent.__table__.create(bind=db.engine, checkfirst=True)
 
     with db.engine.begin() as connection:
         contract_columns = {column["name"] for column in inspect(connection).get_columns(MetricContract.__tablename__)}
@@ -1924,3 +1939,268 @@ class SemanticLayerAPI(RestApi):
             db.session.delete(edge)
         db.session.commit()
         return self.response(200, source=source_id, target=target_id, kind=kind)
+
+    @staticmethod
+    def _glossary_revision(revision: GlossaryTermRevision, links: list[GlossaryTermLink]) -> dict[str, Any]:
+        return {
+            "id": revision.id,
+            "term_id": revision.term_id,
+            "revision_number": revision.revision_number,
+            "canonical_name": revision.term.canonical_name,
+            "definition": revision.definition,
+            "synonyms": revision.synonyms or [],
+            "provenance": revision.provenance,
+            "status": revision.status,
+            "is_current": revision.is_current,
+            "created_at": revision.created_on.isoformat() if revision.created_on else None,
+            "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
+            "revoked_at": revision.revoked_at.isoformat() if revision.revoked_at else None,
+            "links": [
+                {"kind": link.kind, "dataset_id": link.dataset_id, "column_name": link.column_name, "metric_id": link.metric_id}
+                for link in links
+            ],
+        }
+
+    def _glossary_term(self, term: GlossaryTerm, revisions: list[GlossaryTermRevision]) -> dict[str, Any]:
+        serialized = [self._glossary_revision(revision, self._glossary_links(revision.id)) for revision in revisions]
+        current = next((revision for revision in serialized if revision["is_current"]), None)
+        return {
+            "id": term.id,
+            "canonical_name": term.canonical_name,
+            "owner_id": term.owner_id,
+            "steward_id": term.steward_id,
+            "current_revision": current,
+            "revisions": serialized,
+        }
+
+    def _glossary_term_by_id(self, term_id: int) -> GlossaryTerm | None:
+        return db.session.get(GlossaryTerm, term_id)
+
+    @staticmethod
+    def _glossary_links(revision_id: int) -> list[GlossaryTermLink]:
+        return db.session.query(GlossaryTermLink).filter(GlossaryTermLink.revision_id == revision_id).all()
+
+    @staticmethod
+    def _glossary_user_exists(user_id: int) -> bool:
+        return security_manager.get_user_by_id(user_id) is not None
+
+    @staticmethod
+    def _glossary_link_target(link: GlossaryTermLink, dataset: SqlaTable) -> Any | None:
+        if link.kind == "dataset":
+            return None
+        if link.kind == "column":
+            return next((column for column in dataset.columns if column.column_name == link.column_name), None)
+        return next((metric for metric in dataset.metrics if metric.id == link.metric_id), None)
+
+    def _glossary_live_fingerprint(self, link: GlossaryTermLink) -> str | None:
+        dataset = db.session.get(SqlaTable, link.dataset_id)
+        if dataset is None:
+            return None
+        target = self._glossary_link_target(link, dataset)
+        if link.kind != "dataset" and target is None:
+            return None
+        return glossary_link_fingerprint(dataset, link.kind, target)
+
+    @expose("/glossary", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def list_glossary(self):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        terms = db.session.query(GlossaryTerm).order_by(GlossaryTerm.canonical_name).all()
+        return self.response(
+            200,
+            terms=[
+                self._glossary_term(
+                    term,
+                    db.session.query(GlossaryTermRevision)
+                    .filter_by(term_id=term.id, is_current=True)
+                    .order_by(GlossaryTermRevision.revision_number)
+                    .all(),
+                )
+                for term in terms
+            ],
+        )
+
+    @expose("/glossary/<int:term_id>", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def get_glossary(self, term_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        term = self._glossary_term_by_id(term_id)
+        if term is None:
+            return self.response(404, message="Glossary term not found.")
+        revisions = (
+            db.session.query(GlossaryTermRevision)
+            .filter_by(term_id=term_id)
+            .order_by(GlossaryTermRevision.revision_number)
+            .all()
+        )
+        return self.response(200, term=self._glossary_term(term, revisions))
+
+    @expose("/glossary", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def create_glossary(self):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        try:
+            revision = create_draft(db.session, request.get_json(silent=True), current_user.id, lambda key: db.session.get(SqlaTable, key), self._glossary_user_exists)
+            db.session.commit()
+        except GlossaryConflictError as ex:
+            db.session.rollback()
+            return self.response(409, message=str(ex))
+        except GlossaryValidationError as ex:
+            db.session.rollback()
+            return self.response_400(message=str(ex))
+        return self.response(201, term=self._glossary_term(revision.term, [revision]))
+
+    @expose("/glossary/<int:term_id>/draft", methods=("PUT",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def update_glossary_draft(self, term_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        payload = request.get_json(silent=True)
+        current = db.session.query(GlossaryTermRevision).filter_by(term_id=term_id, is_current=True).one_or_none()
+        if current is None:
+            return self.response(404, message="Glossary term not found.")
+        try:
+            expected_revision = payload.get("expected_revision") if isinstance(payload, dict) else None
+            if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                raise GlossaryValidationError("expected_revision is required.")
+            content = dict(payload)
+            content.pop("expected_revision")
+            revision = update_draft(db.session, current, content, expected_revision, current_user.id, lambda key: db.session.get(SqlaTable, key), self._glossary_user_exists)
+            db.session.commit()
+        except GlossaryConflictError as ex:
+            db.session.rollback()
+            return self.response(409, message=str(ex))
+        except GlossaryValidationError as ex:
+            db.session.rollback()
+            return self.response_400(message=str(ex))
+        return self.response(200, term=self._glossary_term(revision.term, [revision]))
+
+    def _glossary_lifecycle(
+        self, term_id: int, event: str, expected_revision: int, actor_id: int, reason: str | None
+    ):
+        _ensure_dictionary_tables()
+        revision = db.session.query(GlossaryTermRevision).filter_by(term_id=term_id, is_current=True).one_or_none()
+        if revision is None:
+            return self.response(404, message="Glossary term not found.")
+        try:
+            if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+                raise GlossaryValidationError("expected_revision is required.")
+            if event == "approve":
+                approve_revision(db.session, revision, expected_revision, actor_id, reason)
+            else:
+                revoke_revision(db.session, revision, expected_revision, actor_id, reason)
+            db.session.commit()
+        except GlossaryConflictError as ex:
+            db.session.rollback()
+            return self.response(409, message=str(ex))
+        except GlossaryValidationError as ex:
+            db.session.rollback()
+            return self.response_400(message=str(ex))
+        return self.response(200, term=self._glossary_term(revision.term, [revision]))
+
+    @expose("/glossary/<int:term_id>/approve", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def approve_glossary(self, term_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        payload = request.get_json(silent=True)
+        expected_revision = payload.get("expected_revision") if isinstance(payload, dict) else None
+        reason = payload.get("reason") if isinstance(payload, dict) else None
+        return self._glossary_lifecycle(term_id, "approve", expected_revision, current_user.id, reason)
+
+    @expose("/glossary/<int:term_id>/revoke", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def revoke_glossary(self, term_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        payload = request.get_json(silent=True)
+        expected_revision = payload.get("expected_revision") if isinstance(payload, dict) else None
+        reason = payload.get("reason") if isinstance(payload, dict) else None
+        return self._glossary_lifecycle(term_id, "revoke", expected_revision, current_user.id, reason)
+
+    @expose("/glossary/<int:term_id>/audit", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def glossary_audit(self, term_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        events = db.session.query(GlossaryTermAuditEvent).filter_by(term_id=term_id).order_by(GlossaryTermAuditEvent.id).all()
+        return self.response(
+            200,
+            events=[
+                {
+                    "id": row.id,
+                    "action": row.event_type,
+                    "revision_number": row.revision_number,
+                    "actor_id": row.actor_id,
+                    "reason": row.reason,
+                    "created_at": row.occurred_at.isoformat(),
+                }
+                for row in events
+            ],
+        )
+
+    @expose("/glossary/discovery", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def glossary_discovery(self):
+        """Return only approved, current, fresh links to caller-authorized datasets."""
+        _ensure_dictionary_tables()
+        rows = db.session.query(GlossaryTermRevision).filter_by(status="approved", is_current=True).all()
+        terms = []
+        for revision in rows:
+            visible_links = []
+            for link in self._glossary_links(revision.id):
+                dataset = db.session.get(SqlaTable, link.dataset_id)
+                if dataset is None or not self._can_access_semantic_query_dataset(dataset):
+                    continue
+                target = self._glossary_link_target(link, dataset)
+                if link.kind != "dataset" and target is None:
+                    continue
+                if glossary_link_fingerprint(dataset, link.kind, target) != link.fingerprint:
+                    continue
+                visible_links.append(
+                    {"kind": link.kind, "dataset_id": link.dataset_id, "column_name": link.column_name, "metric_id": link.metric_id}
+                )
+            if not visible_links:
+                continue
+            terms.append(
+                {
+                    "term_id": revision.term_id,
+                    "canonical_name": revision.term.canonical_name,
+                    "definition": revision.definition,
+                    "synonyms": revision.synonyms or [],
+                    "links": visible_links,
+                }
+            )
+        return self.response(200, terms=terms)

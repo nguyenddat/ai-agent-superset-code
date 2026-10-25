@@ -2,11 +2,12 @@ export const SEMANTIC_LAYER_API = '/extensions/text-to-bi/superset-semantic-laye
 
 export const SEMANTIC_LAYER_PAGE = '/semantic-layer/';
 
-export type SemanticLayerModule = 'dictionary' | 'semantic';
+export type SemanticLayerModule = 'dictionary' | 'semantic' | 'glossary';
 
 export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: string; description: string }> = [
   { id: 'dictionary', label: 'Data Dictionary', description: 'Chỉnh metadata datasets và columns' },
   { id: 'semantic', label: 'Semantic Layer', description: 'Nghiệp vụ và data lineage' },
+  { id: 'glossary', label: 'Business Glossary', description: 'Governed business terms' },
 ];
 
 export function semanticLayerModuleHref(module: SemanticLayerModule): string {
@@ -15,7 +16,7 @@ export function semanticLayerModuleHref(module: SemanticLayerModule): string {
 
 export function semanticLayerModuleFromLocation(): SemanticLayerModule {
   const module = new URLSearchParams(window.location.search).get('module');
-  return module === 'semantic' ? module : 'dictionary';
+  return module === 'semantic' || module === 'glossary' ? module : 'dictionary';
 }
 
 export const semanticLayerEvents = {

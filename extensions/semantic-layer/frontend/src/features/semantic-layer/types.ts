@@ -38,6 +38,57 @@ export type MetricContractExecution = {
   truncated: boolean;
 };
 
+export type GlossaryStatus = 'draft' | 'approved' | 'revoked';
+export type GlossaryProvenance = 'manual' | 'import' | 'ai_suggestion';
+export type GlossaryLink = {
+  id?: number;
+  kind: 'dataset' | 'column' | 'metric';
+  dataset_id: number;
+  column_name?: string | null;
+  metric_id?: number | null;
+  dataset_name?: string | null;
+  metric_name?: string | null;
+};
+export type GlossaryRevision = {
+  id: number;
+  revision_number: number;
+  canonical_name: string;
+  definition: string;
+  synonyms: string[];
+  provenance: GlossaryProvenance;
+  status: GlossaryStatus;
+  is_current: boolean;
+  created_at?: string | null;
+  approved_at?: string | null;
+  revoked_at?: string | null;
+  links: GlossaryLink[];
+};
+export type GlossaryTerm = {
+  id: number;
+  canonical_name: string;
+  owner_id: number | null;
+  steward_id: number | null;
+  current_revision?: GlossaryRevision | null;
+  revisions?: GlossaryRevision[];
+};
+export type GlossaryAuditEvent = {
+  id: number;
+  action: string;
+  revision_number?: number | null;
+  actor_id?: number | null;
+  reason?: string | null;
+  created_at?: string | null;
+};
+export type GlossaryTermPayload = {
+  canonical_name: string;
+  definition: string;
+  synonyms: string[];
+  owner_id: number | null;
+  steward_id: number | null;
+  provenance: GlossaryProvenance;
+  links: Array<Pick<GlossaryLink, 'kind' | 'dataset_id' | 'column_name' | 'metric_id'>>;
+};
+
 export type SupersetDatabase = {
   id: number;
   database_name: string;

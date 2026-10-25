@@ -31,6 +31,13 @@ export const semanticLayerApi = {
   metricContractExecute: (datasetId: number, metricId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/semantic-query/execute`
   ),
+  glossary: `${SEMANTIC_LAYER_API}/glossary`,
+  glossaryTerm: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}`,
+  glossaryDraft: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/draft`,
+  glossaryApprove: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/approve`,
+  glossaryRevoke: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/revoke`,
+  glossaryAudit: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/audit`,
+  glossaryDiscovery: `${SEMANTIC_LAYER_API}/glossary/discovery`,
 } as const;
 
 export const supersetApi = {
