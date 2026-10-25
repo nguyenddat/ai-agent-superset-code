@@ -28,6 +28,7 @@ from ...models.business_domain import BusinessDomain, business_domain_dataset
 from ...models.column_dictionary import ColumnDictionary
 from ...models.data_layer import DataLayer
 from ...models.dataset_dictionary import DatasetDictionary
+from ...models.expert_rule import ExpertRule, ExpertRuleAuditEvent, ExpertRuleLink, ExpertRuleRevision
 from ...models.glossary_term import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
 from ...models.lineage_canvas import LineageCanvas
 from ...models.lineage_edge import LineageEdge
@@ -477,6 +478,11 @@ def _migrate_dictionary_tables():
     GlossaryTermRevision.__table__.create(bind=db.engine, checkfirst=True)
     GlossaryTermLink.__table__.create(bind=db.engine, checkfirst=True)
     GlossaryTermAuditEvent.__table__.create(bind=db.engine, checkfirst=True)
+    # Expert rule routes never issue DDL, so this migration is their only table bootstrap.
+    ExpertRule.__table__.create(bind=db.engine, checkfirst=True)
+    ExpertRuleRevision.__table__.create(bind=db.engine, checkfirst=True)
+    ExpertRuleLink.__table__.create(bind=db.engine, checkfirst=True)
+    ExpertRuleAuditEvent.__table__.create(bind=db.engine, checkfirst=True)
 
     with db.engine.begin() as connection:
         contract_columns = {column["name"] for column in inspect(connection).get_columns(MetricContract.__tablename__)}

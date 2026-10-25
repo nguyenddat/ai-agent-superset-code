@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "benign_prose": [
+    "show monthly revenue", "set priorities", "Update the monthly report", "with seasonal adjustments",
+    "do not include provisional records", "beginning balance", "review with context", "tổng doanh thu theo tháng"
+  ],
+  "sql_or_control": [
+    "SELECT ARRAY[1]", "SELECT CASE WHEN true THEN 1 ELSE 0 END", "SELECT COALESCE(a, b) FROM records",
+    "SELECT amount::text", "SELECT amount IS NULL", "SELECT amount BETWEEN 1 AND 2", "SELECT pg_sleep(1)",
+    "WITH x AS (SELECT 1) SELECT * FROM x", "VALUES (1)", "INSERT INTO x VALUES (1)", "UPDATE x SET y = 1",
+    "DELETE FROM x", "CREATE ROLE attacker", "CREATE SEQUENCE s", "CREATE UNIQUE INDEX ix ON x(y)",
+    "ALTER ROLE attacker", "DROP ROLE attacker", "GRANT SELECT ON x TO public", "REVOKE SELECT ON x FROM public",
+    "BEGIN TRANSACTION", "SET ROLE admin", "USE analytics", "ATTACH DATABASE 'x' AS y", "LOAD 'x'",
+    "PRAGMA database_list", "VACUUM", "SHOW ALL", "SHOW search_path", "-- comment", "SELECT 1; SELECT 2",
+    "SELECT\u00001", "SELECT $$secret$$"
+  ]
+}

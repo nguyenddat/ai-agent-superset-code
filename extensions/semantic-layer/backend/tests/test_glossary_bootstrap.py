@@ -83,6 +83,25 @@ def test_glossary_bootstrap_creates_parent_tables_before_children_with_checkfirs
     assert all(checkfirst for _, checkfirst in glossary_calls)
 
 
+def test_expert_rule_bootstrap_creates_parent_tables_before_children_with_checkfirst():
+    route_path = Path(__file__).parents[1] / "src/text_to_bi/superset_semantic_layer/modules/catalog/route.py"
+    module = ast.parse(route_path.read_text(encoding="utf-8"))
+    migration = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "_migrate_dictionary_tables")
+    namespace = _migration_namespace()
+    exec(compile(ast.Module(body=[migration], type_ignores=[]), str(route_path), "exec"), namespace)  # noqa: S102
+
+    namespace["_migrate_dictionary_tables"]()
+
+    expert_calls = [call for call in namespace["calls"] if call[0].startswith("ExpertRule")]
+    assert [name for name, _ in expert_calls] == [
+        "ExpertRule",
+        "ExpertRuleRevision",
+        "ExpertRuleLink",
+        "ExpertRuleAuditEvent",
+    ]
+    assert all(checkfirst for _, checkfirst in expert_calls)
+
+
 def _migration_namespace():
     calls = []
 
@@ -124,6 +143,10 @@ def _migration_namespace():
         "GlossaryTermRevision",
         "GlossaryTermLink",
         "GlossaryTermAuditEvent",
+        "ExpertRule",
+        "ExpertRuleRevision",
+        "ExpertRuleLink",
+        "ExpertRuleAuditEvent",
     )
     namespace = {name: SimpleNamespace(__tablename__=name, __table__=Table(name)) for name in names}
     namespace.update(
