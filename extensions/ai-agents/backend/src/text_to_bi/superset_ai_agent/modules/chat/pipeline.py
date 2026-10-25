@@ -53,11 +53,25 @@ class QueryFilter(BaseModel):
     source: Literal["time", "place", "user_definition", "question", "expert_rule"]
 
 
+class QueryOrder(BaseModel):
+    metric_id: int
+    direction: Literal["desc", "asc"] = "desc"
+
+
+class ComparedPeriod(BaseModel):
+    start: str = Field(description="YYYY-MM-DD")
+    end: str = Field(description="YYYY-MM-DD")
+    label: str = Field(default="", description="Tên ngắn của kỳ đem so, ví dụ \"tuần trước\".")
+
+
 class QueryPlan(BaseModel):
     dataset_id: int
     metric_ids: list[int]
     dimensions: list[str] = Field(default_factory=list)
     filters: list[QueryFilter] = Field(default_factory=list)
+    order_by: QueryOrder | None = None
+    limit: int | None = None
+    comparison: ComparedPeriod | None = None
     presentation: Literal["number", "table", "bar", "line"] = "table"
     scope: str = Field(default="", description="Phạm vi bằng lời, ví dụ \"Hà Nội, 19/10–25/10/2026\".")
 
@@ -162,7 +176,7 @@ def _described(items: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dic
 
 
 TERM_FIELDS = ("id", "name", "synonyms", "definition")
-USER_DEFINITION_FIELDS = ("id", "kind", "name", "concept", "definition")
+USER_DEFINITION_FIELDS = ("id", "kind", "name", "concept", "definition", "conditions")
 METRIC_FIELDS = ("dataset_id", "metric_id", "name", "definition", "unit", "glossary_term_ids")
 RULE_FIELDS = ("id", "name", "dataset_id", "conditions", "exceptions", "metric_ids", "glossary_term_ids")
 
@@ -263,13 +277,25 @@ def _understanding_shown(
 
 
 def _run_metrics(planned: Any, run_metric: MetricRunner) -> dict[str, Any]:
-    """Each metric is its own governed query; they share dimensions and filters, so they run side by side."""
-    body = planned.request_body()
-    with ThreadPoolExecutor(max_workers=len(planned.metrics)) as pool:
+    """Each metric is its own governed query, once per period; they share dimensions, so they all run side by side."""
+    periods = [False, True] if planned.comparison else [False]
+    calls = [(compared, metric) for compared in periods for metric in planned.metrics]
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
         answers = list(pool.map(
-            lambda metric: run_metric(planned.dataset_id, metric["metric_id"], body), planned.metrics,
+            lambda call: run_metric(planned.dataset_id, call[1]["metric_id"], planned.request_body(compared=call[0])),
+            calls,
         ))
-    return combined_result(planned, answers)
+    count = len(planned.metrics)
+    return combined_result(planned, answers[:count], answers[count:] if planned.comparison else None)
+
+
+def _stored_conditions(definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The user's definitions that carry stored conditions, in the shape the query planner adds them."""
+    return [
+        {"name": item["name"], "dataset_id": item["conditions"]["dataset_id"], "filters": item["conditions"]["filters"],
+         "source": "user_definition"}
+        for item in definitions if item.get("conditions")
+    ]
 
 
 def _query_shown(result: dict[str, Any]) -> dict[str, Any]:
@@ -280,6 +306,10 @@ def _query_shown(result: dict[str, Any]) -> dict[str, Any]:
         ],
         "dimensions": [dimension["name"] for dimension in result["dimensions"]],
         "metrics": [metric["label"] for metric in result["metrics"]],
+        "order": result["order"],
+        "limit": result["limit"],
+        "comparison": result["comparison"],
+        "coverage": result["coverage"],
         "row_count": result["row_count"],
         "rows": result["rows"][:5],
     }
@@ -381,7 +411,9 @@ def run_agent(
     elif run_metric is not None:
         plan = understanding.query.model_dump() if understanding.query else None
         try:
-            planned = plan_query(plan, catalog.datasets, catalog.metrics, chosen_rules)
+            used_definitions = [definitions_by_id[item["id"]] for item in outcome.user_definitions]
+            stored = _stored_conditions(used_definitions)
+            planned = plan_query(plan, catalog.datasets, catalog.metrics, chosen_rules + stored)
             outcome.result = yield from _tool_call(
                 step, "query_metrics", {"plan": plan, "expert_rule_ids": [rule["id"] for rule in chosen_rules]},
                 lambda: _run_metrics(planned, run_metric),

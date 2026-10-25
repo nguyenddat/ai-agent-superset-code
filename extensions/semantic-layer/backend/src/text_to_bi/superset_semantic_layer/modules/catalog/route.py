@@ -69,7 +69,14 @@ from ..semantic_query.contracts import (
     metric_contract_state,
     parse_contract_metric,
 )
-from ..semantic_query.members import build_members_payload, labelled_key_columns, members_from_rows
+from ..semantic_query.members import (
+    build_members_payload,
+    build_time_range_payload,
+    labelled_key_columns,
+    members_from_rows,
+    temporal_columns,
+    time_ranges_from_rows,
+)
 from ..semantic_query.relationships import (
     RelationshipEnd,
     relationship_cardinality,
@@ -1279,7 +1286,26 @@ class SemanticLayerAPI(RestApi):
                 "label": label or label_column,
                 "members": members_from_rows(result.get("data", []), key_column, label_column),
             })
-        return self.response(200, dataset_id=dataset_id, dimensions=dimensions)
+        return self.response(200, dataset_id=dataset_id, dimensions=dimensions, time_ranges=self._time_ranges(dataset))
+
+    @staticmethod
+    def _time_ranges(dataset: SqlaTable) -> list[dict[str, Any]]:
+        """The first and last date of each date column, read through ChartData as the caller; empty when unreadable."""
+        from superset.charts.schemas import ChartDataQueryContextSchema
+        from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+        columns = temporal_columns(dataset)
+        if not columns:
+            return []
+        try:
+            command = ChartDataCommand(ChartDataQueryContextSchema().load(build_time_range_payload(dataset, columns)))
+            command.validate()
+            result = command.run()["queries"][0]
+        except Exception as ex:
+            if not _is_superset_access_error(ex):
+                logger.exception("Reading the date range of %s failed", dataset.table_name)
+            return []
+        return [] if result.get("error") else time_ranges_from_rows(result.get("data", []), columns)
 
     @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
     @protect()

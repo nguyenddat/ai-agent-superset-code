@@ -106,7 +106,8 @@ def test_an_aggregate_over_no_rows_is_no_data_and_each_query_is_kept_for_the_pag
 
     assert (result["rows"], result["row_count"]) == ([], 0)
     assert result["queries"] == [{
-        "metric": "Tổng lượng mưa", "dataset_id": 12, "metric_id": 20, "request": planned.request_body(),
+        "metric": "Tổng lượng mưa", "dataset_id": 12, "metric_id": 20, "period": None,
+        "request": planned.request_body(),
         "sql": "SELECT SUM(...)",
     }]
     assert "queries" not in result_for_answer(result)

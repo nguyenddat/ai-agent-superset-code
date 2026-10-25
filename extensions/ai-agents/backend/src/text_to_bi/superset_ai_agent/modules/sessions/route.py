@@ -9,6 +9,7 @@ from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
 from ...models.question_log import AgentChatSession, AgentQuestion, AgentUserDefinition, ensure_question_tables
+from ..definitions.conditions import conditions_for
 from ..definitions.parsing import DefinitionError, parse_definitions
 from ..definitions.route import serialize_definition, user_definitions
 
@@ -158,7 +159,8 @@ class AgentChatSessionAPI(RestApi):
         definitions = user_definitions(user_id, chat_session.dashboard_id)
         existing = {(item.kind, item.name.casefold()): item for item in definitions}
         now = datetime.now(timezone.utc)
-        for item in confirmed:
+        conditions = conditions_for(confirmed, user_id, request.headers.get("Cookie", ""))
+        for item, item_conditions in zip(confirmed, conditions):
             definition = existing.get((item["kind"], item["name"].casefold()))
             if definition is None:
                 definition = AgentUserDefinition(user_id=user_id, dashboard_id=chat_session.dashboard_id)
@@ -167,6 +169,7 @@ class AgentChatSessionAPI(RestApi):
             definition.name = item["name"]
             definition.concept = item["concept"]
             definition.definition = item["definition"]
+            definition.conditions = item_conditions
             definition.source_question_id = question_id
             definition.source_session_id = session_id
             definition.review_status = "pending"

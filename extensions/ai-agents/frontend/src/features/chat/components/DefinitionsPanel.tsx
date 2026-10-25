@@ -2,6 +2,26 @@ import React, { useState } from 'react';
 import { BookMarked, Check, LoaderCircle, Pencil, Trash2, X } from 'lucide-react';
 import { UserDefinition } from '../../../shared/api/chat';
 import { DEFINITION_KIND_LABELS } from './ChatTurn';
+import { OPERATOR_LABELS, shownCell } from './QueryResultView';
+
+/** What the agent applies for a qualitative concept: its stored conditions, or that it reads the words each time. */
+function DefinitionConditions({ definition }: { definition: UserDefinition }) {
+  if (definition.kind !== 'expert_rule') return null;
+  if (!definition.conditions) {
+    return <span className="ai-definition-note">Chưa chuyển được thành điều kiện; AI Agent hiểu theo lời mô tả.</span>;
+  }
+  return (
+    <ul className="ai-definition-conditions" aria-label="Điều kiện áp dụng">
+      {definition.conditions.filters.map(condition => {
+        const operator = OPERATOR_LABELS[condition.operator as keyof typeof OPERATOR_LABELS] ?? condition.operator;
+        const value = Array.isArray(condition.value)
+          ? condition.value.map(item => shownCell(item)).join(', ')
+          : shownCell(condition.value);
+        return <li key={`${condition.column}${condition.operator}`}>{condition.label} {operator} {value}</li>;
+      })}
+    </ul>
+  );
+}
 
 function DefinitionItem({ definition, onSave, onDelete }: {
   definition: UserDefinition;
@@ -83,6 +103,7 @@ function DefinitionItem({ definition, onSave, onDelete }: {
         <>
           <strong>{definition.name}</strong>
           <p>{definition.definition}</p>
+          <DefinitionConditions definition={definition} />
           {definition.review_status === 'promoted' ? (
             <span className="ai-definition-note">Đã có định nghĩa chung của nghiệp vụ cho khái niệm này.</span>
           ) : null}

@@ -9,7 +9,7 @@ const SOURCE_LABELS: Record<FilterSource, string> = {
   place: 'Địa điểm',
   question: 'Theo câu hỏi',
 };
-const OPERATOR_LABELS: Record<ResultFilter['operator'], string> = {
+export const OPERATOR_LABELS: Record<ResultFilter['operator'], string> = {
   '==': '=', '!=': '≠', '<': '<', '<=': '≤', '>': '>', '>=': '≥', IN: 'thuộc', 'NOT IN': 'không thuộc',
 };
 const CHART_HEIGHT = 200;
@@ -19,7 +19,7 @@ const MAX_BAR_WIDTH = 24;
 const numberFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-function shownCell(value: ResultCell, short = false): string {
+export function shownCell(value: ResultCell, short = false): string {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'number') return numberFormat.format(value);
   const date = ISO_DATE.exec(value);
@@ -211,13 +211,12 @@ function TimeChart({ kind, title, unit, labels, series }: {
   );
 }
 
-/** A metric compared across groups: horizontal bars, longest first, each labelled at its tip. */
-function RankedBars({ title, unit, items }: {
-  title: string; unit: string | null; items: Array<{ label: string; value: number | null }>;
+/** A metric compared across groups: horizontal bars, longest first unless already ranked, labelled at their tips. */
+function RankedBars({ title, unit, items, ranked: alreadyRanked }: {
+  title: string; unit: string | null; items: Array<{ label: string; value: number | null }>; ranked: boolean;
 }) {
-  const ranked = items
-    .filter((item): item is { label: string; value: number } => item.value !== null)
-    .sort((left, right) => right.value - left.value);
+  const valued = items.filter((item): item is { label: string; value: number } => item.value !== null);
+  const ranked = alreadyRanked ? valued : [...valued].sort((left, right) => right.value - left.value);
   if (ranked.length === 0) return null;
   const largest = Math.max(...ranked.map(item => Math.abs(item.value))) || 1;
   return (
@@ -249,9 +248,10 @@ function ResultQueries({ queries }: { queries: NonNullable<QueryResult['queries'
         <ChevronRight className="ai-result-queries-chevron" aria-hidden="true" />
       </button>
       {open && queries.map(query => (
-        <div key={query.metric_id} className="ai-result-query">
+        <div key={`${query.metric_id}-${query.period ?? ''}`} className="ai-result-query">
           <p>
-            {query.metric} · dataset {query.dataset_id}, metric {query.metric_id}
+            {query.metric}{query.period ? ` · ${query.period}` : ''}
+            {` · dataset ${query.dataset_id}, metric ${query.metric_id}`}
             {query.sql ? '' : ' · yêu cầu gửi Semantic Layer'}
           </p>
           <pre>{query.sql ?? JSON.stringify(query.request, null, 2)}</pre>
@@ -261,7 +261,18 @@ function ResultQueries({ queries }: { queries: NonNullable<QueryResult['queries'
   );
 }
 
+/** The change from the compared period to the asked one, as "+1,2 (+5%)"; empty when either value is missing. */
+function change(current: ResultCell, previous: ResultCell): { text: string; direction: 'up' | 'down' | 'same' } | null {
+  if (typeof current !== 'number' || typeof previous !== 'number') return null;
+  const difference = current - previous;
+  const sign = difference > 0 ? '+' : '';
+  const percent = previous === 0 ? '' : ` (${sign}${numberFormat.format((difference / Math.abs(previous)) * 100)}%)`;
+  const direction = difference > 0 ? 'up' : difference < 0 ? 'down' : 'same';
+  return { text: `${sign}${numberFormat.format(difference)}${percent}`, direction };
+}
+
 function ResultTable({ result }: { result: QueryResult }) {
+  const comparison = result.comparison;
   return (
     <div className="ai-result-table-wrap">
       <table className="ai-result-table">
@@ -269,7 +280,11 @@ function ResultTable({ result }: { result: QueryResult }) {
           <tr>
             {result.dimensions.map(dimension => <th key={dimension.name}>{dimension.label}</th>)}
             {result.metrics.map(metric => (
-              <th key={metric.name} className="is-number">{metric.label}{metric.unit ? ` (${metric.unit})` : ''}</th>
+              <React.Fragment key={metric.name}>
+                <th className="is-number">{metric.label}{metric.unit ? ` (${metric.unit})` : ''}</th>
+                {comparison && metric.compared_name && <th className="is-number">{comparison.label}</th>}
+                {comparison && metric.compared_name && <th className="is-number">Thay đổi</th>}
+              </React.Fragment>
             ))}
           </tr>
         </thead>
@@ -277,9 +292,19 @@ function ResultTable({ result }: { result: QueryResult }) {
           {result.rows.map(row => (
             <tr key={result.dimensions.map(dimension => String(row[dimension.name])).join('|') || 'total'}>
               {result.dimensions.map(dimension => <td key={dimension.name}>{shownCell(row[dimension.name])}</td>)}
-              {result.metrics.map(metric => (
-                <td key={metric.name} className="is-number">{shownCell(row[metric.name])}</td>
-              ))}
+              {result.metrics.map(metric => {
+                const previous = metric.compared_name ? row[metric.compared_name] ?? null : null;
+                const delta = change(row[metric.name], previous);
+                return (
+                  <React.Fragment key={metric.name}>
+                    <td className="is-number">{shownCell(row[metric.name])}</td>
+                    {comparison && metric.compared_name && <td className="is-number">{shownCell(previous)}</td>}
+                    {comparison && metric.compared_name && (
+                      <td className={`is-number is-change is-${delta?.direction ?? 'same'}`}>{delta?.text ?? '—'}</td>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -297,7 +322,8 @@ type ChartPlan =
  * eight groups), as ranked bars when the only dimension is a group; anything else stays a table.
  */
 function chartPlan(result: QueryResult): ChartPlan | null {
-  if (result.rows.length < 2) return null;
+  // Two periods side by side read best as numbers with their change, so a comparison stays a table.
+  if (result.rows.length < 2 || result.comparison) return null;
   const time = result.dimensions.find(dimension => dimension.temporal);
   const others = result.dimensions.filter(dimension => dimension !== time);
   const distinct = (name: string) => Array.from(new Set(result.rows.map(row => String(row[name]))));
@@ -317,7 +343,7 @@ function MetricChart({ plan, result, metric }: {
 }) {
   if (plan.kind === 'ranking') {
     const items = result.rows.map(row => ({ label: shownCell(row[plan.group]), value: numericCell(row[metric.name]) }));
-    return <RankedBars title={metric.label} unit={metric.unit} items={items} />;
+    return <RankedBars title={metric.label} unit={metric.unit} items={items} ranked={Boolean(result.order)} />;
   }
   const valueAt = new Map(result.rows.map(row => [
     `${plan.group ? String(row[plan.group]) : ''}|${String(row[plan.time])}`, numericCell(row[metric.name]),
@@ -335,6 +361,9 @@ export function QueryResultView({ result }: { result: QueryResult }) {
   const single = result.dimensions.length === 0 && result.rows.length <= 1;
   const plan = chartPlan(result);
   const showChart = plan !== null && view === 'chart';
+  const extreme = result.order?.direction === 'asc' ? 'thấp' : 'cao';
+  const ranking = result.order && result.limit
+    ? ` · ${result.limit} nhóm ${extreme} nhất theo ${result.order.label.toLocaleLowerCase('vi')}` : '';
 
   return (
     <section className="ai-result" aria-label="Số liệu truy vấn">
@@ -342,7 +371,11 @@ export function QueryResultView({ result }: { result: QueryResult }) {
         <div className="ai-result-heading">
           <strong>{result.scope || 'Số liệu'}</strong>
           <span>
-            {result.row_count === 0 ? 'Không có dòng nào thoả điều kiện' : `${result.row_count} dòng`}
+            {result.row_count === 0 && result.coverage?.status === 'none' ? 'Ngoài khoảng thời gian có dữ liệu' : null}
+            {result.row_count === 0 && result.coverage?.status !== 'none' ? 'Không có dòng nào thoả điều kiện' : null}
+            {result.row_count > 0 ? `${result.row_count} dòng` : null}
+            {ranking}
+            {result.comparison ? ` · so với ${result.comparison.label}` : ''}
             {result.truncated ? ' · đã rút gọn' : ''}
           </span>
         </div>
@@ -369,12 +402,22 @@ export function QueryResultView({ result }: { result: QueryResult }) {
       )}
       {single && result.rows.length === 1 && (
         <div className="ai-result-tiles">
-          {result.metrics.map(metric => (
-            <div key={metric.name} className="ai-result-tile">
-              <span>{metric.label}</span>
-              <strong>{shownCell(result.rows[0][metric.name])}{metric.unit && <small> {metric.unit}</small>}</strong>
-            </div>
-          ))}
+          {result.metrics.map(metric => {
+            const previous = metric.compared_name ? result.rows[0][metric.compared_name] ?? null : null;
+            const delta = change(result.rows[0][metric.name], previous);
+            return (
+              <div key={metric.name} className="ai-result-tile">
+                <span>{metric.label}</span>
+                <strong>{shownCell(result.rows[0][metric.name])}{metric.unit && <small> {metric.unit}</small>}</strong>
+                {result.comparison && metric.compared_name && (
+                  <span className="ai-result-tile-compared">
+                    {result.comparison.label}: {withUnit(previous, metric.unit)}
+                    {delta && <em className={`is-change is-${delta.direction}`}> {delta.text}</em>}
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       {showChart && result.metrics.map(metric => (

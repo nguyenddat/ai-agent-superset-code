@@ -172,7 +172,10 @@ def test_the_rule_filters_come_from_the_rule_and_the_rows_are_cleaned():
         {"ngay": "2026-10-20", "nhiet_do_cao_nhat": 37.5},
     ]
     assert outcome.result["metrics"] == [
-        {"name": "nhiet_do_cao_nhat", "label": "Nhiệt độ cao nhất", "unit": "°C", "format": None},
+        {
+            "name": "nhiet_do_cao_nhat", "label": "Nhiệt độ cao nhất", "unit": "°C", "format": None,
+            "compared_name": None,
+        },
     ]
     assert [item["source"] for item in outcome.result["filters"]] == ["expert_rule", "time", "time", "place"]
     final_prompt = model.prompts[-1][1][1][1]
@@ -363,6 +366,7 @@ def test_consumer_payloads_flatten_to_the_ids_the_agent_answers_with():
         "labelled_values": [
             {"column": "thanh_pho_key", "label": "Thành phố", "values": [{"value": 1, "label": "Ha Noi"}]},
         ],
+        "time_ranges": [],
     }]
     assert catalog.summary() == {
         "glossary_terms": ["Nắng nóng"], "metrics": ["Nhiệt độ cao nhất"], "expert_rules": ["Ngày nắng nóng gay gắt"],
@@ -377,3 +381,20 @@ def test_a_rule_condition_no_filter_can_express_has_no_filters():
 
     assert rule_filters(rule) is None
     assert rule_filters({"conditions": [{"field_ref": {"column_dictionary_id": 5}, "operator": "equals"}]}) is None
+
+
+def test_a_user_definition_with_stored_conditions_is_queried_with_them():
+    stored = {"dataset_id": 12, "filters": [{"column": "nhiet_do_cao_nhat_c", "operator": ">=", "value": 35}]}
+    user_definitions = [
+        {"id": 6, "kind": "expert_rule", "name": "Ngày nóng", "concept": "nóng", "definition": "Từ 35 °C.",
+         "conditions": stored},
+    ]
+    retyped = {"column": "nhiet_do_cao_nhat_c", "operator": ">=", "value": "30", "source": "user_definition"}
+    answers = _answers(rule_ids=(), user_rule_ids=(6,), filters=WEEK_FILTERS + [retyped])
+    semantic_layer = FakeSemanticLayer()
+    _, _, model = _run(answers, user_definitions=user_definitions, run_metric=semantic_layer)
+
+    sent = semantic_layer.calls[0][2]["filters"]
+    assert sent[0] == {"column": "nhiet_do_cao_nhat_c", "operator": ">=", "value": 35}
+    assert [item["value"] for item in sent if item["column"] == "nhiet_do_cao_nhat_c"] == [35]
+    assert '"conditions"' in model.prompts[0][1][1][1]

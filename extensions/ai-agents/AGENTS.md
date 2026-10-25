@@ -28,9 +28,14 @@ option is a measurable threshold on the found metric). The page shows them as a
 card, one question at a time: the user picks an option (keys 1–N, Enter) or
 writes their own under "Khác", then sends every answer at once, or skips. The
 answers are saved per user and dashboard (`text_to_bi_agent_user_definition`)
-and the question is answered again with them. Every later conversation of that
-user on that dashboard uses them; the "Cách hiểu của bạn" panel lists, edits
-and deletes them. An approved term or rule always takes precedence over a
+and the question is answered again with them. While saving, one model call per
+confirmed rule (`modules/definitions/conditions.py`, in parallel) turns its text
+into checked filters on one dataset (`conditions`: column, label, operator,
+value), so every later question uses that exact threshold, as with an approved
+rule; a definition no filter can express keeps `conditions` NULL and is followed
+from its text. Editing a definition's text structures it again. Every later
+conversation of that user on that dashboard uses them; the "Cách hiểu của bạn"
+panel lists, edits and deletes them. An approved term or rule always takes precedence over a
 user's definition of the same concept.
 
 Administrators never edit users' definitions. In the Semantic Layer's "Xử lý câu
@@ -67,9 +72,13 @@ numbers, and logs the question so administrators can fill the gaps:
    metric query. The plan names the dataset, metrics, dimensions and filters
    tagged by source: `time` (dates computed from today in Vietnam's time),
    `place` (key values found through the dataset's labelled values, so "Hà Nội"
-   becomes `thanh_pho_key = 1`), `user_definition` (the user's own definition
-   written as a condition) and `question` (a threshold the asker gave). The
-   model runs with `reasoning_effort="low"`.
+   becomes `thanh_pho_key = 1`), `user_definition` (only for a user's definition
+   without stored conditions) and `question` (a threshold the asker gave). It
+   may also rank (`order_by` a metric and `limit` 1–100 groups) and compare
+   (`comparison`: the same query over another period, such as last week). The
+   catalog's `time_ranges` (first and last date of each dataset date column, from
+   `dimension-members`) let it pick dates the data covers. The model runs with
+   `reasoning_effort="low"`.
 4. When something is missing, `propose_missing_items` drafts the questions back
    to the user for a missing term or rule (`clarifications`) and a metric
    proposal for administrators (`suggestions`), and no query runs. A failure here
@@ -78,7 +87,15 @@ numbers, and logs the question so administrators can fill the gaps:
    (`modules/chat/query.py`): only listed columns, filterable or groupable as
    used, and the supported operators. An approved expert rule's filters come
    from the rule's own conditions, never from the model's copy of them, and a
-   rule with a condition no filter can express stops the query. Each metric then
+   rule with a condition no filter can express stops the query. A user's
+   definition with stored `conditions` is applied the same way and replaces the
+   model's filters on its columns. Ranking, the row limit and the comparison run
+   on the agent side, because the execute endpoint takes only dimensions and
+   filters: a comparison needs time filters and no date dimension, and runs every
+   metric again over the other period, adding `<metric>__compare` columns. The
+   requested dates are checked against `time_ranges` (`coverage`: `full`,
+   `partial` or `none`), so a period outside the data is told apart from one
+   where nothing matched. Each metric then
    runs through the Semantic Layer's governed
    `.../metrics/<id>/semantic-query/execute` endpoint as the user (cookie and
    CSRF token forwarded), in parallel, and the answers merge into one table: a
@@ -106,10 +123,14 @@ because metrics are created in the Superset dataset editor.
 
 The page shows a result as one number per metric, a line or columns over time
 (a line per group, with a legend, for up to eight groups), ranked horizontal
-bars across groups, or a table; the chart and table views switch in place. The
-conditions used appear as chips naming their source, and "Xem truy vấn" opens
-the request sent for each metric with the SQL the Semantic Layer ran, which it
-returns to administrators only.
+bars across groups (in the asked order when ranked), or a table; the chart and
+table views switch in place. A comparison shows each number with the other
+period's value and the change, and the table gains "kỳ so sánh" and "Thay đổi"
+columns. The heading names the ranking, the comparison and any gap in the data's
+date range. The conditions used appear as chips naming their source, and "Xem
+truy vấn" opens the request sent for each metric and period with the SQL the
+Semantic Layer ran, which it returns to administrators only. The "Cách hiểu của
+bạn" panel shows a definition's stored conditions as chips.
 
 ## Extension structure
 
@@ -155,7 +176,8 @@ extensions/ai-agents/
   `{state: "dismissed"}` (CSRF); confirming a concept again replaces the user's
   earlier definition of it on that dashboard.
 - `GET .../definitions/?dashboard_id=` lists the user's definitions;
-  `PUT .../definitions/<id>` takes `{name, definition}`; `DELETE
+  `PUT .../definitions/<id>` takes `{name, definition}` and structures the
+  conditions again when the text changed; `DELETE
   .../definitions/<id>` forgets one (CSRF, own definitions only).
 - `GET .../definitions/review` lists every user's definitions; `PUT
   .../definitions/review` takes `{ids, status}` with `pending`, `promoted` or

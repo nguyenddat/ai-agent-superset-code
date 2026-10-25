@@ -26,9 +26,14 @@ export type DefinitionDraft = {
 /** What the user answered to one question: the option they chose or their own words. */
 export type ConfirmedDefinition = { kind: DefinitionKind; concept: string | null; name: string; definition: string };
 
+/** A condition stored with a definition: the column, its business name, the comparison and the threshold. */
+export type DefinitionCondition = { column: string; label: string; operator: string; value: ResultCell | ResultCell[] };
+
 /** A definition the user confirmed; the agent uses it in all their conversations about the dashboard. */
 export type UserDefinition = ConfirmedDefinition & {
   id: number;
+  /** For a qualitative concept, the conditions every later question applies; null when none could be stored. */
+  conditions: { dataset_id: number; filters: DefinitionCondition[] } | null;
   dashboard_id: number;
   source_question_id: number | null;
   /** `promoted` once administrators cover the concept with a shared term or rule. */
@@ -52,19 +57,32 @@ export type ResultFilter = {
 };
 
 /** What the approved metrics answered: a row per dimension value, a column per metric. */
+export type Coverage = { column: string; min: string; max: string; start: string; end: string;
+  status: 'full' | 'partial' | 'none' };
+
 export type QueryResult = {
   scope: string;
   presentation: 'number' | 'table' | 'bar' | 'line';
   dimensions: Array<{ name: string; label: string; temporal: boolean }>;
-  metrics: Array<{ name: string; label: string; unit: string | null; format: string | null }>;
+  /** `compared_name` is the row key of the metric's value in the compared period, when there is one. */
+  metrics: Array<{
+    name: string; label: string; unit: string | null; format: string | null; compared_name?: string | null;
+  }>;
   filters: ResultFilter[];
   rows: Array<Record<string, ResultCell>>;
   row_count: number;
+  total_rows?: number;
   truncated: boolean;
+  order?: { metric_name: string; label: string; direction: 'asc' | 'desc' } | null;
+  limit?: number | null;
+  comparison?: { label: string; start: string; end: string; coverage: Coverage | null } | null;
+  coverage?: Coverage | null;
   notes: string[];
   /** What the agent asked the Semantic Layer for each metric; `sql` only when it shows it (to administrators). */
   queries?: Array<{
     metric: string;
+    /** The compared period's label, or null for the period asked about. */
+    period?: string | null;
     dataset_id: number;
     metric_id: number;
     request: { dimensions: string[]; filters: Array<{ column: string; operator: string; value: unknown }> };

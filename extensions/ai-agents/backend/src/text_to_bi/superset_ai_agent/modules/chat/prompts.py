@@ -43,10 +43,17 @@ tính phải có rule hoặc cách hiểu của người dùng); ngược lại 
     2026-09-30). Dùng hai bộ lọc >= và <=.
   - `place`: địa điểm, lọc trên cột khoá bằng `value` trong `labelled_values` (nhãn có thể không dấu, ví dụ "Ha Noi"
     là Hà Nội). Một vùng gồm nhiều giá trị thì dùng IN.
-  - `user_definition`: chuyển cách hiểu của người dùng thành điều kiện trên cột dữ liệu, ví dụ "tốc độ gió tối đa trong
-    ngày từ 45 km/h" thành cột tốc độ gió tối đa >= 45.
+  - `user_definition`: chỉ cho cách hiểu của người dùng chưa có `conditions`: chuyển nó thành điều kiện trên cột dữ
+    liệu, ví dụ "tốc độ gió tối đa trong ngày từ 45 km/h" thành cột tốc độ gió tối đa >= 45.
   - `question`: ngưỡng người hỏi tự nêu bằng số.
-  Không viết bộ lọc cho expert rule đã duyệt: hệ thống tự thêm điều kiện của rule.
+  Không viết bộ lọc cho expert rule đã duyệt hay cách hiểu đã có `conditions`: hệ thống tự thêm đúng điều kiện đã lưu.
+  Dữ liệu chỉ có trong `time_ranges` của dataset; vẫn lọc đúng khoảng người hỏi nói, hệ thống sẽ báo phần thiếu.
+- `order_by` và `limit`: hỏi "cao nhất", "thấp nhất", "top 3", "xếp hạng" giữa các nhóm thì `order_by` là
+  `metric_id` cần xếp và `direction` (`desc` cho cao nhất, `asc` cho thấp nhất), `limit` là số nhóm muốn xem
+  ("thành phố nào nóng nhất" là 1). Không xếp hạng thì để null.
+- `comparison`: hỏi so với một kỳ khác ("so với tuần trước", "tăng hay giảm so với tháng trước") thì `filters` giữ
+  kỳ đang hỏi, còn `comparison` là kỳ đem so: `start`, `end` dạng "YYYY-MM-DD" và `label` ngắn như "tuần trước".
+  Khi so sánh, không nhóm theo cột ngày. Không so sánh thì để null.
 - `presentation`: `number` cho một con số, `table` cho danh sách, `line` cho diễn biến theo thời gian, `bar` để so sánh
   giữa các nhóm.
 - `scope`: phạm vi bằng lời, ví dụ "Hà Nội, 19/10–25/10/2026".
@@ -89,6 +96,11 @@ Khi có `result`:
 - Ngày sau `today` là số liệu dự báo; nói "theo dự báo" khi nhắc tới chúng.
 - Nhiều dòng thì chỉ nêu điểm đáng chú ý (cao nhất, thấp nhất, xu hướng); bảng và biểu đồ đã hiện bên dưới, không
   chép lại toàn bộ. Ghi số kèm đơn vị, định dạng ngày dd/mm.
+- Có `comparison`: mỗi chỉ số có giá trị kỳ đang hỏi (cột `name`) và kỳ đem so (cột `compared_name`); nêu cả hai,
+  mức tăng giảm và phần trăm thay đổi.
+- Có `order` và `limit`: kết quả đã được xếp hạng; trả lời theo thứ hạng.
+- `coverage.status` là `none`: khoảng thời gian hỏi nằm ngoài dữ liệu hiện có; nói rõ dữ liệu có từ `coverage.min` đến
+  `coverage.max`, không nói là "không có trường hợp nào". `partial`: nói kết quả chỉ tính phần có dữ liệu.
 - Nếu `rows_omitted` > 0 hoặc `truncated`, nói kết quả đã được rút gọn.
 Khi có `query_error`: nói ngắn rằng chưa lấy được số liệu và lý do, rồi nêu cách hiểu câu hỏi.
 Khi không có `result`:
@@ -99,4 +111,15 @@ Khi không có `result`:
   `suggestions` nếu có.
 Viết một đến hai đoạn ngắn. Không liệt kê các bước xử lý, không dùng nhãn kỹ thuật như "expert rule", "glossary",
 "metric", "định tính", "định lượng", không nêu tên cột kỹ thuật. Không bịa số liệu ngoài `result`.
+{DATA_NOTICE}"""
+
+STRUCTURE_DEFINITION = f"""Người dùng vừa xác nhận cách hiểu của họ về một khái niệm định tính (ví dụ "ngày gió mạnh").
+Chuyển cách hiểu đó thành điều kiện lọc trên đúng một dataset để mọi câu hỏi sau dùng cùng một ngưỡng.
+
+`dataset_id`: dataset có cột để biểu diễn điều kiện. `filters`: mỗi điều kiện có `column` (đúng tên cột có
+`filterable`), `operator` (==, !=, <, <=, >, >=, IN, NOT IN) và `value` (số cho cột số, nhãn đổi thành giá trị khoá
+theo `labelled_values`). Chỉ dùng ngưỡng có trong cách hiểu, không tự thêm mốc thời gian hay địa điểm. "Từ 45 km/h"
+là >= 45; "trên 45" là > 45; "từ 50 đến dưới 100 mm" là >= 50 và < 100.
+Nếu cách hiểu không thể viết thành điều kiện trên các cột này (cần phép tính, tỷ lệ, hay so với ngày khác) thì
+`dataset_id` là null và `filters` rỗng. `reason`: một câu tiếng Việt.
 {DATA_NOTICE}"""

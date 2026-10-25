@@ -1,9 +1,13 @@
 """Turns the model's query plan into governed metric queries, and their answers into one result table.
 
-The model proposes the dataset, metrics, dimensions and filters; nothing it proposes is trusted as is. Columns and
-operators are checked against the catalog, and an approved expert rule is never re-typed by the model: its filters
-come from the rule's own conditions. A user's own definition has no structured conditions, so the model writes them
-as filters, and they are checked like any other.
+The model proposes the dataset, metrics, dimensions, filters, an order, a row limit and a period to compare with;
+nothing it proposes is trusted as is. Columns and operators are checked against the catalog. A threshold that is
+already structured is never re-typed by the model: an approved expert rule's filters come from the rule's own
+conditions, and a user's own definition from the conditions stored when they confirmed it. Only a definition without
+stored conditions is written as filters by the model, and checked like any other.
+
+The Semantic Layer runs each metric with dimensions and filters only, so ordering, the row limit and the comparison
+with another period are applied here, on the rows it returned.
 """
 
 from dataclasses import dataclass, field
@@ -15,9 +19,11 @@ OPERATORS = ("==", "!=", "<", "<=", ">", ">=", "IN", "NOT IN")
 MAX_METRICS = 3
 MAX_DIMENSIONS = 2
 MAX_FILTERS = 12
+MAX_LIMIT = 100
 # Rows the final answer reads; the browser receives every row the Semantic Layer returned.
 ROWS_FOR_ANSWER = 60
 NUMERIC_TYPES = ("INT", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "BIGINT", "SMALLINT")
+COMPARED_SUFFIX = "__compare"
 
 
 class QueryPlanError(ValueError):
@@ -33,14 +39,21 @@ class PlannedQuery:
     presentation: str
     scope: str
     notes: list[str] = field(default_factory=list)
+    # {metric_name, label, direction}: rows sorted by a metric, then cut to `limit`.
+    order: dict[str, Any] | None = None
+    limit: int | None = None
+    # {label, start, end, filters}: the same query over another period, its time filters replaced.
+    comparison: dict[str, Any] | None = None
+    # {column, min, max, start, end, status}: which part of the asked period the data covers.
+    coverage: dict[str, Any] | None = None
 
-    def request_body(self) -> dict[str, Any]:
+    def request_body(self, compared: bool = False) -> dict[str, Any]:
         """What the Semantic Layer's execution endpoint accepts: column names and filters, nothing else."""
+        filters = self.comparison["filters"] if compared and self.comparison else self.filters
         return {
             "dimensions": [dimension["name"] for dimension in self.dimensions],
             "filters": [
-                {"column": item["column"], "operator": item["operator"], "value": item["value"]}
-                for item in self.filters
+                {"column": item["column"], "operator": item["operator"], "value": item["value"]} for item in filters
             ],
         }
 
@@ -63,6 +76,11 @@ def _coerced(value: Any, column: dict[str, Any]) -> Any:
     return int(value) if isinstance(value, float) and value.is_integer() else value
 
 
+def _key(value: Any) -> str:
+    """A key as text, so 1, 1.0 and "1" find the same label."""
+    return str(int(value)) if isinstance(value, float) and value.is_integer() else str(value)
+
+
 def _value_labels(dataset: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """For each key column with labelled values, the label of each key, so a result says "Ha Noi" rather than 1.
 
@@ -78,11 +96,6 @@ def _value_labels(dataset: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return labels
 
 
-def _key(value: Any) -> str:
-    """A key as text, so 1, 1.0 and "1" find the same label."""
-    return str(int(value)) if isinstance(value, float) and value.is_integer() else str(value)
-
-
 def _shown_value(value: Any, labels: dict[str, str]) -> Any:
     if isinstance(value, list):
         return [labels.get(_key(item), item) for item in value]
@@ -90,7 +103,7 @@ def _shown_value(value: Any, labels: dict[str, str]) -> Any:
 
 
 def _checked_filter(
-    item: dict[str, Any], columns: dict[str, dict[str, Any]], source: str, value_labels: dict[str, dict[str, str]],
+    item: dict[str, Any], columns: dict[str, dict[str, Any]], source: str, value_labels: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     column = columns.get(item.get("column"))
     if column is None or not column.get("filterable"):
@@ -118,13 +131,110 @@ def _checked_filter(
     }
 
 
+def checked_conditions(dataset: dict[str, Any], filters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A definition's conditions checked against its dataset, kept as `{column, label, operator, value}`."""
+    columns = {column["name"]: column for column in dataset["columns"]}
+    value_labels = _value_labels(dataset)
+    checked = [_checked_filter(item, columns, "user_definition", value_labels) for item in filters]
+    return [{key: item[key] for key in ("column", "label", "operator", "value")} for item in checked]
+
+
+def _iso_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _shown_date(value: date | str) -> str:
+    moment = value if isinstance(value, date) else date.fromisoformat(value)
+    return moment.strftime("%d/%m/%Y")
+
+
+def _period(filters: list[dict[str, Any]], column: str) -> tuple[date | None, date | None]:
+    """The first and last day the time filters on `column` allow."""
+    start = end = None
+    for item in filters:
+        if item["column"] != column or item["operator"] not in ("==", ">=", ">", "<=", "<"):
+            continue
+        moment = _iso_date(item["value"])
+        if moment is None:
+            continue
+        if item["operator"] in ("==", ">=", ">"):
+            start = moment if start is None else max(start, moment)
+        if item["operator"] in ("==", "<=", "<"):
+            end = moment if end is None else min(end, moment)
+    return start, end
+
+
+def _coverage(dataset: dict[str, Any], column: str, start: date | None, end: date | None) -> dict[str, Any] | None:
+    """How much of the asked period the data covers: all of it, part of it, or none of it."""
+    known = next((item for item in dataset.get("time_ranges", []) if item["column"] == column), None)
+    first, last = (_iso_date(known["min"]), _iso_date(known["max"])) if known else (None, None)
+    if first is None or last is None:
+        return None
+    asked_start, asked_end = start or first, end or last
+    if asked_end < first or asked_start > last:
+        status = "none"
+    elif asked_start < first or asked_end > last:
+        status = "partial"
+    else:
+        status = "full"
+    return {
+        "column": column, "min": first.isoformat(), "max": last.isoformat(),
+        "start": asked_start.isoformat(), "end": asked_end.isoformat(), "status": status,
+    }
+
+
+def _coverage_note(coverage: dict[str, Any] | None, label: str = "") -> str | None:
+    if coverage is None or coverage["status"] == "full":
+        return None
+    span = f"từ {_shown_date(coverage['min'])} đến {_shown_date(coverage['max'])}"
+    period = f"{label} " if label else ""
+    if coverage["status"] == "none":
+        return f"Khoảng thời gian {period}nằm ngoài dữ liệu hiện có ({span})."
+    return f"Dữ liệu chỉ có {span}, nên khoảng thời gian {period}chỉ được tính phần nằm trong đó."
+
+
+def _comparison(
+    plan: dict[str, Any], filters: list[dict[str, Any]], dimensions: list[dict[str, Any]],
+    columns: dict[str, dict[str, Any]], value_labels: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """The same filters with the asked period swapped for the compared one."""
+    asked = plan.get("comparison")
+    if not asked:
+        return None
+    start, end = _iso_date(asked.get("start")), _iso_date(asked.get("end"))
+    if start is None or end is None or start > end:
+        raise QueryPlanError("Kỳ so sánh cần ngày bắt đầu và ngày kết thúc hợp lệ.")
+    time_filters = [item for item in filters if item["source"] == "time"]
+    if not time_filters:
+        raise QueryPlanError("Muốn so sánh hai kỳ thì câu hỏi cần có khoảng thời gian của kỳ hiện tại.")
+    column = time_filters[0]["column"]
+    if any(dimension["name"] == column for dimension in dimensions):
+        raise QueryPlanError("Không so sánh hai kỳ khi kết quả đã chia theo từng ngày; hãy hỏi tổng của mỗi kỳ.")
+    kept = [item for item in filters if not (item["source"] == "time" and item["column"] == column)]
+    bounds = [
+        _checked_filter({"column": column, "operator": operator, "value": moment.isoformat()}, columns, "time", {})
+        for operator, moment in ((">=", start), ("<=", end))
+    ]
+    label = str(asked.get("label") or "").strip() or f"{_shown_date(start)}–{_shown_date(end)}"
+    return {
+        "label": label, "start": start.isoformat(), "end": end.isoformat(), "column": column, "filters": kept + bounds,
+    }
+
+
 def plan_query(
     plan: dict[str, Any] | None,
     catalog_datasets: list[dict[str, Any]],
     catalog_metrics: list[dict[str, Any]],
     rules: list[dict[str, Any]],
 ) -> PlannedQuery:
-    """Check the model's plan and add the filters of the approved rules the question uses."""
+    """Check the model's plan and add the stored conditions of the rules and user definitions the question uses.
+
+    Each of `rules` is `{name, dataset_id, filters, source}`, with source `expert_rule` (the default) or
+    `user_definition`.
+    """
     if not plan:
         raise QueryPlanError("Chưa lập được truy vấn cho câu hỏi.")
     dataset = next((item for item in catalog_datasets if item["id"] == plan.get("dataset_id")), None)
@@ -142,8 +252,7 @@ def plan_query(
         column = columns.get(name)
         if column is None or not column.get("groupby"):
             raise QueryPlanError(f"Không nhóm được theo cột “{name}”.")
-        temporal = bool(column.get("temporal"))
-        dimension = {"name": name, "label": column.get("label") or name, "temporal": temporal}
+        dimension = {"name": name, "label": column.get("label") or name, "temporal": bool(column.get("temporal"))}
         if name in value_labels:
             # A key is shown by its labels, so it is named like them: "Thành phố" rather than "Khóa thành phố".
             dimension["label"] = value_labels[name]["label"] or dimension["label"]
@@ -151,20 +260,52 @@ def plan_query(
         dimensions.append(dimension)
     notes = []
     filters = []
+    stored_columns = set()
     for rule in rules:
+        source = rule.get("source") or "expert_rule"
         if rule.get("dataset_id") != dataset["id"]:
-            notes.append(f"Rule “{rule['name']}” thuộc dataset khác nên không áp dụng được vào truy vấn này.")
+            notes.append(f"Điều kiện “{rule['name']}” thuộc dataset khác nên không áp dụng được vào truy vấn này.")
             continue
         if rule.get("filters") is None:
-            raise QueryPlanError(f"Điều kiện của rule “{rule['name']}” chưa chuyển được thành bộ lọc.")
-        filters += [_checked_filter(item, columns, "expert_rule", value_labels) for item in rule["filters"]]
-    # An approved rule's thresholds come from the rule itself, never from the model's copy of them.
+            raise QueryPlanError(f"Điều kiện của “{rule['name']}” chưa chuyển được thành bộ lọc.")
+        filters += [_checked_filter(item, columns, source, value_labels) for item in rule["filters"]]
+        if source == "user_definition":
+            stored_columns.update(item["column"] for item in rule["filters"])
+    # A stored threshold comes from where it was stored, never from the model's copy of it.
     for item in plan.get("filters") or []:
         source = item.get("source") or "question"
-        if source != "expert_rule":
+        retyped = source == "expert_rule" or (source == "user_definition" and item.get("column") in stored_columns)
+        if not retyped:
             filters.append(_checked_filter(item, columns, source, value_labels))
     if len(metrics) > MAX_METRICS or len(dimensions) > MAX_DIMENSIONS or len(filters) > MAX_FILTERS:
         raise QueryPlanError("Truy vấn quá rộng; hãy hỏi cụ thể hơn.")
+
+    order = None
+    asked_order = plan.get("order_by") or {}
+    if asked_order.get("metric_id") is not None:
+        ordered_metric = next((metric for metric in metrics if metric["metric_id"] == asked_order["metric_id"]), None)
+        if ordered_metric is None:
+            raise QueryPlanError("Chỉ sắp xếp được theo một metric có trong truy vấn.")
+        direction = "asc" if asked_order.get("direction") == "asc" else "desc"
+        order = {"metric_name": ordered_metric["metric_name"], "label": ordered_metric["name"], "direction": direction}
+    limit = plan.get("limit")
+    if limit is not None:
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_LIMIT:
+            raise QueryPlanError(f"Số dòng giới hạn phải từ 1 đến {MAX_LIMIT}.")
+        if not dimensions:
+            limit = None
+
+    comparison = _comparison(plan, filters, dimensions, columns, value_labels)
+    time_column = next((item["column"] for item in filters if item["source"] == "time"), None)
+    time_column = time_column or next((dimension["name"] for dimension in dimensions if dimension["temporal"]), None)
+    coverage = _coverage(dataset, time_column, *_period(filters, time_column)) if time_column else None
+    notes += [note for note in (_coverage_note(coverage),) if note]
+    if comparison:
+        compared_period = (_iso_date(comparison["start"]), _iso_date(comparison["end"]))
+        compared_coverage = _coverage(dataset, comparison["column"], *compared_period)
+        notes += [note for note in (_coverage_note(compared_coverage, comparison["label"]),) if note]
+        comparison["coverage"] = compared_coverage
+
     presentation = plan.get("presentation") if plan.get("presentation") in ("number", "table", "bar", "line") else None
     return PlannedQuery(
         dataset_id=dataset["id"],
@@ -174,6 +315,10 @@ def plan_query(
         presentation=presentation or ("table" if dimensions else "number"),
         scope=str(plan.get("scope") or "").strip(),
         notes=notes,
+        order=order,
+        limit=limit,
+        comparison=comparison,
+        coverage=coverage,
     )
 
 
@@ -203,25 +348,59 @@ def _number(value: Any) -> Any:
     return value
 
 
-def combined_result(planned: PlannedQuery, answers: list[dict[str, Any]]) -> dict[str, Any]:
-    """One table: a row per dimension value, a column per metric, as each metric query answered."""
-    rows: dict[tuple, dict[str, Any]] = {}
+def _merge(
+    rows: dict[tuple, dict[str, Any]], planned: PlannedQuery, answers: list[dict[str, Any]], suffix: str = "",
+) -> bool:
+    """Fold each metric's rows into one row per dimension value; True when the Semantic Layer cut any of them."""
     truncated = False
     for metric, answer in zip(planned.metrics, answers):
         truncated = truncated or bool(answer.get("truncated"))
         for raw in answer.get("rows", []):
             cells = {
-                dimension["name"]: _cell(raw.get(dimension["name"]), dimension)
-                for dimension in planned.dimensions
+                dimension["name"]: _cell(raw.get(dimension["name"]), dimension) for dimension in planned.dimensions
             }
             key = tuple(cells[dimension["name"]] for dimension in planned.dimensions)
             row = rows.setdefault(key, cells)
-            row[metric["metric_name"]] = _number(raw.get(metric["metric_name"]))
+            row[metric["metric_name"] + suffix] = _number(raw.get(metric["metric_name"]))
+    return truncated
+
+
+def _ordered(rows: list[dict[str, Any]], planned: PlannedQuery) -> list[dict[str, Any]]:
     names = [dimension["name"] for dimension in planned.dimensions]
+    ordered = sorted(rows, key=lambda row: tuple(str(row[name]) for name in names))
+    if planned.order:
+        metric_name, descending = planned.order["metric_name"], planned.order["direction"] == "desc"
+        valued = [row for row in ordered if isinstance(row.get(metric_name), (int, float))]
+        empty = [row for row in ordered if not isinstance(row.get(metric_name), (int, float))]
+        ordered = sorted(valued, key=lambda row: row[metric_name], reverse=descending) + empty
+    return ordered[:planned.limit] if planned.limit else ordered
+
+
+def combined_result(
+    planned: PlannedQuery, answers: list[dict[str, Any]], compared_answers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """One table: a row per dimension value, a column per metric, and per metric its value in the compared period."""
+    rows: dict[tuple, dict[str, Any]] = {}
+    truncated = _merge(rows, planned, answers)
+    if planned.comparison and compared_answers is not None:
+        truncated = _merge(rows, planned, compared_answers, COMPARED_SUFFIX) or truncated
     # An aggregate over no rows comes back as one row of empty values; that is no data, not a value.
-    metric_names = [metric["metric_name"] for metric in planned.metrics]
-    found = [row for row in rows.values() if any(row.get(name) is not None for name in metric_names)]
-    ordered = sorted(found, key=lambda row: tuple(str(row[name]) for name in names))
+    value_names = [metric["metric_name"] + suffix for metric in planned.metrics for suffix in ("", COMPARED_SUFFIX)]
+    found = [row for row in rows.values() if any(row.get(name) is not None for name in value_names)]
+    shown = _ordered(found, planned)
+    notes = list(planned.notes)
+    if truncated and planned.order:
+        notes.append("Semantic Layer đã giới hạn số dòng trả về, nên thứ hạng chỉ tính trên phần dữ liệu đã nhận.")
+    compared = planned.comparison is not None and compared_answers is not None
+    queries = [
+        {
+            "metric": metric["name"], "dataset_id": planned.dataset_id, "metric_id": metric["metric_id"],
+            "period": period, "request": planned.request_body(compared=period is not None), "sql": answer.get("sql"),
+        }
+        for period, period_answers in ((None, answers), ((planned.comparison or {}).get("label"), compared_answers))
+        if period_answers is not None and (period is None or compared)
+        for metric, answer in zip(planned.metrics, period_answers)
+    ]
     return {
         "scope": planned.scope,
         "presentation": planned.presentation,
@@ -231,22 +410,26 @@ def combined_result(planned: PlannedQuery, answers: list[dict[str, Any]]) -> dic
         ],
         "metrics": [
             {
-                "name": metric["metric_name"], "label": metric["name"],
-                "unit": metric.get("unit"), "format": metric.get("d3format"),
+                "name": metric["metric_name"], "label": metric["name"], "unit": metric.get("unit"),
+                "format": metric.get("d3format"),
+                "compared_name": metric["metric_name"] + COMPARED_SUFFIX if compared else None,
             }
             for metric in planned.metrics
         ],
         "filters": planned.filters,
-        "rows": ordered,
-        "row_count": len(ordered),
+        "order": planned.order,
+        "limit": planned.limit,
+        "comparison": (
+            {key: planned.comparison[key] for key in ("label", "start", "end", "coverage")} if compared else None
+        ),
+        "coverage": planned.coverage,
+        "rows": shown,
+        "row_count": len(shown),
+        "total_rows": len(found),
         "truncated": truncated,
-        "notes": planned.notes,
+        "notes": notes,
         # What was asked of the Semantic Layer for each metric, and the SQL it ran when it shows it (to administrators).
-        "queries": [
-            {"metric": metric["name"], "dataset_id": planned.dataset_id, "metric_id": metric["metric_id"],
-             "request": planned.request_body(), "sql": answer.get("sql")}
-            for metric, answer in zip(planned.metrics, answers)
-        ],
+        "queries": queries,
     }
 
 

@@ -10,6 +10,7 @@ from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
 from ...models.question_log import AgentQuestion, AgentUserDefinition, ensure_question_tables
+from .conditions import conditions_for
 from .parsing import DefinitionError, parse_definition
 
 # How administrators settled a user's own definition: a shared business term or rule now covers the concept
@@ -58,6 +59,7 @@ def serialize_definition(definition: AgentUserDefinition) -> dict:
         "name": definition.name,
         "concept": definition.concept,
         "definition": definition.definition,
+        "conditions": definition.conditions,
         "dashboard_id": definition.dashboard_id,
         "source_question_id": definition.source_question_id,
         "review_status": definition.review_status,
@@ -129,6 +131,10 @@ class AgentUserDefinitionAPI(RestApi):
             item = parse_definition({**(request.get_json(silent=True) or {}), "kind": definition.kind})
         except DefinitionError as ex:
             return self.response_400(message=str(ex))
+        if item["definition"] != definition.definition or definition.conditions is None:
+            # New words may mean a new threshold, so the conditions are worked out again from them.
+            asked = {**item, "concept": item["concept"] or definition.concept}
+            definition.conditions = conditions_for([asked], int(current_user.id), request.headers.get("Cookie", ""))[0]
         definition.name = item["name"]
         definition.concept = item["concept"] or definition.concept
         definition.definition = item["definition"]

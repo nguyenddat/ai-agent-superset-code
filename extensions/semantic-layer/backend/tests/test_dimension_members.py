@@ -1,16 +1,21 @@
+from datetime import date
 from types import SimpleNamespace
 
 from text_to_bi.superset_semantic_layer.modules.semantic_query.members import (
     MAX_MEMBERS,
     build_members_payload,
+    build_time_range_payload,
     labelled_key_columns,
     members_from_rows,
+    temporal_columns,
+    time_ranges_from_rows,
 )
 
 
-def _column(name, expression=None, groupby=True, filterable=True, is_active=True):
+def _column(name, expression=None, groupby=True, filterable=True, is_active=True, is_dttm=False):
     return SimpleNamespace(
         column_name=name, expression=expression, groupby=groupby, filterable=filterable, is_active=is_active,
+        is_dttm=is_dttm,
     )
 
 
@@ -52,4 +57,27 @@ def test_members_are_unique_labelled_pairs_sorted_by_label():
     assert members_from_rows(rows, "city_key", "city_name") == [
         {"value": 1, "label": "Ha Noi"},
         {"value": 2, "label": "Hue"},
+    ]
+
+
+def test_the_date_range_is_read_for_physical_date_columns_only():
+    dataset = _dataset([
+        _column("day_key", is_dttm=True),
+        _column("city_key"),
+        _column("month", "date_trunc('month', fact_weather.day_key)", is_dttm=True),
+        _column("odd name", is_dttm=True),
+    ])
+
+    columns = temporal_columns(dataset)
+    metrics = build_time_range_payload(dataset, columns)["queries"][0]["metrics"]
+
+    assert columns == ["day_key"]
+    assert [metric["sqlExpression"] for metric in metrics] == ["MIN(day_key)", "MAX(day_key)"]
+
+
+def test_a_date_range_reads_dates_timestamps_and_epoch_milliseconds():
+    rows = [{"min__day_key": date(2026, 10, 12), "max__day_key": 1793491200000, "min__other": None}]
+
+    assert time_ranges_from_rows(rows, ["day_key", "other"]) == [
+        {"column": "day_key", "min": "2026-10-12", "max": "2026-11-01"},
     ]

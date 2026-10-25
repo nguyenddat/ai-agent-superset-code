@@ -60,7 +60,10 @@ def _session_history(session_id: int, excluded_question_id: int | None) -> list[
 def _user_definitions(user_id: int, dashboard_id: int) -> list[dict]:
     """What the user confirmed concepts mean on this dashboard, in the shape the agent reads."""
     return [
-        {"id": item.id, "kind": item.kind, "name": item.name, "concept": item.concept, "definition": item.definition}
+        {
+            "id": item.id, "kind": item.kind, "name": item.name, "concept": item.concept,
+            "definition": item.definition, "conditions": item.conditions,
+        }
         for item in user_definitions(user_id, dashboard_id)
     ]
 

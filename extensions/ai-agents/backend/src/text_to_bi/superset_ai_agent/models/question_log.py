@@ -101,6 +101,10 @@ class AgentUserDefinition(Model):
     name = Column(String(200), nullable=False)
     concept = Column(String(200), nullable=True)
     definition = Column(Text, nullable=False)
+    # For a qualitative concept, the definition as conditions on one dataset, `{dataset_id, filters: [{column, label,
+    # operator, value}]}`, worked out when the user confirmed or edited it, so every later question uses the same
+    # threshold. NULL when it could not be expressed as conditions; the agent then reads the definition's words.
+    conditions = Column(JSON, nullable=True)
     # The question that asked the user, and its conversation.
     source_question_id = Column(Integer, nullable=True)
     source_session_id = Column(Integer, nullable=True)
@@ -122,6 +126,7 @@ ADDED_COLUMNS_DDL = (
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS clarification_state VARCHAR(20)",
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS retry_of INTEGER",
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS query_result JSON",
+    "ALTER TABLE text_to_bi_agent_user_definition ADD COLUMN IF NOT EXISTS conditions JSON",
 )
 
 _tables_lock = threading.Lock()

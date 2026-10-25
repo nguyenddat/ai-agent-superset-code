@@ -118,6 +118,8 @@ def _dataset_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str
             }
             for item in members.get("dimensions", [])
         ],
+        # The first and last date of each date column, so a question outside them is known to have no data.
+        "time_ranges": members.get("time_ranges", []),
     }
 
 
