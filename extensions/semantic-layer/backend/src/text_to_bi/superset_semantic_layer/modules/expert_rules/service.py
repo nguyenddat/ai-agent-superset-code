@@ -285,6 +285,8 @@ def normalize_rule_payload(payload: Any, column_resolver: Callable[[Any], Any] |
 def validate_semantic_links(payload: dict[str, Any], dataset_resolver: Callable[[int], Any], glossary_resolver: Callable[[int], Any], metric_resolver: Callable[[int], Any]) -> None:
     if dataset_resolver(payload["dataset_id"]) is None:
         raise ExpertRuleValidationError("Unknown dataset.")
+    if not payload["glossary_term_ids"]:
+        raise ExpertRuleValidationError("An expert rule needs at least one approved glossary term.")
     for term_id in payload["glossary_term_ids"]:
         resolved = glossary_resolver(term_id)
         terms = resolved if isinstance(resolved, list) else [resolved]

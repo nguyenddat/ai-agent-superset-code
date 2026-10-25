@@ -53,7 +53,7 @@ function buildCondition(draft: ConditionDraft, column: ExpertRuleColumnOption): 
   return { field_ref: fieldRef, operator: draft.operator, value_type: kind, value };
 }
 
-function OptionSelect({ label, items, value, placeholder, className = 'w-full min-w-0', onChange }: {
+export function OptionSelect({ label, items, value, placeholder, className = 'w-full min-w-0', onChange }: {
   label: string;
   items: OptionItem[];
   value: string | null;
@@ -198,25 +198,25 @@ export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRu
   const [glossaryTermIds, setGlossaryTermIds] = useState<number[]>(() => (
     (rule?.glossary_terms ?? []).map(term => term.id).filter(id => dataset?.glossary_terms.some(term => term.id === id))
   ));
-  const [metricIds, setMetricIds] = useState<number[]>(() => (
-    (rule?.metrics ?? []).map(metric => metric.id).filter(id => dataset?.metrics.some(metric => metric.id === id))
-  ));
-  const droppedLinks = [...(rule?.glossary_terms ?? []), ...(rule?.metrics ?? [])].length
-    - glossaryTermIds.length - metricIds.length;
+  const droppedTerms = (rule?.glossary_terms ?? []).length - glossaryTermIds.length;
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  // A rule builds on its terms: it inherits their approved metrics, and the columns they name are offered first.
+  const selectedTerms = (dataset?.glossary_terms ?? []).filter(term => glossaryTermIds.includes(term.id));
+  const inheritedMetricIds = [...new Set(selectedTerms.flatMap(term => term.metric_ids))]
+    .filter(id => dataset?.metrics.some(metric => metric.id === id));
+  const termColumns = new Set(selectedTerms.flatMap(term => term.column_names));
   const columns = dataset?.columns ?? [];
-  const columnItems = columns.map(column => ({
-    value: String(column.id), label: column.display_name || column.column_name,
-  }));
+  const columnItems = [...columns]
+    .sort((first, second) => Number(termColumns.has(second.column_name)) - Number(termColumns.has(first.column_name)))
+    .map(column => ({ value: String(column.id), label: column.display_name || column.column_name }));
   const datasetItems = datasets.map(item => ({ value: String(item.id), label: item.name }));
 
   const changeDataset = (value: string) => {
     setDatasetId(Number(value));
     setConditions(current => current.map(condition => ({ ...condition, columnId: '' })));
     setGlossaryTermIds([]);
-    setMetricIds([]);
   };
   const updateCondition = (key: number, change: Partial<ConditionDraft>) => setConditions(current => (
     current.map(condition => (condition.key === key ? { ...condition, ...change } : condition))
@@ -227,6 +227,10 @@ export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRu
 
   const save = async () => {
     if (datasetId === null) return;
+    if (glossaryTermIds.length === 0) {
+      setSaveError('Chọn ít nhất một thuật ngữ mà rule này dựa trên.');
+      return;
+    }
     const builtConditions: ExpertRuleCondition[] = [];
     for (const draft of conditions) {
       const column = columns.find(item => String(item.id) === draft.columnId);
@@ -250,7 +254,7 @@ export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRu
       exceptions: filledPairs(exceptions).map(row => ({ when: row.first.trim(), outcome: row.second.trim() })),
       examples: filledPairs(examples).map(row => ({ question: row.first.trim(), intent: row.second.trim() })),
       glossary_term_ids: glossaryTermIds,
-      metric_ids: metricIds,
+      metric_ids: inheritedMetricIds,
     };
     if (payload.examples.length === 0) {
       setSaveError('Thêm ít nhất một câu hỏi mẫu.');
@@ -293,6 +297,23 @@ export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRu
           placeholder="Ví dụ: Ngày nắng nóng"
           onChange={event => setName(event.target.value)}
         />
+        <span className="sl-metric-trial-label">Thuật ngữ</span>
+        <ReferencePicker
+          label="Thêm thuật ngữ"
+          available={dataset?.glossary_terms ?? []}
+          selectedIds={glossaryTermIds}
+          onChange={setGlossaryTermIds}
+        />
+        <span className="sl-metric-trial-label">Metric</span>
+        <div className="sl-metric-trial-field">
+          {inheritedMetricIds.length === 0 ? (
+            <span className="sl-metric-muted">Lấy từ thuật ngữ đã chọn.</span>
+          ) : inheritedMetricIds.map(id => (
+            <span key={id} className="sl-metric-token is-static">
+              {dataset?.metrics.find(metric => metric.id === id)?.name ?? `#${id}`}
+            </span>
+          ))}
+        </div>
         <span className="sl-metric-trial-label">Khi nào áp dụng</span>
         <div className="sl-metric-trial-field is-stacked">
           {conditions.map(draft => {
@@ -368,27 +389,16 @@ export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRu
           addLabel="Thêm câu hỏi mẫu"
           onChange={setExamples}
         />
-        <span className="sl-metric-trial-label">Thuật ngữ</span>
-        <ReferencePicker
-          label="Thêm thuật ngữ"
-          available={dataset?.glossary_terms ?? []}
-          selectedIds={glossaryTermIds}
-          onChange={setGlossaryTermIds}
-        />
-        <span className="sl-metric-trial-label">Metric</span>
-        <ReferencePicker
-          label="Thêm metric"
-          available={dataset?.metrics ?? []}
-          selectedIds={metricIds}
-          onChange={setMetricIds}
-        />
       </div>
-      {droppedLinks > 0 ? (
-        <p className="sl-metric-muted">Đã bỏ {droppedLinks} liên kết tới thuật ngữ hoặc metric không còn được duyệt.</p>
+      {droppedTerms > 0 ? (
+        <p className="sl-metric-muted">Đã bỏ {droppedTerms} thuật ngữ không còn được duyệt.</p>
       ) : null}
       {saveError ? <div className="sl-metric-error" role="alert"><AlertCircle /> {saveError}</div> : null}
       <div className="sl-metrics-actions">
-        <Button disabled={saving || !name.trim() || datasetId === null} onClick={() => void save()}>
+        <Button
+          disabled={saving || !name.trim() || datasetId === null || glossaryTermIds.length === 0}
+          onClick={() => void save()}
+        >
           {saving ? <LoaderCircle className="sl-spin" data-icon="inline-start" /> : null}
           {rule ? 'Lưu bản nháp mới' : 'Tạo bản nháp'}
         </Button>

@@ -471,3 +471,11 @@ def test_a_rule_may_have_no_exceptions_but_needs_an_example():
     assert service.normalize_rule_payload(_payload(exceptions=[]))["exceptions"] == []
     with pytest.raises(service.ExpertRuleValidationError):
         service.normalize_rule_payload(_payload(examples=[]))
+
+
+def test_a_rule_must_build_on_at_least_one_glossary_term():
+    with pytest.raises(service.ExpertRuleValidationError, match="glossary term"):
+        service.validate_semantic_links(
+            service.normalize_rule_payload(_payload(glossary_term_ids=[], metric_ids=[])),
+            lambda _: object(), lambda _: None, lambda _: None,
+        )

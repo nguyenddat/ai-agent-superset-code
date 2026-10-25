@@ -118,15 +118,17 @@ export type MetricFilterOperator = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'IN' 
 export type MetricQueryFilter = { column: string; operator: MetricFilterOperator; value: string | number | boolean | Array<string | number> };
 
 export type GlossaryStatus = 'draft' | 'approved' | 'revoked';
+/** Review state of a term: `outdated` is an approval whose linked column or metric changed since it was saved. */
+export type GlossaryState = GlossaryStatus | 'outdated';
 export type GlossaryProvenance = 'manual' | 'import' | 'ai_suggestion';
 export type GlossaryLink = {
-  id?: number;
   kind: 'dataset' | 'column' | 'metric';
   dataset_id: number;
   column_name?: string | null;
   metric_id?: number | null;
+  /** Readable labels, present on the admin list. */
   dataset_name?: string | null;
-  metric_name?: string | null;
+  target_name?: string | null;
 };
 export type GlossaryRevision = {
   id: number;
@@ -150,13 +152,35 @@ export type GlossaryTerm = {
   current_revision?: GlossaryRevision | null;
   revisions?: GlossaryRevision[];
 };
+/** A term as the admin list returns it: its current revision with review state and the people behind it. */
+export type GlossaryReviewTerm = GlossaryTerm & {
+  current_revision: GlossaryRevision;
+  state: GlossaryState;
+  author_id: number | null;
+  author_name: string | null;
+  approver_name: string | null;
+  revoker_name: string | null;
+};
+export type GlossaryTermList = {
+  terms: GlossaryReviewTerm[];
+  current_user_id: number | null;
+  require_second_reviewer: boolean;
+};
+/** What a term may link to in one dataset: physical active columns and saved metrics. */
+export type GlossaryDatasetOption = {
+  id: number;
+  name: string;
+  columns: Array<{ column_name: string; name: string }>;
+  metrics: Array<{ id: number; name: string }>;
+};
 export type GlossaryAuditEvent = {
   id: number;
-  action: string;
-  revision_number?: number | null;
-  actor_id?: number | null;
-  reason?: string | null;
-  created_at?: string | null;
+  action: 'created' | 'updated' | 'approved' | 'revoked';
+  revision_number: number | null;
+  actor_id: number | null;
+  actor_name: string | null;
+  reason: string | null;
+  created_at: string | null;
 };
 export type GlossaryTermPayload = {
   canonical_name: string;
@@ -388,12 +412,15 @@ export type ExpertRuleAuditEntry = {
 
 export type ExpertRuleColumnOption = { id: number; column_name: string; display_name: string; data_type: string };
 
+/** An approved term a rule may build on, with the approved metrics and the columns it names in that dataset. */
+export type ExpertRuleTermOption = ExpertRuleReference & { metric_ids: number[]; column_names: string[] };
+
 /** A dataset a rule may be written for, with the columns, approved terms and approved metrics it may reference. */
 export type ExpertRuleDatasetOption = {
   id: number;
   name: string;
   columns: ExpertRuleColumnOption[];
-  glossary_terms: ExpertRuleReference[];
+  glossary_terms: ExpertRuleTermOption[];
   metrics: ExpertRuleReference[];
 };
 

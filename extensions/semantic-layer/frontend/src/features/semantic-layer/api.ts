@@ -48,6 +48,7 @@ export const semanticLayerApi = {
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/semantic-query/execute`
   ),
   glossary: `${SEMANTIC_LAYER_API}/glossary`,
+  glossaryOptions: `${SEMANTIC_LAYER_API}/glossary/options`,
   glossaryTerm: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}`,
   glossaryDraft: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/draft`,
   glossaryApprove: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/approve`,

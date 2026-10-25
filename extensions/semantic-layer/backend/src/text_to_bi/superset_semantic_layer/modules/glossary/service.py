@@ -30,6 +30,10 @@ class GlossaryConflictError(ValueError):
     """An optimistic concurrency conflict."""
 
 
+class GlossarySelfApprovalError(ValueError):
+    """The author of a revision tried to approve it while a second reviewer is required."""
+
+
 def _normalized(value: str) -> str:
     return " ".join(value.split()).casefold()
 
@@ -125,7 +129,12 @@ def _content_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(values, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
 
 
-def _validated_links(session: Any, links: list[dict[str, Any]], dataset_resolver: Callable[[int], Any]) -> list[dict[str, Any]]:
+def _validated_links(
+    session: Any,
+    links: list[dict[str, Any]],
+    dataset_resolver: Callable[[int], Any],
+    metric_is_approved: Callable[[Any, Any], bool] | None = None,
+) -> list[dict[str, Any]]:
     result = []
     seen = set()
     for raw in links:
@@ -144,6 +153,8 @@ def _validated_links(session: Any, links: list[dict[str, Any]], dataset_resolver
             target = next((metric for metric in dataset.metrics if getattr(metric, "id", None) == metric_id), None)
             if target is None:
                 raise GlossaryValidationError("Invalid glossary link.")
+            if metric_is_approved is not None and not metric_is_approved(dataset, target):
+                raise GlossaryValidationError("A glossary term may link only approved metrics.")
         elif raw.get("column_name") is not None or raw.get("metric_id") is not None:
             raise GlossaryValidationError("Invalid glossary link.")
         values = {
@@ -187,7 +198,14 @@ def _lock_current_revision(session: Any, current: Any) -> Any:
     return locked
 
 
-def create_draft(session: Any, payload: Any, actor_id: int, dataset_resolver: Callable[[int], Any], user_exists: Callable[[int], bool]) -> Any:
+def create_draft(
+    session: Any,
+    payload: Any,
+    actor_id: int,
+    dataset_resolver: Callable[[int], Any],
+    user_exists: Callable[[int], bool],
+    metric_is_approved: Callable[[Any, Any], bool] | None = None,
+) -> Any:
     from ...models.glossary_term import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
 
     values = normalize_glossary_payload(payload)
@@ -206,7 +224,7 @@ def create_draft(session: Any, payload: Any, actor_id: int, dataset_resolver: Ca
     revision = GlossaryTermRevision(term_id=term.id, revision_number=1, definition=values["definition"], synonyms=values["synonyms"], provenance=values["provenance"], source_reference=None, source_hash=values.get("source_hash"), content_hash=_content_hash(values), status="draft", is_current=True)
     session.add(revision)
     session.flush()
-    for link in _validated_links(session, values["links"], dataset_resolver):
+    for link in _validated_links(session, values["links"], dataset_resolver, metric_is_approved):
         session.add(GlossaryTermLink(revision_id=revision.id, **link))
     session.add(GlossaryTermAuditEvent(term_id=term.id, revision_id=revision.id, event_type="created", actor_id=actor_id, revision_number=1, occurred_at=datetime.now(timezone.utc)))
     return revision
@@ -220,6 +238,7 @@ def update_draft(
     actor_id: int,
     dataset_resolver: Callable[[int], Any],
     user_exists: Callable[[int], bool],
+    metric_is_approved: Callable[[Any, Any], bool] | None = None,
 ) -> Any:
     """Replace the current draft with an immutable next revision."""
     from ...models.glossary_term import GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
@@ -227,8 +246,8 @@ def update_draft(
     current = _lock_current_revision(session, current)
     if current.revision_number != expected_revision:
         raise GlossaryConflictError("The glossary term changed; refresh and retry.")
-    if current.status not in {"draft", "approved"} or not current.is_current:
-        raise GlossaryValidationError("Only a current draft or approved revision can be updated.")
+    if not current.is_current:
+        raise GlossaryValidationError("Only the current revision can be updated.")
     values = normalize_glossary_payload(payload)
     for field in ("owner_id", "steward_id"):
         if values.get(field) is not None and not user_exists(values[field]):
@@ -249,13 +268,34 @@ def update_draft(
     except IntegrityError as ex:
         session.rollback()
         raise GlossaryConflictError("The glossary term changed; refresh and retry.") from ex
-    for link in _validated_links(session, values["links"], dataset_resolver):
+    for link in _validated_links(session, values["links"], dataset_resolver, metric_is_approved):
         session.add(GlossaryTermLink(revision_id=revision.id, **link))
     session.add(GlossaryTermAuditEvent(term_id=current.term_id, revision_id=revision.id, event_type="updated", actor_id=actor_id, revision_number=revision.revision_number, occurred_at=datetime.now(timezone.utc)))
     return revision
 
 
-def approve_revision(session: Any, revision: Any, expected_revision: int, actor_id: int, reason: str | None = None) -> None:
+def revision_author_id(session: Any, revision: Any) -> int | None:
+    """Who wrote a revision: the actor of its created or updated audit event."""
+    from ...models.glossary_term import GlossaryTermAuditEvent
+
+    event = (
+        session.query(GlossaryTermAuditEvent)
+        .filter(GlossaryTermAuditEvent.revision_id == revision.id)
+        .filter(GlossaryTermAuditEvent.event_type.in_(("created", "updated")))
+        .order_by(GlossaryTermAuditEvent.id.desc())
+        .first()
+    )
+    return event.actor_id if event else None
+
+
+def approve_revision(
+    session: Any,
+    revision: Any,
+    expected_revision: int,
+    actor_id: int,
+    reason: str | None = None,
+    require_second_reviewer: bool = False,
+) -> None:
     from ...models.glossary_term import GlossaryTermAuditEvent
 
     revision = _lock_current_revision(session, revision)
@@ -263,6 +303,8 @@ def approve_revision(session: Any, revision: Any, expected_revision: int, actor_
         raise GlossaryConflictError("The glossary term changed; refresh and retry.")
     if revision.status != "draft" or not revision.is_current:
         raise GlossaryValidationError("Only the current draft can be approved.")
+    if require_second_reviewer and revision_author_id(session, revision) == actor_id:
+        raise GlossarySelfApprovalError("The author of a glossary term cannot approve it.")
     if reason is not None and (not isinstance(reason, str) or len(reason) > MAX_REASON_LENGTH):
         raise GlossaryValidationError("Invalid approval reason.")
     revision.status, revision.approver_id, revision.approved_at = "approved", actor_id, datetime.now(timezone.utc)
@@ -279,5 +321,6 @@ def revoke_revision(session: Any, revision: Any, expected_revision: int, actor_i
         raise GlossaryValidationError("Only the current approved revision can be revoked.")
     if not isinstance(reason, str) or not reason.strip() or len(reason) > MAX_REASON_LENGTH:
         raise GlossaryValidationError("A bounded revocation reason is required.")
-    revision.status, revision.is_current, revision.revoker_id, revision.revoked_at = "revoked", False, actor_id, datetime.now(timezone.utc)
+    # A revoked revision stays current so the term keeps its place and can be revised into a new draft.
+    revision.status, revision.revoker_id, revision.revoked_at = "revoked", actor_id, datetime.now(timezone.utc)
     session.add(GlossaryTermAuditEvent(term_id=revision.term_id, revision_id=revision.id, event_type="revoked", actor_id=actor_id, reason=reason.strip(), revision_number=revision.revision_number, occurred_at=revision.revoked_at))

@@ -7,6 +7,7 @@ import pytest
 from text_to_bi.superset_semantic_layer.modules.glossary import service
 from text_to_bi.superset_semantic_layer.modules.glossary.service import (
     GlossaryConflictError,
+    GlossarySelfApprovalError,
     GlossaryValidationError,
     approve_revision,
     extract_glossary_update_payload,
@@ -211,3 +212,57 @@ def test_approval_rejects_stale_revision_after_locked_reread(monkeypatch):
 
     with pytest.raises(GlossaryConflictError):
         approve_revision(SimpleNamespace(), SimpleNamespace(), expected_revision=2, actor_id=1)
+
+
+def _audit_models(monkeypatch):
+    models = ModuleType("text_to_bi.superset_semantic_layer.models.glossary_term")
+    models.GlossaryTermAuditEvent = SimpleNamespace
+    monkeypatch.setitem(sys.modules, models.__name__, models)
+
+
+@pytest.mark.parametrize("require_second_reviewer", [False, True])
+def test_author_may_approve_own_draft_unless_a_second_reviewer_is_required(monkeypatch, require_second_reviewer):
+    draft = SimpleNamespace(id=5, term_id=3, revision_number=2, status="draft", is_current=True)
+    monkeypatch.setattr(service, "_lock_current_revision", lambda *_: draft)
+    monkeypatch.setattr(service, "revision_author_id", lambda _session, revision: 7)
+    _audit_models(monkeypatch)
+    session = SimpleNamespace(added=[], add=lambda event: session.added.append(event))
+
+    if require_second_reviewer:
+        with pytest.raises(GlossarySelfApprovalError):
+            approve_revision(session, draft, 2, 7, None, require_second_reviewer=True)
+        assert draft.status == "draft" and session.added == []
+    else:
+        approve_revision(session, draft, 2, 7)
+        assert draft.status == "approved" and draft.approver_id == 7
+
+
+def test_another_administrator_may_approve_when_a_second_reviewer_is_required(monkeypatch):
+    draft = SimpleNamespace(id=5, term_id=3, revision_number=2, status="draft", is_current=True)
+    monkeypatch.setattr(service, "_lock_current_revision", lambda *_: draft)
+    monkeypatch.setattr(service, "revision_author_id", lambda _session, revision: 7)
+    _audit_models(monkeypatch)
+
+    approve_revision(SimpleNamespace(add=lambda _event: None), draft, 2, 8, None, require_second_reviewer=True)
+
+    assert draft.status == "approved" and draft.approver_id == 8
+
+
+def test_revoked_revision_stays_current_so_the_term_can_be_revised(monkeypatch):
+    approved = SimpleNamespace(id=5, term_id=3, revision_number=2, status="approved", is_current=True)
+    monkeypatch.setattr(service, "_lock_current_revision", lambda *_: approved)
+    _audit_models(monkeypatch)
+
+    service.revoke_revision(SimpleNamespace(add=lambda _event: None), approved, 2, 8, "  Định nghĩa sai.  ")
+
+    assert approved.status == "revoked" and approved.is_current is True and approved.revoker_id == 8
+
+
+def test_a_term_may_link_only_approved_metrics():
+    metric = SimpleNamespace(id=19, metric_name="max_temperature", expression="MAX(temperature)")
+    dataset = SimpleNamespace(id=11, columns=[], metrics=[metric])
+    link = {"kind": "metric", "dataset_id": 11, "metric_id": 19}
+
+    with pytest.raises(GlossaryValidationError, match="approved metrics"):
+        service._validated_links(SimpleNamespace(), [link], lambda _: dataset, lambda _dataset, _metric: False)
+    assert service._validated_links(SimpleNamespace(), [link], lambda _: dataset, lambda _dataset, _metric: True)

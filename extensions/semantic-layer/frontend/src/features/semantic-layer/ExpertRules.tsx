@@ -60,6 +60,8 @@ const formatDate = (value: string | null) => formatTime(value).split(' ').pop() 
 
 /** One line on who moved the rule into its current state, or what it needs next. */
 function reviewSummary(rule: ExpertRule, viewerId: number | null, secondReviewerRequired: boolean): string {
+  // Rules written before every rule had to build on a glossary term must be linked to one when next edited.
+  if (rule.glossary_terms.length === 0 && rule.state !== 'revoked') return 'Chưa gắn thuật ngữ · sửa để gắn thuật ngữ';
   switch (rule.state) {
     case 'approved':
       return `Duyệt bởi ${rule.approver_name ?? '—'} · ${formatDate(rule.approved_at)}`;

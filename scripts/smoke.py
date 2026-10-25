@@ -28,6 +28,7 @@ READ_ONLY_ENDPOINTS = [
     f"{SEMANTIC_API}/datasets/reference-options",
     f"{SEMANTIC_API}/data-layers",
     f"{SEMANTIC_API}/glossary",
+    f"{SEMANTIC_API}/glossary/options",
     f"{SEMANTIC_API}/glossary/discovery",
     f"{EXPERT_RULES_API}/expert-rules/discover",
 ]

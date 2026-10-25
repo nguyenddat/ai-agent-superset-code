@@ -260,7 +260,7 @@ function SemanticLayerPage() {
                 placeholder="Chọn database"
               />
             </div>
-            {activeModule !== 'metrics' && activeModule !== 'rules' ? (
+            {activeModule !== 'metrics' && activeModule !== 'rules' && activeModule !== 'glossary' ? (
               <div className="sl-header-select sl-dataset-select">
                 <HeaderPicker
                   ariaLabel="Dataset"
@@ -283,7 +283,7 @@ function SemanticLayerPage() {
           ) : (
             <div className="sl-content">
               {activeModule === 'glossary' ? (
-                <main className="sl-details"><Glossary datasets={datasets} /></main>
+                <main className="sl-details"><Glossary /></main>
               ) : activeModule === 'rules' ? (
                 <main className="sl-details"><ExpertRules /></main>
               ) : activeModule === 'metrics' ? (

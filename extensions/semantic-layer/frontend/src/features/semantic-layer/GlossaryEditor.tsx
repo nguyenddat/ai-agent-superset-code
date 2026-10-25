@@ -1,100 +1,199 @@
-import React, { useEffect, useState } from 'react';
-import { Minus, Plus, Save } from 'lucide-react';
+import React, { useState } from 'react';
+import { AlertCircle, LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import type { DashboardDataset, GlossaryLink, GlossaryProvenance, GlossaryTerm, GlossaryTermPayload } from './types';
+import { requestJson, semanticLayerApi } from './api';
+import { OptionSelect } from './ExpertRuleEditor';
+import type { GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryTermPayload } from './types';
 
-type DraftLink = { dataset_id: number | null; column_name: string; metric_id: number | null };
-type Props = {
-  term: GlossaryTerm | null;
-  datasets: DashboardDataset[];
-  busy: boolean;
+/** A link row: the dataset, then `dataset`, `column:<name>` or `metric:<id>` for what in it the term names. */
+type LinkDraft = { key: number; datasetId: string; target: string };
+
+let nextLinkKey = 1;
+const emptyLink = (): LinkDraft => ({ key: nextLinkKey++, datasetId: '', target: '' });
+
+function linkTarget(link: GlossaryLink): string {
+  if (link.kind === 'column') return `column:${link.column_name}`;
+  return link.kind === 'metric' ? `metric:${link.metric_id}` : 'dataset';
+}
+
+function buildLink(draft: LinkDraft): GlossaryTermPayload['links'][number] {
+  const datasetId = Number(draft.datasetId);
+  const value = draft.target.slice(draft.target.indexOf(':') + 1);
+  if (draft.target.startsWith('column:')) {
+    return { kind: 'column', dataset_id: datasetId, column_name: value, metric_id: null };
+  }
+  if (draft.target.startsWith('metric:')) {
+    return { kind: 'metric', dataset_id: datasetId, column_name: null, metric_id: Number(value) };
+  }
+  return { kind: 'dataset', dataset_id: datasetId, column_name: null, metric_id: null };
+}
+
+const GLOSSARY_ERRORS: Array<[string, string]> = [
+  ['already exists', 'Đã có thuật ngữ cùng tên.'],
+  ['changed; refresh', 'Thuật ngữ vừa được thay đổi ở nơi khác; tải lại rồi thử lại.'],
+  ['cannot approve', 'Người soạn thuật ngữ không thể tự duyệt; cần một quản trị viên khác duyệt.'],
+  ['Duplicate glossary link', 'Có hai liên kết giống nhau.'],
+  ['At least one glossary link', 'Thêm ít nhất một liên kết.'],
+  ['Invalid glossary link', 'Có liên kết không còn hợp lệ: cột hoặc metric đã bị xoá hay đổi.'],
+  ['only approved metrics', 'Thuật ngữ chỉ được gắn metric đã duyệt.'],
+  ['synonym cannot duplicate', 'Từ đồng nghĩa không được trùng tên thuật ngữ.'],
+  ['definition must be', 'Nhập định nghĩa.'],
+  ['canonical_name must be', 'Nhập tên thuật ngữ.'],
+  ['too long', 'Nội dung quá dài.'],
+];
+
+/** Shows a backend glossary error in Vietnamese; messages the backend already writes in Vietnamese pass through. */
+export function glossaryErrorMessage(message: string): string {
+  return GLOSSARY_ERRORS.find(([fragment]) => message.includes(fragment))?.[1] ?? message;
+}
+
+type GlossaryEditorProps = {
+  term: GlossaryReviewTerm | null;
+  datasets: GlossaryDatasetOption[];
   onCancel: () => void;
-  onSave: (payload: GlossaryTermPayload, expectedRevision?: number) => void;
+  onSaved: (termId: number) => void;
 };
 
-const emptyLink = (): DraftLink => ({ dataset_id: null, column_name: '', metric_id: null });
-const current = (term: GlossaryTerm | null) => term?.current_revision ?? term?.revisions?.find(revision => revision.is_current) ?? null;
+/** Writes a new term or the next draft of an existing one; saving always leaves a draft to approve. */
+export function GlossaryEditor({ term, datasets, onCancel, onSaved }: GlossaryEditorProps) {
+  const revision = term?.current_revision ?? null;
+  const [name, setName] = useState(term?.canonical_name ?? '');
+  const [definition, setDefinition] = useState(revision?.definition ?? '');
+  const [synonyms, setSynonyms] = useState((revision?.synonyms ?? []).join(', '));
+  const [links, setLinks] = useState<LinkDraft[]>(() => {
+    const savedLinks = revision?.links ?? [];
+    if (savedLinks.length === 0) return [emptyLink()];
+    return savedLinks.map(link => (
+      { key: nextLinkKey++, datasetId: String(link.dataset_id), target: linkTarget(link) }
+    ));
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
-/** Editor for an admin candidate. An AI origin stays a draft until the separate approve action succeeds. */
-export function GlossaryEditor({ term, datasets, busy, onCancel, onSave }: Props) {
-  const [name, setName] = useState('');
-  const [definition, setDefinition] = useState('');
-  const [synonyms, setSynonyms] = useState('');
-  const [ownerId, setOwnerId] = useState('');
-  const [stewardId, setStewardId] = useState('');
-  const [provenance, setProvenance] = useState<GlossaryProvenance>('manual');
-  const [links, setLinks] = useState<DraftLink[]>([emptyLink()]);
+  const datasetItems = datasets.map(dataset => ({ value: String(dataset.id), label: dataset.name }));
+  const targetItems = (datasetId: string) => {
+    const dataset = datasets.find(item => String(item.id) === datasetId);
+    if (!dataset) return [];
+    return [
+      { value: 'dataset', label: 'Cả dataset' },
+      ...dataset.metrics.map(metric => ({ value: `metric:${metric.id}`, label: `Metric: ${metric.name}` })),
+      ...dataset.columns.map(column => ({ value: `column:${column.column_name}`, label: `Cột: ${column.name}` })),
+    ];
+  };
+  const updateLink = (key: number, change: Partial<LinkDraft>) => setLinks(current => (
+    current.map(link => (link.key === key ? { ...link, ...change } : link))
+  ));
 
-  useEffect(() => {
-    const revision = current(term);
-    setName(term?.canonical_name ?? revision?.canonical_name ?? '');
-    setDefinition(revision?.definition ?? '');
-    setSynonyms((revision?.synonyms ?? []).join(', '));
-    setOwnerId(term?.owner_id?.toString() ?? '');
-    setStewardId(term?.steward_id?.toString() ?? '');
-    setProvenance(revision?.provenance ?? 'manual');
-    setLinks(revision?.links.length ? revision.links.map(link => ({
-      dataset_id: link.dataset_id,
-      column_name: link.column_name ?? '',
-      metric_id: link.metric_id ?? null,
-    })) : [emptyLink()]);
-  }, [term]);
-
-  const updateLink = (index: number, patch: Partial<DraftLink>) => setLinks(items => items.map((item, itemIndex) => (
-    itemIndex === index ? { ...item, ...patch } : item
-  )));
-  const submit = () => {
-    const parsedLinks: GlossaryLink[] = links
-      .filter(link => link.dataset_id !== null)
-      .map(link => ({
-        kind: link.metric_id !== null ? 'metric' : link.column_name.trim() ? 'column' : 'dataset',
-        dataset_id: link.dataset_id as number,
-        column_name: link.column_name.trim() || null,
-        metric_id: link.metric_id,
-      }));
-    onSave({
+  const save = async () => {
+    const filledLinks = links.filter(link => link.datasetId && link.target);
+    if (filledLinks.length === 0) {
+      setSaveError('Thêm ít nhất một liên kết tới dataset, cột hoặc metric.');
+      return;
+    }
+    const payload: GlossaryTermPayload = {
       canonical_name: name.trim(),
       definition: definition.trim(),
       synonyms: synonyms.split(',').map(value => value.trim()).filter(Boolean),
-      owner_id: ownerId ? Number(ownerId) : null,
-      steward_id: stewardId ? Number(stewardId) : null,
-      provenance,
-      links: parsedLinks,
-    }, current(term)?.revision_number);
+      owner_id: term?.owner_id ?? null,
+      steward_id: term?.steward_id ?? null,
+      provenance: revision?.provenance ?? 'manual',
+      links: filledLinks.map(buildLink),
+    };
+    setSaving(true);
+    setSaveError('');
+    try {
+      const response = term && revision
+        ? await requestJson<{ term: { id: number } }>(
+          semanticLayerApi.glossaryDraft(term.id), 'PUT', { ...payload, expected_revision: revision.revision_number },
+        )
+        : await requestJson<{ term: { id: number } }>(semanticLayerApi.glossary, 'POST', payload);
+      onSaved(response.term.id);
+    } catch (failure) {
+      setSaveError(glossaryErrorMessage(failure instanceof Error ? failure.message : 'Không lưu được thuật ngữ.'));
+      setSaving(false);
+    }
   };
 
-  return <section className="sl-glossary-editor" aria-label={term ? `Edit ${name || 'glossary term'}` : 'Create glossary term'}>
-    <header><h3>{term ? 'Edit draft' : 'New glossary term'}</h3><p>Changes create or update a candidate draft; they are not discoverable until approved.</p></header>
-    <div className="sl-glossary-fields">
-      <label>Canonical name<Input value={name} disabled={busy} onChange={event => setName(event.target.value)} /></label>
-      <label>Synonyms <small>comma-separated</small><Input value={synonyms} disabled={busy} onChange={event => setSynonyms(event.target.value)} /></label>
-      <label>Owner user ID<Input type="number" min="1" value={ownerId} disabled={busy} onChange={event => setOwnerId(event.target.value)} /></label>
-      <label>Steward user ID<Input type="number" min="1" value={stewardId} disabled={busy} onChange={event => setStewardId(event.target.value)} /></label>
-      <label>Provenance<select value={provenance} disabled={busy} onChange={event => setProvenance(event.target.value as GlossaryProvenance)}>
-        <option value="manual">Manual</option><option value="import">Import</option><option value="ai_suggestion">AI suggestion (candidate only)</option>
-      </select></label>
-      <label className="sl-glossary-wide">Definition<Textarea value={definition} disabled={busy} onChange={event => setDefinition(event.target.value)} /></label>
+  return (
+    <div className="sl-metrics-definition">
+      <div className="sl-metric-trial-config">
+        <span className="sl-metric-trial-label">Tên thuật ngữ</span>
+        {term ? <span className="sl-rule-static">{term.canonical_name}</span> : (
+          <Input
+            aria-label="Tên thuật ngữ"
+            className="sl-rule-wide"
+            value={name}
+            maxLength={255}
+            placeholder="Ví dụ: Nắng nóng"
+            onChange={event => setName(event.target.value)}
+          />
+        )}
+        <span className="sl-metric-trial-label">Định nghĩa</span>
+        <Textarea
+          aria-label="Định nghĩa"
+          className="sl-glossary-definition-input"
+          value={definition}
+          maxLength={10000}
+          placeholder="Thuật ngữ này nghĩa là gì với người dùng nghiệp vụ"
+          onChange={event => setDefinition(event.target.value)}
+        />
+        <span className="sl-metric-trial-label">Từ đồng nghĩa</span>
+        <Input
+          aria-label="Từ đồng nghĩa"
+          className="sl-rule-wide"
+          value={synonyms}
+          placeholder="Cách nhau bởi dấu phẩy, ví dụ: trời nóng, oi bức"
+          onChange={event => setSynonyms(event.target.value)}
+        />
+        <span className="sl-metric-trial-label">Liên kết</span>
+        <div className="sl-metric-trial-field is-stacked">
+          {links.map(link => (
+            <div key={link.key} className="sl-rule-pair">
+              <OptionSelect
+                label="Dataset"
+                items={datasetItems}
+                value={link.datasetId || null}
+                placeholder="Chọn dataset"
+                onChange={datasetId => updateLink(link.key, { datasetId, target: '' })}
+              />
+              <OptionSelect
+                label="Cột hoặc metric"
+                items={targetItems(link.datasetId)}
+                value={link.target || null}
+                placeholder="Chọn cột hoặc metric"
+                onChange={target => updateLink(link.key, { target })}
+              />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Xoá liên kết"
+                disabled={links.length === 1}
+                onClick={() => setLinks(current => current.filter(item => item.key !== link.key))}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="self-start"
+            onClick={() => setLinks(current => [...current, emptyLink()])}
+          >
+            <Plus data-icon="inline-start" /> Thêm liên kết
+          </Button>
+        </div>
+      </div>
+      {saveError ? <div className="sl-metric-error" role="alert"><AlertCircle /> {saveError}</div> : null}
+      <div className="sl-metrics-actions">
+        <Button disabled={saving || !name.trim() || !definition.trim()} onClick={() => void save()}>
+          {saving ? <LoaderCircle className="sl-spin" data-icon="inline-start" /> : null}
+          {term ? 'Lưu bản nháp mới' : 'Tạo bản nháp'}
+        </Button>
+        <Button variant="outline" disabled={saving} onClick={onCancel}>Huỷ</Button>
+      </div>
     </div>
-    <section className="sl-glossary-links" aria-label="Semantic links"><div><h4>Semantic links</h4><p>Link each term to a live dataset column or saved metric.</p></div>
-      {links.map((link, index) => {
-        const dataset = datasets.find(item => item.id === link.dataset_id);
-        return <div className="sl-glossary-link" key={index}>
-          <select aria-label={`Dataset link ${index + 1}`} value={link.dataset_id ?? ''} disabled={busy} onChange={event => updateLink(index, { dataset_id: event.target.value ? Number(event.target.value) : null, column_name: '', metric_id: null })}>
-            <option value="">Select dataset</option>{datasets.map(item => <option key={item.id} value={item.id}>{item.datasource_name || item.name || item.table_name || `Dataset ${item.id}`}</option>)}
-          </select>
-          <select aria-label={`Column link ${index + 1}`} value={link.column_name} disabled={busy || !dataset} onChange={event => updateLink(index, { column_name: event.target.value, metric_id: null })}>
-            <option value="">Column (or choose metric)</option>{dataset?.columns?.map(column => <option key={column.column_name} value={column.column_name}>{column.column_name}</option>)}
-          </select>
-          <select aria-label={`Metric link ${index + 1}`} value={link.metric_id ?? ''} disabled={busy || !dataset} onChange={event => updateLink(index, { metric_id: event.target.value ? Number(event.target.value) : null, column_name: '' })}>
-            <option value="">Metric (or choose column)</option>{dataset?.metrics?.map(metric => <option key={metric.id} value={metric.id}>{metric.verbose_name || metric.metric_name}</option>)}
-          </select>
-          <Button variant="ghost" size="icon" disabled={busy || links.length === 1} aria-label="Remove link" onClick={() => setLinks(items => items.filter((_, itemIndex) => itemIndex !== index))}><Minus /></Button>
-        </div>;
-      })}
-      <Button variant="outline" size="sm" disabled={busy} onClick={() => setLinks(items => [...items, emptyLink()])}><Plus data-icon="inline-start" /> Add link</Button>
-    </section>
-    <footer className="sl-glossary-editor-actions"><Button variant="outline" disabled={busy} onClick={onCancel}>Cancel</Button><Button disabled={busy} onClick={submit}><Save data-icon="inline-start" /> Save draft</Button></footer>
-  </section>;
+  );
 }

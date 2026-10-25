@@ -15,6 +15,10 @@ Metrics, glossary terms and expert rules move from draft to approved to revoked,
 its actor and reason. By default an administrator may approve their own work; set
 `TEXT_TO_BI_REQUIRE_SECOND_REVIEWER = True` in `superset_config.py` to require a second administrator.
 
+The three build on each other: metric → glossary term → expert rule. A term may link only approved metrics, and
+it becomes outdated when a linked metric is revoked or its formula changes. A rule needs at least one approved term
+and takes its metrics from the terms it names, so a revoked metric or term also leaves the rule outdated.
+
 ## Consumer API
 
 Approved content reaches any consumer, such as a Text to BI agent, through read-only endpoints. Each returns only

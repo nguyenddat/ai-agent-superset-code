@@ -63,6 +63,7 @@ export function expertRuleErrorMessage(message: string): string {
   }
   if (message === 'Invalid metric link.') return 'Metric liên kết không còn ở trạng thái đã duyệt.';
   if (message === 'Invalid glossary link.') return 'Thuật ngữ liên kết không còn ở trạng thái đã duyệt.';
+  if (message.includes('at least one approved glossary term')) return 'Rule cần ít nhất một thuật ngữ đã duyệt.';
   if (message.includes('already exists')) return 'Đã có rule cùng tên.';
   if (message.includes('changed; refresh')) return 'Rule vừa được người khác thay đổi; tải lại rồi thử lại.';
   const invalid = message.match(/^(?:Invalid|Duplicate) (.+)\.$/);

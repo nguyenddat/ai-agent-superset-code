@@ -295,3 +295,19 @@ def test_an_approved_rule_with_a_changed_link_is_outdated(monkeypatch):
     assert api._review_state(approved, links) == "outdated"
     assert api._review_state(approved, links[:1]) == "approved"
     assert api._review_state(SimpleNamespace(status="draft", is_current=True), links) == "draft"
+
+
+def test_a_rule_takes_its_metrics_from_its_glossary_terms(monkeypatch):
+    route, _, _ = _load_route(monkeypatch)
+    api = route.ExpertRuleAPI()
+    term_links = {
+        3: [SimpleNamespace(kind="metric", metric_id=17), SimpleNamespace(kind="column", metric_id=None)],
+        4: [SimpleNamespace(kind="metric", metric_id=20), SimpleNamespace(kind="metric", metric_id=22)],
+    }
+    api._term_links = lambda term_id, dataset_id: term_links[term_id] if dataset_id == 12 else []
+    api._metric = lambda metric_id: None if metric_id == 22 else SimpleNamespace(status="approved")
+
+    payload = {"dataset_id": 12, "glossary_term_ids": [3, 4], "metric_ids": [99]}
+
+    assert api._with_term_metrics(payload) == {**payload, "metric_ids": [17, 20]}
+    assert api._with_term_metrics({"dataset_id": 12}) == {"dataset_id": 12}

@@ -179,7 +179,10 @@ class ExpertRuleAPI(RestApi):
     @_rollback_on_error
     def create_rule(self):
         if not self._is_admin(): return self.response(403, message="Admin access required.")
-        return self._mutate(lambda payload: create_draft(db.session, payload, current_user.id, self._dataset, self._glossary, self._metric, self._fingerprint, self._column_resolver(payload.get("dataset_id"))))
+        return self._mutate(lambda payload: create_draft(
+            db.session, self._with_term_metrics(payload), current_user.id, self._dataset, self._glossary, self._metric,
+            self._fingerprint, self._column_resolver(payload.get("dataset_id")),
+        ))
 
     @expose("/expert-rules/<int:rule_id>/draft", methods=["PUT"])
     @protect()
@@ -189,7 +192,15 @@ class ExpertRuleAPI(RestApi):
     @_rollback_on_error
     def update_rule(self, rule_id: int):
         if not self._is_admin(): return self.response(403, message="Admin access required.")
-        return self._mutate(lambda revision, payload: update_draft(db.session, revision, {k: v for k, v in payload.items() if k != "expected_revision"}, self._expected(payload), current_user.id, self._dataset, self._glossary, self._metric, self._fingerprint, self._column_resolver(payload.get("dataset_id"))), rule_id)
+
+        def save(revision, payload):
+            content = self._with_term_metrics({key: value for key, value in payload.items() if key != "expected_revision"})
+            return update_draft(
+                db.session, revision, content, self._expected(payload), current_user.id, self._dataset, self._glossary,
+                self._metric, self._fingerprint, self._column_resolver(payload.get("dataset_id")),
+            )
+
+        return self._mutate(save, rule_id)
 
     @expose("/expert-rules/<int:rule_id>/approve", methods=["POST"])
     @protect()
@@ -280,6 +291,28 @@ class ExpertRuleAPI(RestApi):
         # An approved rule whose linked metric or term changed since approval is hidden from discovery.
         return "approved" if live else "outdated"
 
+    def _term_links(self, term_id: int, dataset_id: int) -> list[GlossaryTermLink]:
+        """The approved current revision's links of a term into one dataset."""
+        revision = (
+            db.session.query(GlossaryTermRevision).filter_by(term_id=term_id, status="approved", is_current=True).one_or_none()
+        )
+        if revision is None:
+            return []
+        return db.session.query(GlossaryTermLink).filter_by(revision_id=revision.id, dataset_id=dataset_id).all()
+
+    def _with_term_metrics(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """A rule's metrics are the approved metrics its glossary terms name, so they are never chosen separately."""
+        term_ids, dataset_id = payload.get("glossary_term_ids"), payload.get("dataset_id")
+        if not isinstance(term_ids, list) or not isinstance(dataset_id, int):
+            return payload
+        metric_ids = {
+            link.metric_id
+            for term_id in term_ids if isinstance(term_id, int)
+            for link in self._term_links(term_id, dataset_id)
+            if link.kind == "metric" and self._metric(link.metric_id) is not None
+        }
+        return {**payload, "metric_ids": sorted(metric_ids)}
+
     def _live_fingerprint(self, link: ExpertRuleLink) -> str | None:
         return self._fingerprint(link.kind, link.target_id, link.dataset_id)
 
@@ -345,10 +378,19 @@ class ExpertRuleAPI(RestApi):
         if not self._is_admin(): return self.response(403, message="Admin access required.")
         terms_by_dataset: dict[int, list[dict[str, Any]]] = {}
         for revision in db.session.query(GlossaryTermRevision).filter_by(status="approved", is_current=True).all():
-            term = {"id": revision.term_id, "name": self._glossary_term_name(revision.term_id)}
             links = db.session.query(GlossaryTermLink).filter_by(revision_id=revision.id).all()
             for dataset_id in {link.dataset_id for link in links}:
-                terms_by_dataset.setdefault(dataset_id, []).append(term)
+                dataset_links = [link for link in links if link.dataset_id == dataset_id]
+                terms_by_dataset.setdefault(dataset_id, []).append({
+                    "id": revision.term_id,
+                    "name": self._glossary_term_name(revision.term_id),
+                    # The editor shows the metrics a rule inherits and lists the term's own columns first.
+                    "metric_ids": sorted(
+                        link.metric_id for link in dataset_links
+                        if link.kind == "metric" and self._metric(link.metric_id) is not None
+                    ),
+                    "column_names": sorted(link.column_name for link in dataset_links if link.kind == "column"),
+                })
         datasets = []
         for dictionary in db.session.query(DatasetDictionary).all():
             dataset = self._dataset(dictionary.id)

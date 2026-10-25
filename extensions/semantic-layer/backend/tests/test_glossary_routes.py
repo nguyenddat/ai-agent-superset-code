@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 ROUTE_PATH = Path(__file__).parents[1] / "src" / "text_to_bi" / "superset_semantic_layer" / "modules" / "catalog" / "route.py"
 ADMIN_ENDPOINTS = {
+    "list_glossary": ("/glossary", "GET"),
+    "glossary_options": ("/glossary/options", "GET"),
     "create_glossary": ("/glossary", "POST"),
     "update_glossary_draft": ("/glossary/<int:term_id>/draft", "PUT"),
     "approve_glossary": ("/glossary/<int:term_id>/approve", "POST"),
@@ -91,6 +93,7 @@ def _update_handler(payload, update_draft):
     instance = namespace["HarnessAPI"]()
     instance._is_admin = lambda: True
     instance._glossary_user_exists = lambda _user_id: True
+    instance._glossary_metric_approved = lambda _dataset, _metric: True
     instance._glossary_term = lambda term, revisions: {"id": term.id, "revisions": len(revisions)}
     return instance, current, validation_error, conflict_error
 
@@ -141,7 +144,7 @@ def test_management_routes_delegate_to_governed_service_with_expected_revision_a
 def test_update_draft_executes_frontend_payload_with_revision_token_separate_from_service_content():
     received = {}
 
-    def update_draft(_session, current, payload, expected, actor_id, _dataset, _user):
+    def update_draft(_session, current, payload, expected, actor_id, _dataset, _user, _metric_is_approved):
         received.update(current=current, payload=payload, expected=expected, actor_id=actor_id)
         return SimpleNamespace(term=SimpleNamespace(id=7))
 
@@ -191,3 +194,16 @@ def test_audit_is_admin_only_read_only_and_cannot_be_used_for_cross_term_id_look
     assert "term_id" in source and "audit" in source.lower()
     assert "current_user.id" not in source  # audit visibility is role-based, not caller-supplied identity.
     assert "request.args" not in source  # no alternate revision/term ID can override the path scope.
+
+
+def test_approval_passes_the_second_reviewer_setting_and_answers_self_approval_with_403():
+    source = ast.unparse(_api_methods()["_glossary_lifecycle"])
+    assert "self._second_reviewer_required()" in source
+    assert "GlossarySelfApprovalError" in source and "403" in source
+
+
+def test_list_reports_review_state_reviewers_and_the_second_reviewer_setting():
+    source = ast.unparse(_api_methods()["list_glossary"]) + ast.unparse(_api_methods()["_glossary_review_entry"])
+    for field in ("state", "author_name", "approver_name", "revoker_name", "current_user_id", "require_second_reviewer"):
+        assert f"'{field}'" in source or f"{field}=" in source
+    assert "'outdated'" in source

@@ -49,10 +49,12 @@ from ..data_dictionary.repository.repo_column_dictionary import ColumnDictionary
 from ..data_dictionary.repository.repo_dataset_dictionary import DatasetDictionaryRepository
 from ..glossary.service import (
     GlossaryConflictError,
+    GlossarySelfApprovalError,
     GlossaryValidationError,
     approve_revision,
     create_draft,
     glossary_link_fingerprint,
+    revision_author_id,
     revoke_revision,
     update_draft,
 )
@@ -2310,6 +2312,19 @@ class SemanticLayerAPI(RestApi):
             return next((column for column in dataset.columns if column.column_name == link.column_name), None)
         return next((metric for metric in dataset.metrics if metric.id == link.metric_id), None)
 
+    def _glossary_metric_approved(self, dataset: SqlaTable, metric: Any) -> bool:
+        """A term builds on a metric only while the metric's contract is approved for its current formula."""
+        return contract_is_approved_current(self._contract_for(dataset.id, metric.id), dataset, metric)
+
+    def _glossary_link_is_live(self, link: GlossaryTermLink) -> bool:
+        """The linked object is unchanged since the term was saved, and a linked metric is still approved."""
+        if self._glossary_live_fingerprint(link) != link.fingerprint:
+            return False
+        if link.kind != "metric":
+            return True
+        dataset = db.session.get(SqlaTable, link.dataset_id)
+        return self._glossary_metric_approved(dataset, self._glossary_link_target(link, dataset))
+
     def _glossary_live_fingerprint(self, link: GlossaryTermLink) -> str | None:
         dataset = db.session.get(SqlaTable, link.dataset_id)
         if dataset is None:
@@ -2319,6 +2334,31 @@ class SemanticLayerAPI(RestApi):
             return None
         return glossary_link_fingerprint(dataset, link.kind, target)
 
+    def _glossary_review_entry(self, term: GlossaryTerm, revision: GlossaryTermRevision, user_name: Any) -> dict:
+        """A term's current revision with its review state, the people behind it and readable link labels."""
+        links = self._glossary_links(revision.id)
+        entry = self._glossary_term(term, [revision])
+        stale = not all(self._glossary_link_is_live(link) for link in links)
+        author_id = revision_author_id(db.session, revision)
+        current = entry["current_revision"]
+        for serialized, link in zip(current["links"], links):
+            dataset = db.session.get(SqlaTable, link.dataset_id)
+            target = self._glossary_link_target(link, dataset) if dataset else None
+            serialized["dataset_name"] = dataset.table_name if dataset else None
+            if link.kind == "dataset":
+                serialized["target_name"] = None
+            else:
+                fallback = link.column_name if link.kind == "column" else getattr(target, "metric_name", None)
+                serialized["target_name"] = getattr(target, "verbose_name", None) or fallback
+        return {
+            **entry,
+            "state": "outdated" if revision.status == "approved" and stale else revision.status,
+            "author_id": author_id,
+            "author_name": user_name(author_id),
+            "approver_name": user_name(revision.approver_id),
+            "revoker_name": user_name(revision.revoker_id),
+        }
+
     @expose("/glossary", methods=("GET",))
     @protect()
     @safe
@@ -2327,20 +2367,44 @@ class SemanticLayerAPI(RestApi):
         if not self._is_admin():
             return self.response(403, message="Admin access required.")
         _ensure_dictionary_tables()
-        terms = db.session.query(GlossaryTerm).order_by(GlossaryTerm.canonical_name).all()
+        user_name = self._user_names()
+        terms = []
+        for term in db.session.query(GlossaryTerm).order_by(GlossaryTerm.canonical_name).all():
+            revision = db.session.query(GlossaryTermRevision).filter_by(term_id=term.id, is_current=True).one_or_none()
+            if revision is not None:
+                terms.append(self._glossary_review_entry(term, revision, user_name))
         return self.response(
             200,
-            terms=[
-                self._glossary_term(
-                    term,
-                    db.session.query(GlossaryTermRevision)
-                    .filter_by(term_id=term.id, is_current=True)
-                    .order_by(GlossaryTermRevision.revision_number)
-                    .all(),
-                )
-                for term in terms
-            ],
+            terms=terms,
+            current_user_id=current_user.id,
+            require_second_reviewer=self._second_reviewer_required(),
         )
+
+    @expose("/glossary/options", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def glossary_options(self):
+        """What a term may link to: each dataset with its physical active columns and its saved metrics."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        datasets = []
+        for dataset in db.session.query(SqlaTable).all():
+            datasets.append({
+                "id": dataset.id,
+                "name": dataset.table_name,
+                "columns": [
+                    {"column_name": column.column_name, "name": column.verbose_name or column.column_name}
+                    for column in dataset.columns if column.is_active is True and not column.expression
+                ],
+                # A term builds on approved metrics only, so a metric must pass review before a term can name it.
+                "metrics": [
+                    {"id": metric.id, "name": metric.verbose_name or metric.metric_name}
+                    for metric in dataset.metrics if self._glossary_metric_approved(dataset, metric)
+                ],
+            })
+        datasets.sort(key=lambda item: item["name"].casefold())
+        return self.response(200, datasets=datasets)
 
     @expose("/glossary/<int:term_id>", methods=("GET",))
     @protect()
@@ -2372,7 +2436,14 @@ class SemanticLayerAPI(RestApi):
             return self.response(403, message="Admin access required.")
         _ensure_dictionary_tables()
         try:
-            revision = create_draft(db.session, request.get_json(silent=True), current_user.id, lambda key: db.session.get(SqlaTable, key), self._glossary_user_exists)
+            revision = create_draft(
+                db.session,
+                request.get_json(silent=True),
+                current_user.id,
+                lambda key: db.session.get(SqlaTable, key),
+                self._glossary_user_exists,
+                self._glossary_metric_approved,
+            )
             db.session.commit()
         except GlossaryConflictError as ex:
             db.session.rollback()
@@ -2402,7 +2473,16 @@ class SemanticLayerAPI(RestApi):
                 raise GlossaryValidationError("expected_revision is required.")
             content = dict(payload)
             content.pop("expected_revision")
-            revision = update_draft(db.session, current, content, expected_revision, current_user.id, lambda key: db.session.get(SqlaTable, key), self._glossary_user_exists)
+            revision = update_draft(
+                db.session,
+                current,
+                content,
+                expected_revision,
+                current_user.id,
+                lambda key: db.session.get(SqlaTable, key),
+                self._glossary_user_exists,
+                self._glossary_metric_approved,
+            )
             db.session.commit()
         except GlossaryConflictError as ex:
             db.session.rollback()
@@ -2423,10 +2503,16 @@ class SemanticLayerAPI(RestApi):
             if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
                 raise GlossaryValidationError("expected_revision is required.")
             if event == "approve":
-                approve_revision(db.session, revision, expected_revision, actor_id, reason)
+                approve_revision(
+                    db.session, revision, expected_revision, actor_id, reason, self._second_reviewer_required()
+                )
             else:
                 revoke_revision(db.session, revision, expected_revision, actor_id, reason)
             db.session.commit()
+        except GlossarySelfApprovalError:
+            db.session.rollback()
+            message = "Người soạn thuật ngữ không thể tự duyệt; cần một quản trị viên khác duyệt."
+            return self.response(403, message=message)
         except GlossaryConflictError as ex:
             db.session.rollback()
             return self.response(409, message=str(ex))
@@ -2472,6 +2558,7 @@ class SemanticLayerAPI(RestApi):
             return self.response(403, message="Admin access required.")
         _ensure_dictionary_tables()
         events = db.session.query(GlossaryTermAuditEvent).filter_by(term_id=term_id).order_by(GlossaryTermAuditEvent.id).all()
+        user_name = self._user_names()
         return self.response(
             200,
             events=[
@@ -2480,6 +2567,7 @@ class SemanticLayerAPI(RestApi):
                     "action": row.event_type,
                     "revision_number": row.revision_number,
                     "actor_id": row.actor_id,
+                    "actor_name": user_name(row.actor_id),
                     "reason": row.reason,
                     "created_at": row.occurred_at.isoformat(),
                 }
@@ -2510,6 +2598,8 @@ class SemanticLayerAPI(RestApi):
                 if link.kind != "dataset" and target is None:
                     continue
                 if glossary_link_fingerprint(dataset, link.kind, target) != link.fingerprint:
+                    continue
+                if link.kind == "metric" and not self._glossary_metric_approved(dataset, target):
                     continue
                 visible_links.append(
                     {"kind": link.kind, "dataset_id": link.dataset_id, "column_name": link.column_name, "metric_id": link.metric_id}

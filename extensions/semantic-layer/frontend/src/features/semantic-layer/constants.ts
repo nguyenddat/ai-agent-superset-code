@@ -10,7 +10,7 @@ export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: strin
   { id: 'dictionary', label: 'Data Dictionary', description: 'Chỉnh metadata datasets và columns' },
   { id: 'semantic', label: 'Semantic Model', description: 'Nghiệp vụ và data lineage' },
   { id: 'metrics', label: 'Metrics', description: 'Duyệt định nghĩa metric và chạy thử' },
-  { id: 'glossary', label: 'Business Glossary', description: 'Governed business terms' },
+  { id: 'glossary', label: 'Business Glossary', description: 'Thuật ngữ nghiệp vụ được quản trị' },
   { id: 'rules', label: 'Expert Rules', description: 'Quy tắc nghiệp vụ của chuyên gia' },
 ];
 
