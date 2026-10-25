@@ -168,17 +168,29 @@ function PairRows({ rows, firstLabel, secondLabel, firstPlaceholder, secondPlace
   );
 }
 
+/** Starting values for a new rule; the conditions stay empty because the threshold is the expert's to set. */
+export type ExpertRuleDraft = {
+  name: string;
+  datasetId: number | null;
+  glossaryTermIds: number[];
+  example: { question: string; intent: string } | null;
+};
+
 type ExpertRuleEditorProps = {
   rule: ExpertRule | null;
+  draft?: ExpertRuleDraft | null;
   datasets: ExpertRuleDatasetOption[];
   onCancel: () => void;
   onSaved: (ruleId: number) => void;
 };
 
 /** Writes a new rule or the next draft of an existing one; saving always leaves a draft for a second reviewer. */
-export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRuleEditorProps) {
-  const [datasetId, setDatasetId] = useState<number | null>(rule?.dataset_id ?? datasets[0]?.id ?? null);
-  const [name, setName] = useState(rule?.name ?? '');
+export function ExpertRuleEditor({ rule, draft, datasets, onCancel, onSaved }: ExpertRuleEditorProps) {
+  const draftDatasetId = datasets.some(item => item.id === draft?.datasetId) ? draft?.datasetId : undefined;
+  const [datasetId, setDatasetId] = useState<number | null>(
+    rule?.dataset_id ?? draftDatasetId ?? datasets[0]?.id ?? null,
+  );
+  const [name, setName] = useState(rule?.name ?? draft?.name ?? '');
   const [conditions, setConditions] = useState<ConditionDraft[]>(() => (
     rule?.conditions.map(condition => ({
       key: draftKey(),
@@ -192,11 +204,12 @@ export function ExpertRuleEditor({ rule, datasets, onCancel, onSaved }: ExpertRu
   ));
   const [examples, setExamples] = useState<PairDraft[]>(() => (
     rule?.examples.map(item => ({ key: draftKey(), first: item.question, second: item.intent }))
-    ?? [{ key: draftKey(), first: '', second: '' }]
+    ?? [{ key: draftKey(), first: draft?.example?.question ?? '', second: draft?.example?.intent ?? '' }]
   ));
   const dataset = datasets.find(item => item.id === datasetId);
   const [glossaryTermIds, setGlossaryTermIds] = useState<number[]>(() => (
-    (rule?.glossary_terms ?? []).map(term => term.id).filter(id => dataset?.glossary_terms.some(term => term.id === id))
+    (rule ? rule.glossary_terms.map(term => term.id) : draft?.glossaryTermIds ?? [])
+      .filter(id => dataset?.glossary_terms.some(term => term.id === id))
   ));
   const droppedTerms = (rule?.glossary_terms ?? []).length - glossaryTermIds.length;
   const [saving, setSaving] = useState(false);

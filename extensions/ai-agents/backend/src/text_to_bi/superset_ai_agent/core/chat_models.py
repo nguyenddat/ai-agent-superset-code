@@ -1,19 +1,24 @@
+import os
+from functools import lru_cache
+
 from langchain_openai import ChatOpenAI
 
-from .settings import config
+MODEL_NAME = "openai/gpt-6-luna"
 
-model_names = ["openai/gpt-6-luna"]
-model_cache = {}
 
-def get_chat_model(model_name: str = model_names[0]) -> ChatOpenAI:
-    if model_name not in model_cache:
-        if model_name not in model_names:
-            raise ValueError(f"Model '{model_name}' not found. Available models: {model_names}")
-
-        model_cache[model_name] = ChatOpenAI(
-            model=model_name,
-            temperature=0.0,
-            api_key=config.openrouter_api_key,
-            base_url="https://openrouter.ai/api/v1",
+@lru_cache(maxsize=1)
+def get_chat_model() -> ChatOpenAI:
+    """The OpenRouter chat model every agent step uses; the key comes from the Superset container environment."""
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY chưa được cấu hình. Đặt biến này trong extensions/ai-agents/.env "
+            "rồi khởi động lại dịch vụ superset."
         )
-    return model_cache[model_name]
+    return ChatOpenAI(
+        model=MODEL_NAME,
+        temperature=0.0,
+        max_tokens=4096,
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+    )

@@ -195,6 +195,8 @@ export type GlossaryTermPayload = {
 export type SupersetDatabase = {
   id: number;
   database_name: string;
+  /** Superset's extra JSON, as a string. */
+  extra?: string | null;
 };
 
 export type DashboardDataset = {
@@ -396,6 +398,65 @@ export type ExpertRule = {
   approved_at: string | null;
   revoker_name: string | null;
   revoked_at: string | null;
+};
+
+export type AgentMissingKind = 'glossary' | 'metric' | 'expert_rule';
+
+/** What AI Agent proposed for each missing kind; an expert rule proposal leaves the threshold to the expert. */
+export type AgentSuggestions = {
+  glossary?: { name: string; definition: string; synonyms: string[] };
+  metric?: { name: string; definition: string; unit: string };
+  expert_rule?: { name: string; concept: string; description: string };
+};
+
+/** `pending` means no administrator has handled the question yet. */
+export type QuestionHandlingStatus = 'pending' | 'to_create' | 'created' | 'ignored';
+
+/** A question AI Agent could not fully resolve, as its review endpoint returns it. */
+export type AgentReviewQuestion = {
+  id: number;
+  question: string;
+  rewritten_question: string | null;
+  asked_by: string | null;
+  asked_on: string | null;
+  glossary_terms: Array<{ id: number; name: string }>;
+  metrics: Array<{ dataset_id: number; metric_id: number; name: string }>;
+  expert_rules: Array<{ id: number; name: string }>;
+  missing: AgentMissingKind[];
+  /** False for a quantitative question, which needs no expert rule; null on questions logged before the agent asked. */
+  requires_expert_rule: boolean | null;
+  suggestions: AgentSuggestions;
+  handling: {
+    status: QuestionHandlingStatus; note: string | null; handled_by: string | null; handled_on: string | null;
+  };
+};
+
+export type AgentReviewQuestionList = {
+  counts: Record<QuestionHandlingStatus, number>;
+  questions: AgentReviewQuestion[];
+};
+
+export type AgentDefinitionKind = 'glossary' | 'expert_rule';
+
+/** `promoted`: a shared term or rule now covers the concept; `ignored`: it stays the user's own sense. */
+export type AgentDefinitionReviewStatus = 'pending' | 'promoted' | 'ignored';
+
+/** What one user confirmed a concept means to them on one dashboard. */
+export type AgentUserDefinition = {
+  id: number;
+  kind: AgentDefinitionKind;
+  name: string;
+  concept: string | null;
+  definition: string;
+  user_id: number;
+  defined_by: string | null;
+  dashboard_id: number;
+  dashboard_title: string | null;
+  question: string | null;
+  review_status: AgentDefinitionReviewStatus;
+  reviewed_by: string | null;
+  reviewed_on: string | null;
+  updated_on: string | null;
 };
 
 export type ExpertRuleList = { rules: ExpertRule[]; current_user_id: number | null; require_second_reviewer: boolean };

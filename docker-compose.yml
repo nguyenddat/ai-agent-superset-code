@@ -42,7 +42,8 @@ services:
     command: >-
       sh -c 'superset db upgrade && superset init && python /app/pythonpath/create_admin.py &&
       python /app/pythonpath/bootstrap_warehouse.py &&
-      python /app/pythonpath/bootstrap_metrics.py && python /app/pythonpath/bootstrap_dashboard.py'
+      python /app/pythonpath/bootstrap_metrics.py && python /app/pythonpath/bootstrap_dashboard.py &&
+      python /app/pythonpath/bootstrap_governance.py'
     env_file:
       - ./extensions/ai-agents/.env
     environment:
@@ -62,12 +63,15 @@ services:
       WAREHOUSE_DB_USER: ${WAREHOUSE_DB_USER:-bi}
       WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD:-bi_dev_password}
       WAREHOUSE_SUPERSET_NAME: ${WAREHOUSE_SUPERSET_NAME:-Weather Warehouse}
+      # Read-only login that the "Text to BI Governance" connection uses for the AI Agent reporting views.
+      TEXT_TO_BI_REPORTING_DB_PASSWORD: ${TEXT_TO_BI_REPORTING_DB_PASSWORD:-reporting_dev_password}
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       - ./superset/create_admin.py:/app/pythonpath/create_admin.py:ro
       - ./superset/bootstrap_warehouse.py:/app/pythonpath/bootstrap_warehouse.py:ro
       - ./superset/bootstrap_metrics.py:/app/pythonpath/bootstrap_metrics.py:ro
       - ./superset/bootstrap_dashboard.py:/app/pythonpath/bootstrap_dashboard.py:ro
+      - ./superset/bootstrap_governance.py:/app/pythonpath/bootstrap_governance.py:ro
       - superset_extensions:/app/superset_home/extensions
     depends_on:
       superset-db:

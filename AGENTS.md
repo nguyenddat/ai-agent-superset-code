@@ -13,9 +13,12 @@ metadata database, and two Superset extensions: an AI Agent and a Semantic Layer
   creates dashboard tables from that business layer.
 - `airflow/` contains the Open-Meteo ingestion DAG and its runtime files.
 - `superset/` contains the Superset image definition, local configuration, and
-  admin and warehouse bootstrap scripts.
+  admin, warehouse and governance bootstrap scripts. `bootstrap_governance.py`
+  builds the "Tổng quan AI Agent" dashboard on read-only views of the AI Agent
+  question log.
 - `extensions/ai-agents/` contains the AI Agent frontend and backend. Its
-  dashboard panel streams chat requests through the Superset extension API.
+  `/ai-agent/` chat page keeps each user's conversations and streams each step
+  as a tool call; see its own `AGENTS.md`.
 - `extensions/semantic-layer/` contains the admin-only semantic metadata UI and
   backend. Its metadata tables live in Superset's metadata database.
 - `extensions/*.supx` contains the bundles copied into the running Superset

@@ -9,6 +9,8 @@ import { ExpertRules } from '../features/semantic-layer/ExpertRules';
 import { BusinessCanvas } from '../features/semantic-layer/BusinessCanvas';
 import { Glossary } from '../features/semantic-layer/Glossary';
 import { MetricContracts } from '../features/semantic-layer/MetricContracts';
+import { Overview } from '../features/semantic-layer/Overview';
+import { QuestionReview } from '../features/semantic-layer/QuestionReview';
 import { requestJson, semanticLayerApi, supersetApi } from '../features/semantic-layer/api';
 import {
   SEMANTIC_LAYER_PAGE,
@@ -24,6 +26,15 @@ import { getDatasetName, groupDatasetsByLayer } from '../features/semantic-layer
 import { HeaderPicker } from '../features/semantic-layer/HeaderPicker';
 import { LayersDialog } from '../features/semantic-layer/LayersDialog';
 import type { DashboardDataset, DataLayer, DatasetDictionary, SupersetDatabase, ThemeMode } from '../features/semantic-layer/types';
+
+/** Connections marked `text_to_bi_internal` (the AI Agent reporting views) hold no business data to model. */
+function isInternalDatabase(database: SupersetDatabase): boolean {
+  try {
+    return JSON.parse(database.extra || '{}')?.text_to_bi_internal === true;
+  } catch {
+    return false;
+  }
+}
 
 function activeSupersetTheme(): ThemeMode {
   const luminance = (color: string) => {
@@ -145,7 +156,8 @@ function SemanticLayerPage() {
         if (!response.ok) throw new Error(`Không tải được databases (${response.status}).`);
         const payload = await response.json();
         if (!active) return;
-        const result = Array.isArray(payload?.result) ? payload.result as SupersetDatabase[] : [];
+        const result = (Array.isArray(payload?.result) ? payload.result as SupersetDatabase[] : [])
+          .filter(database => !isInternalDatabase(database));
         setDatabases(result);
         setSelectedDatabase(result[0]?.id ?? null);
         if (result.length === 0) setLoading(false);
@@ -260,7 +272,7 @@ function SemanticLayerPage() {
                 placeholder="Chọn database"
               />
             </div>
-            {activeModule !== 'metrics' && activeModule !== 'rules' && activeModule !== 'glossary' ? (
+            {activeModule === 'dictionary' || activeModule === 'semantic' ? (
               <div className="sl-header-select sl-dataset-select">
                 <HeaderPicker
                   ariaLabel="Dataset"
@@ -282,7 +294,11 @@ function SemanticLayerPage() {
             <div className="sl-state sl-error"><p>{error}</p></div>
           ) : (
             <div className="sl-content">
-              {activeModule === 'glossary' ? (
+              {activeModule === 'overview' ? (
+                <main className="sl-details"><Overview /></main>
+              ) : activeModule === 'questions' ? (
+                <main className="sl-details"><QuestionReview /></main>
+              ) : activeModule === 'glossary' ? (
                 <main className="sl-details"><Glossary /></main>
               ) : activeModule === 'rules' ? (
                 <main className="sl-details"><ExpertRules /></main>

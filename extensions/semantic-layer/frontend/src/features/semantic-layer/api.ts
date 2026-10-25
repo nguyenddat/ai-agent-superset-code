@@ -1,4 +1,15 @@
-import { EXPERT_RULES_API, SEMANTIC_LAYER_API } from './constants';
+import { AGENT_DEFINITIONS_API, AGENT_QUESTIONS_API, EXPERT_RULES_API, SEMANTIC_LAYER_API } from './constants';
+
+export const agentQuestionsApi = {
+  review: (handling: string, missing: string) => (
+    `${AGENT_QUESTIONS_API}/review?handling=${encodeURIComponent(handling)}&missing=${encodeURIComponent(missing)}`
+  ),
+  handling: (questionId: number) => `${AGENT_QUESTIONS_API}/${encodeURIComponent(questionId)}/handling`,
+};
+
+export const agentDefinitionsApi = {
+  review: `${AGENT_DEFINITIONS_API}/review`,
+};
 
 export const expertRulesApi = {
   rules: `${EXPERT_RULES_API}/expert-rules`,
@@ -59,8 +70,11 @@ export const semanticLayerApi = {
 
 export const supersetApi = {
   csrfToken: '/api/v1/security/csrf_token/',
-  databases: `/api/v1/database/?q=${encodeURIComponent('(order_column:database_name,order_direction:asc,page_size:100)')}`,
+  databases: `/api/v1/database/?q=${encodeURIComponent(
+    '(columns:!(id,database_name,extra),order_column:database_name,order_direction:asc,page_size:100)',
+  )}`,
   dataset: (datasetId: number) => `/api/v1/dataset/${encodeURIComponent(datasetId)}`,
+  dashboard: (idOrSlug: number | string) => `/api/v1/dashboard/${encodeURIComponent(idOrSlug)}`,
   databaseDatasets: (databaseId: number, page: number) => `/api/v1/dataset/?q=${encodeURIComponent(
     `(filters:!((col:database,opr:rel_o_m,value:${databaseId})),page:${page},page_size:100)`,
   )}`,

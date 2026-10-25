@@ -1214,3 +1214,108 @@
 .sl-rule-wide { width: 100%; max-width: 420px; }
 .sl-rule-condition { display: grid; max-width: 760px; grid-template-columns: minmax(0, 1.4fr) 180px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
 .sl-rule-pair { display: grid; max-width: 760px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+
+/* Overview: the embedded AI Agent dashboard. */
+.sl-overview {
+  /* The page resets scrolled frame containers, so the overview scrolls itself rather than .sl-details. */
+  display: grid; min-height: 0; flex: 1; align-content: start; gap: 12px; overflow-y: auto; padding-right: 4px;
+}
+.sl-overview h3 { margin: 0; color: var(--sl-text); font-size: 14px; font-weight: 650; }
+.sl-overview h4 { margin: 0; color: var(--sl-text); font-size: 13px; font-weight: 650; }
+.sl-overview h4 span { margin-left: 4px; color: var(--sl-muted); font-weight: 500; }
+.sl-overview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sl-overview-actions { display: flex; align-items: center; gap: 12px; }
+.sl-overview-link { display: inline-flex; align-items: center; gap: 4px; color: var(--sl-accent); font-size: 12px; }
+.sl-overview-link svg { width: 13px; height: 13px; }
+.sl-overview-dashboard {
+  width: 100%; height: 980px; border: 1px solid var(--sl-border); border-radius: 8px; background: var(--sl-surface);
+}
+
+
+/* A form opened from "Xử lý câu hỏi": the question it came from and what AI Agent proposed. */
+.sl-creation-origin {
+  display: flex; flex: none; gap: 10px; margin: 14px 16px 0; padding: 10px 12px; border: 1px solid var(--sl-border);
+  border-left: 3px solid var(--sl-accent); border-radius: 8px; background: var(--sl-surface-muted); font-size: 13px;
+}
+.sl-creation-origin > svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--sl-accent); }
+.sl-creation-origin > div { display: grid; min-width: 0; gap: 4px; }
+.sl-creation-origin q { color: var(--sl-text); font-style: italic; }
+.sl-creation-origin p { margin: 0; color: var(--sl-text-secondary); }
+.sl-creation-proposal { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 4px 0; }
+.sl-creation-proposal dt { color: var(--sl-muted); }
+.sl-creation-proposal dd { margin: 0; color: var(--sl-text); }
+.sl-creation-actions { display: flex; align-items: center; gap: 12px; }
+
+/* Question review: AI Agent questions that missed a glossary term, metric or expert rule; create what is missing or
+   ignore the question. */
+.sl-question-review { --sl-kind-glossary: #0d9488; --sl-kind-metric: #2563eb; --sl-kind-expert_rule: #7c3aed; }
+.sl-question-review [data-kind="glossary"] { --sl-kind-color: var(--sl-kind-glossary); }
+.sl-question-review [data-kind="metric"] { --sl-kind-color: var(--sl-kind-metric); }
+.sl-question-review [data-kind="expert_rule"] { --sl-kind-color: var(--sl-kind-expert_rule); }
+
+.sl-question-item { flex-direction: column; align-items: stretch; gap: 3px; }
+.sl-question-item-text {
+  display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.4;
+}
+.sl-question-item-meta {
+  display: flex; justify-content: space-between; gap: 8px; color: var(--sl-muted); font-size: 11px; font-weight: 400;
+}
+.sl-question-item-meta > span { font-variant-numeric: tabular-nums; }
+.sl-question-list-empty { padding: 8px 6px; }
+
+.sl-question-review .sl-metrics-title { max-width: 720px; }
+.sl-question-review .sl-metrics-title h3 { font-size: 16px; line-height: 1.4; }
+.sl-question-review .sl-metrics-title p { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sl-question-review .sl-metrics-title .sl-question-understood { color: var(--sl-text-secondary); font-size: 13px; }
+.sl-question-busy { width: 16px; height: 16px; align-self: center; color: var(--sl-muted); }
+.sl-question-kind {
+  padding: 0 7px; border: 1px solid var(--sl-border); border-radius: 999px; color: var(--sl-text-secondary);
+  font-size: 10px; font-weight: 600; line-height: 16px;
+}
+.sl-question-kind.is-qualitative {
+  border-color: color-mix(in srgb, var(--sl-kind-expert_rule) 45%, transparent); color: var(--sl-kind-expert_rule);
+}
+
+.sl-question-proposals {
+  display: flex; flex-direction: column; margin: 0; padding: 0; border: 1px solid var(--sl-border);
+  border-radius: 8px; list-style: none;
+}
+.sl-question-proposals li { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; }
+.sl-question-proposals li + li { border-top: 1px solid var(--sl-border); }
+.sl-question-proposals li > button { flex: none; }
+.sl-question-kind-icon {
+  display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px;
+  border-radius: 6px; color: var(--sl-kind-color);
+  background: color-mix(in srgb, var(--sl-kind-color) 12%, transparent);
+}
+.sl-question-kind-icon svg { width: 15px; height: 15px; }
+.sl-question-proposal-body { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.sl-question-proposal-kind { color: var(--sl-muted); font-size: 11px; font-weight: 600; }
+.sl-question-proposal-body strong { color: var(--sl-text); font-size: 14px; font-weight: 600; }
+.sl-question-proposal-body p { margin: 2px 0 0; color: var(--sl-text-secondary); font-size: 12px; line-height: 1.5; }
+.sl-question-found { margin: 0; color: var(--sl-text-secondary); font-size: 12px; }
+.sl-question-found span { margin-right: 6px; color: var(--sl-muted); font-weight: 600; }
+
+.sl-question-empty {
+  display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  color: var(--sl-muted); font-size: 13px;
+}
+.sl-question-empty svg { width: 28px; height: 28px; }
+.sl-question-empty p { margin: 0; }
+
+/* "Xử lý câu hỏi": users' own definitions grouped by concept, and questions missing a metric. */
+.sl-question-review-page { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; }
+.sl-question-review-page > .sl-metrics-tabs { margin-top: 0; padding: 0; }
+.sl-definition-review-kind { display: inline-flex; align-items: center; gap: 4px; color: var(--sl-kind-color); }
+.sl-definition-review-kind svg { width: 12px; height: 12px; }
+.sl-definition-review-note {
+  margin: 0; padding: 10px 12px; border: 1px solid var(--sl-border); border-radius: 8px; background: var(--sl-surface-muted);
+  color: var(--sl-text-secondary); font-size: 12px; line-height: 1.55;
+}
+.sl-definition-review-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.sl-definition-review-list li {
+  display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--sl-border); border-radius: 8px;
+}
+.sl-definition-review-text { margin: 0; color: var(--sl-text); font-size: 13px; font-weight: 500; line-height: 1.5; }
+.sl-definition-review-list q { color: var(--sl-text-secondary); font-size: 12px; font-style: italic; }
+.sl-definition-review-meta { color: var(--sl-muted); font-size: 12px; }

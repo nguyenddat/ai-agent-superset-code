@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Ban, Check, FilePlus2, LoaderCircle, RotateCcw, Search } from 'lucide-react';
+import { AlertCircle, Ban, Check, ExternalLink, FilePlus2, LoaderCircle, RotateCcw, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi } from './api';
+import { CreationOrigin } from './CreationOrigin';
+import { takeMetricRequest } from './creationRequest';
+import type { MetricRequest } from './creationRequest';
 import { MetricDecisionDialog } from './MetricDecisionDialog';
 import type { MetricDecision } from './MetricDecisionDialog';
 import { formatTime, MetricDefinitionPanel } from './MetricDefinitionPanel';
@@ -73,7 +76,38 @@ function FilterSelect({ label, items, value, onChange }: {
 type MetricContractsProps = { databaseId: number | null };
 
 /** Admin workspace listing every saved metric with its review state: propose, approve, revoke and try each metric. */
+/**
+ * A metric AI Agent proposed for a question. Metrics are saved metrics of a Superset dataset, so the administrator adds
+ * it in the dataset editor and comes back here to give it a business definition and propose it for approval.
+ */
+function ProposedMetric({ request, onClose }: { request: MetricRequest; onClose: () => void }) {
+  const proposal = request.question.suggestions.metric;
+  return (
+    <CreationOrigin request={request}>
+      {proposal ? (
+        <dl className="sl-creation-proposal">
+          <dt>Tên metric</dt><dd>{proposal.name}</dd>
+          <dt>Cách tính</dt><dd>{proposal.definition}</dd>
+          {proposal.unit ? <><dt>Đơn vị</dt><dd>{proposal.unit}</dd></> : null}
+        </dl>
+      ) : null}
+      <p>
+        Metric được tạo trong dataset của Superset: mở dataset, thêm metric với tên trên, rồi quay lại đây nhập định
+        nghĩa nghiệp vụ và tạo bản đề xuất.
+      </p>
+      <div className="sl-creation-actions">
+        <a className="sl-overview-link" href="/tablemodelview/list/" target="_blank" rel="noreferrer">
+          Mở danh sách dataset <ExternalLink aria-hidden="true" />
+        </a>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}><X /> Đóng</Button>
+      </div>
+    </CreationOrigin>
+  );
+}
+
 export function MetricContracts({ databaseId }: MetricContractsProps) {
+  // Set when "Xử lý câu hỏi" sent the administrator here to add the metric a question was missing.
+  const [creation, setCreation] = useState<MetricRequest | null>(() => takeMetricRequest());
   const [reviewList, setReviewList] = useState<MetricReviewList>(
     { datasets: [], metrics: [], users: [], current_user_id: null, require_second_reviewer: false },
   );
@@ -233,6 +267,7 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
         </div>
       </aside>
       <section className="sl-metrics-detail" aria-label="Chi tiết metric">
+        {creation ? <ProposedMetric request={creation} onClose={() => setCreation(null)} /> : null}
         {error ? <div className="sl-metric-error" role="alert"><AlertCircle /> {error}</div> : null}
         {!selectedMetric ? <p className="sl-metric-muted">Chọn một metric để xem chi tiết.</p> : (
           <>

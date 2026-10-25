@@ -49,21 +49,33 @@ export function glossaryErrorMessage(message: string): string {
   return GLOSSARY_ERRORS.find(([fragment]) => message.includes(fragment))?.[1] ?? message;
 }
 
+/** Starting values for a new term, such as the one AI Agent proposed for a question it could not resolve. */
+export type GlossaryDraft = {
+  name: string;
+  definition: string;
+  synonyms: string[];
+  link: { datasetId: number; target: string } | null;
+};
+
 type GlossaryEditorProps = {
   term: GlossaryReviewTerm | null;
+  draft?: GlossaryDraft | null;
   datasets: GlossaryDatasetOption[];
   onCancel: () => void;
   onSaved: (termId: number) => void;
 };
 
 /** Writes a new term or the next draft of an existing one; saving always leaves a draft to approve. */
-export function GlossaryEditor({ term, datasets, onCancel, onSaved }: GlossaryEditorProps) {
+export function GlossaryEditor({ term, draft, datasets, onCancel, onSaved }: GlossaryEditorProps) {
   const revision = term?.current_revision ?? null;
-  const [name, setName] = useState(term?.canonical_name ?? '');
-  const [definition, setDefinition] = useState(revision?.definition ?? '');
-  const [synonyms, setSynonyms] = useState((revision?.synonyms ?? []).join(', '));
+  const [name, setName] = useState(term?.canonical_name ?? draft?.name ?? '');
+  const [definition, setDefinition] = useState(revision?.definition ?? draft?.definition ?? '');
+  const [synonyms, setSynonyms] = useState((revision?.synonyms ?? draft?.synonyms ?? []).join(', '));
   const [links, setLinks] = useState<LinkDraft[]>(() => {
     const savedLinks = revision?.links ?? [];
+    if (savedLinks.length === 0 && draft?.link) {
+      return [{ key: nextLinkKey++, datasetId: String(draft.link.datasetId), target: draft.link.target }];
+    }
     if (savedLinks.length === 0) return [emptyLink()];
     return savedLinks.map(link => (
       { key: nextLinkKey++, datasetId: String(link.dataset_id), target: linkTarget(link) }

@@ -1,70 +1,131 @@
 import json
 import logging
-import queue
-import threading
+import time
+from datetime import datetime, timezone
 
-from flask import Response, current_app, request, stream_with_context
+from flask import Response, request, stream_with_context
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
-from superset.exceptions import SupersetSecurityException
-from superset.models.dashboard import Dashboard
+from superset import db
+from superset.commands.dashboard.exceptions import DashboardAccessDeniedError, DashboardNotFoundError
+from superset.daos.dashboard import DashboardDAO
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
-from ...agent_package.bi_planning import plan_bi
-from ...agent_package.data_builder import build_data
-from ...agent_package.metadata_resolution import resolve_metadata, _metadata_resolution_context
-from ...agent_package.context.dashboard import get_dashboard_datasets, get_dashboard_title
-from ...core.superset_client import superset_client
+from ...core.chat_models import get_chat_model
+from ...models.question_log import AgentChatSession, AgentQuestion, ensure_question_tables
+from ..definitions.route import user_definitions
+from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, recent_history, run_agent
+from .semantic_source import SemanticSourceError, load_semantic_catalog
 
 logger = logging.getLogger(__name__)
-MAX_METADATA_PLAN_FEEDBACK_ROUNDS = 2
+MAX_QUESTION_LENGTH = 2000
+SESSION_TITLE_LENGTH = 80
 
 
 def _event(name: str, data: dict) -> str:
     return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
-def _metadata_feedback(resolution) -> str | None:
-    """Build a short actionable handoff; infrastructure failures are not planning feedback."""
-    non_actionable = {
-        "metadata_unavailable", "missing_dataset", "missing_dashboard_context",
-        "unauthorized_dataset", "validator_exception", "invalid_tool_input",
-    }
-    if any(item.get("code") in non_actionable for item in resolution.errors):
+def _session_title(question: str) -> str:
+    """A new conversation is named after its first question, cut at a word boundary."""
+    title = " ".join(question.split())
+    if len(title) <= SESSION_TITLE_LENGTH:
+        return title
+    return title[:SESSION_TITLE_LENGTH].rsplit(" ", 1)[0] + "…"
+
+
+def _session_history(session_id: int, excluded_question_id: int | None) -> list[dict[str, str]]:
+    """The conversation's last answered turns, which the agent uses to rewrite a follow-up question.
+
+    A question answered again after the user confirmed definitions leaves out its first answer.
+    """
+    answered = (
+        db.session.query(AgentQuestion.question, AgentQuestion.answer)
+        .filter(AgentQuestion.session_id == session_id, AgentQuestion.answer.isnot(None), AgentQuestion.error.is_(None))
+        .filter(AgentQuestion.id != (excluded_question_id or 0))
+        .order_by(AgentQuestion.id.desc())
+        .limit(MAX_HISTORY_TURNS)
+        .all()
+    )
+    return recent_history([
+        message
+        for question, answer in reversed(answered)
+        for message in ({"role": "user", "content": question}, {"role": "assistant", "content": answer})
+    ])
+
+
+def _user_definitions(user_id: int, dashboard_id: int) -> list[dict]:
+    """What the user confirmed concepts mean on this dashboard, in the shape the agent reads."""
+    return [
+        {"id": item.id, "kind": item.kind, "name": item.name, "concept": item.concept, "definition": item.definition}
+        for item in user_definitions(user_id, dashboard_id)
+    ]
+
+
+def _record_tool_call(tool_calls: list[dict], name: str, data: dict) -> None:
+    """Keep each step as the browser shows it: the start's arguments merged with the end's status and result."""
+    if name == "tool_start":
+        tool_calls.append({**data, "status": "running"})
+    elif name == "tool_end":
+        for tool_call in tool_calls:
+            if tool_call["id"] == data["id"]:
+                tool_call.update(data)
+
+
+def _save_question(
+    *,
+    user_id: int,
+    session_id: int,
+    dashboard_id: int,
+    question: str,
+    history_turns: int,
+    outcome: AgentOutcome,
+    tool_calls: list[dict],
+    retry_of: int | None,
+    started: float,
+    error: str | None,
+) -> int | None:
+    """Record the question as the conversation's next turn; a failed write is logged and never breaks the answer."""
+    try:
+        record = AgentQuestion(
+            user_id=user_id,
+            session_id=session_id,
+            dashboard_id=dashboard_id,
+            question=question,
+            rewritten_question=outcome.rewritten_question,
+            history_turns=history_turns,
+            glossary_terms=outcome.glossary_terms,
+            metrics=outcome.metrics,
+            expert_rules=outcome.expert_rules,
+            missing=[] if error else outcome.missing,
+            requires_expert_rule=None if error else outcome.requires_expert_rule,
+            suggestions=None if error else outcome.suggestions,
+            tool_calls=tool_calls,
+            clarifications=None if error else outcome.clarifications or None,
+            clarification_state="pending" if outcome.clarifications and not error else None,
+            retry_of=retry_of,
+            status="failed" if error else outcome.status,
+            answer=outcome.answer or None,
+            error=error,
+            duration_ms=round((time.monotonic() - started) * 1000),
+        )
+        db.session.add(record)
+        db.session.query(AgentChatSession).filter(AgentChatSession.id == session_id).update(
+            {AgentChatSession.updated_on: datetime.now(timezone.utc)}
+        )
+        db.session.commit()
+        return record.id
+    except Exception:
+        db.session.rollback()
+        logger.exception("Could not record the AI Agent question")
         return None
-
-    details = [
-        str(item.get("message", "")).strip()
-        for item in resolution.errors
-        if isinstance(item, dict) and item.get("message")
-    ][:2]
-    if not details and resolution.resolution and resolution.resolution.message:
-        details.append(resolution.resolution.message.strip())
-    if not details:
-        return None
-    return "MetadataResolution chưa ánh xạ được BI Plan: " + "; ".join(details)[:450]
-
-
-def get_chat_context(user_id: int, dashboard_id: int) -> dict:
-    datasets = get_dashboard_datasets(dashboard_id, superset_client)
-    title = get_dashboard_title(dashboard_id, superset_client)
-    return {
-        "user_id": user_id,
-        "dashboard_id": dashboard_id,
-        "allowed_dataset_ids": [dataset.id for dataset in datasets],
-        "dataset_names": {
-            str(dataset.id): dataset.name or dataset.datasource_name or str(dataset.id)
-            for dataset in datasets
-        },
-        "dashboard_title": title,
-    }
 
 
 @api(
     id="text_to_bi_chat_api",
     name="Superset AI Agent API",
-    description="Streaming BI planning API for the Superset AI Agent extension.",
+    description="Streaming semantic resolution API for the Superset AI Agent extension.",
     resource_name="chat",
 )
 class TextToBIAgentAPI(RestApi):
@@ -76,6 +137,12 @@ class TextToBIAgentAPI(RestApi):
     @safe
     @permission_name("read")
     def stream_chat(self):
+        """Answer one question in a conversation; without `session_id` it starts one about `dashboard_id`.
+
+        With `retry_of`, the conversation's earlier question is answered again, after the user confirmed definitions.
+        The reply streams as SSE: `session` first, then each step as a tool call, the answer, and `done`, which carries
+        the definitions the user is asked to confirm.
+        """
         from flask_wtf.csrf import validate_csrf
         from wtforms import ValidationError
 
@@ -85,157 +152,88 @@ class TextToBIAgentAPI(RestApi):
             return self.response(403, message="CSRF token không hợp lệ.")
 
         body = request.get_json(silent=True) or {}
+        user_id = int(current_user.id)
+        ensure_question_tables(db.engine)
+        session_id = body.get("session_id")
+        retry_of = body.get("retry_of")
+        if retry_of is not None:
+            if not isinstance(retry_of, int) or isinstance(retry_of, bool) or session_id is None:
+                return self.response_400(message="Câu hỏi cần trả lời lại không hợp lệ.")
+            earlier = db.session.query(AgentQuestion).filter_by(id=retry_of, session_id=session_id).one_or_none()
+            if earlier is None:
+                return self.response_404()
+            body = {**body, "question": earlier.question}
+        question = body.get("question")
+        if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_LENGTH:
+            return self.response_400(message="Câu hỏi phải là chuỗi không rỗng, tối đa 2000 ký tự.")
+        question = question.strip()
+
+        if session_id is None:
+            # Every conversation is about a dashboard the user may open; the answers and the log are tied to it.
+            dashboard_id = body.get("dashboard_id")
+            if not isinstance(dashboard_id, int) or isinstance(dashboard_id, bool):
+                return self.response_400(message="Chọn dashboard trước khi hỏi AI Agent.")
+        else:
+            if not isinstance(session_id, int) or isinstance(session_id, bool):
+                return self.response_400(message="Cuộc trò chuyện không hợp lệ.")
+            chat_session = db.session.query(AgentChatSession).filter_by(id=session_id, user_id=user_id).one_or_none()
+            if chat_session is None:
+                return self.response_404()
+            dashboard_id = chat_session.dashboard_id
         try:
-            dashboard_id = int(body["dashboard_id"])
-            query = body["query"]
-            if not isinstance(query, str) or not query.strip():
-                raise ValueError("query must be a non-empty string")
-            dashboard = Dashboard.get(dashboard_id)
-            if dashboard is None:
-                return self.response(404, message="Dashboard not found")
-            dashboard.raise_for_access()
-            user_id = int(current_user.id)
-        except (KeyError, TypeError, ValueError) as exc:
-            return self.response(400, message=f"Invalid request: {exc}")
-        except SupersetSecurityException:
-            return self.response(403, message="Dashboard access denied")
+            DashboardDAO.get_by_id_or_slug(dashboard_id)
+        except (DashboardNotFoundError, DashboardAccessDeniedError):
+            return self.response(403, message="Dashboard không tồn tại hoặc bạn không có quyền xem.")
+
+        if session_id is None:
+            chat_session = AgentChatSession(user_id=user_id, dashboard_id=dashboard_id, title=_session_title(question))
+            db.session.add(chat_session)
+            db.session.commit()
+        session_payload = {"id": chat_session.id, "title": chat_session.title, "dashboard_id": dashboard_id}
+        session_id = chat_session.id
+        history = _session_history(session_id, retry_of)
+        user_definitions = _user_definitions(user_id, dashboard_id)
+        # The Semantic Layer is read as this user, so forward their session rather than a service account.
+        cookie_header = request.headers.get("Cookie", "")
 
         @stream_with_context
         def events():
-            flask_app = current_app._get_current_object()
-            yield _event("status", {"message": "Đang lấy ngữ cảnh dashboard"})
+            started = time.monotonic()
+            outcome = AgentOutcome()
+            tool_calls: list[dict] = []
+            error = None
+            yield _event("session", session_payload)
+            pipeline = run_agent(
+                question, history, get_chat_model(), lambda: load_semantic_catalog(cookie_header), user_definitions,
+            )
             try:
-                context = get_chat_context(user_id, dashboard_id)
-                context["user_question"] = query
-                yield _event("context", {
-                    "dashboard_title": context["dashboard_title"],
-                    "authorized_dataset_count": len(context["allowed_dataset_ids"]),
-                    "datasets": context["dataset_names"],
-                })
-                yield _event("status", {"message": "Đang lập kế hoạch BI"})
-
-                event_queue: queue.Queue[str | None] = queue.Queue()
-
-                def run_planner():
-                    with flask_app.app_context():
-                      try:
-                        event_queue.put(_event("agent_start", {"agent": "bi_planner", "iteration": 1}))
-                        result = plan_bi(
-                            query,
-                            context,
-                            on_event=lambda name, data: event_queue.put(_event(name, data)),
-                        )
-                        if result.success and result.contract:
-                            contract = result.contract
-                            event_queue.put(_event("bi_contract", {
-                                "contract": contract.model_dump(mode="json"),
-                                "attempts": result.attempts,
-                            }))
-                            resolution = None
-                            for iteration in range(1, MAX_METADATA_PLAN_FEEDBACK_ROUNDS + 2):
-                                event_queue.put(_event("agent_start", {
-                                    "agent": "metadata_resolution", "iteration": iteration,
-                                }))
-                                resolution = resolve_metadata(
-                                    contract,
-                                    context,
-                                    on_event=lambda name, data: event_queue.put(_event(name, data)),
-                                )
-                                if resolution.success:
-                                    break
-
-                                feedback = _metadata_feedback(resolution)
-                                if not feedback or iteration > MAX_METADATA_PLAN_FEEDBACK_ROUNDS:
-                                    break
-
-                                event_queue.put(_event("agent_message", {
-                                    "from_agent": "metadata_resolution",
-                                    "to_agent": "bi_planner",
-                                    "message": feedback,
-                                    "iteration": iteration,
-                                }))
-                                planner_iteration = iteration + 1
-                                event_queue.put(_event("agent_start", {
-                                    "agent": "bi_planner", "iteration": planner_iteration,
-                                }))
-                                revised = plan_bi(
-                                    query,
-                                    context,
-                                    previous_contract=contract,
-                                    metadata_feedback=feedback,
-                                    on_event=lambda name, data: event_queue.put(_event(name, data)),
-                                )
-                                if not revised.success or not revised.contract:
-                                    event_queue.put(_event("planning_failure", {
-                                        "errors": revised.errors,
-                                        "attempts": revised.attempts,
-                                        "reason": "BI Planner không thể cập nhật plan theo phản hồi MetadataResolution.",
-                                    }))
-                                    break
-                                contract = revised.contract
-                                event_queue.put(_event("plan_revision", {
-                                    "iteration": planner_iteration,
-                                    "contract": contract.model_dump(mode="json"),
-                                }))
-                                event_queue.put(_event("bi_contract", {
-                                    "contract": contract.model_dump(mode="json"),
-                                    "attempts": revised.attempts,
-                                }))
-                                event_queue.put(_event("agent_message", {
-                                    "from_agent": "bi_planner",
-                                    "to_agent": "metadata_resolution",
-                                    "message": "Đã cập nhật BI Plan theo phản hồi, giữ nguyên mục tiêu phân tích. Hãy ánh xạ lại plan mới.",
-                                    "iteration": planner_iteration,
-                                }))
-
-                            if resolution:
-                                event_queue.put(_event("metadata_resolution", {
-                                    "success": resolution.success,
-                                    "resolution": resolution.resolution.model_dump(mode="json") if resolution.resolution else None,
-                                    "errors": resolution.errors,
-                                    "attempts": resolution.attempts,
-                                }))
-                            if resolution.success and resolution.resolution:
-                                event_queue.put(_event("status", {"message": "Đang tạo và kiểm tra SQL cuối cùng"}))
-                                resolved_context = resolution.agent_context or _metadata_resolution_context(
-                                    contract, context
-                                )
-                                event_queue.put(_event("agent_start", {"agent": "data_builder", "iteration": 1}))
-                                data_result = build_data(
-                                    resolved_context,
-                                    context,
-                                    resolution.resolution,
-                                    on_event=lambda name, data: event_queue.put(_event(name, data)),
-                                )
-                                event_queue.put(_event("data_builder_result", {
-                                    "success": data_result.success,
-                                    "sql": data_result.sql,
-                                    "summary": data_result.summary,
-                                    "chart_url": data_result.chart_url,
-                                    "chart_error": data_result.chart_error,
-                                    "errors": data_result.errors,
-                                    "attempts": data_result.attempts,
-                                }))
-                        else:
-                            event_queue.put(_event("planning_failure", {
-                                "errors": result.errors,
-                                "attempts": result.attempts,
-                            }))
-                        event_queue.put(_event("done", {}))
-                      except Exception:
-                          logger.exception("BI planner failed (dashboard_id=%s)", dashboard_id)
-                          event_queue.put(_event("error", {"message": "Không thể hoàn tất bước lập kế hoạch BI."}))
-                      finally:
-                          event_queue.put(None)
-
-                threading.Thread(target=run_planner, daemon=True).start()
                 while True:
-                    item = event_queue.get()
-                    if item is None:
+                    try:
+                        name, data = next(pipeline)
+                    except StopIteration as finished:
+                        outcome = finished.value
                         break
-                    yield item
-            except Exception:
-                logger.exception("BI planning stream failed (dashboard_id=%s)", dashboard_id)
-                yield _event("error", {"message": "Không thể hoàn tất bước lập kế hoạch BI."})
+                    _record_tool_call(tool_calls, name, data)
+                    yield _event(name, data)
+            except SemanticSourceError as ex:
+                error = str(ex)
+                yield _event("error", {"message": error})
+            except Exception as ex:
+                logger.exception("AI Agent stream failed")
+                error = str(ex) or type(ex).__name__
+                yield _event("error", {"message": "AI Agent không hoàn tất được câu trả lời."})
+            question_id = _save_question(
+                user_id=user_id, session_id=session_id, dashboard_id=dashboard_id, question=question,
+                history_turns=len(history) // 2, outcome=outcome, tool_calls=tool_calls, retry_of=retry_of,
+                started=started, error=error,
+            )
+            yield _event("done", {
+                "question_id": question_id,
+                "status": "failed" if error else outcome.status,
+                "missing": [] if error else outcome.missing,
+                "clarifications": [] if error or question_id is None else outcome.clarifications,
+                "user_definitions": [] if error else outcome.user_definitions,
+            })
 
-        return Response(events(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        return Response(events(), mimetype="text/event-stream", headers=headers)

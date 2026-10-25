@@ -4,7 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi } from './api';
+import { CreationOrigin } from './CreationOrigin';
+import { completeConceptCreation, takeConceptRequest } from './creationRequest';
+import type { ConceptRequest } from './creationRequest';
 import { GlossaryEditor, glossaryErrorMessage } from './GlossaryEditor';
+import type { GlossaryDraft } from './GlossaryEditor';
 import { formatTime } from './MetricDefinitionPanel';
 import { ReviewDecisionDialog } from './ReviewDecisionDialog';
 import type { ReviewDecisionText } from './ReviewDecisionDialog';
@@ -155,14 +159,21 @@ function TermDetail({ term, historyRevision }: { term: GlossaryReviewTerm; histo
   );
 }
 
+/** A shared term for a concept users defined for themselves: only its name; the definition is the expert's. */
+function draftFromRequest(request: ConceptRequest): GlossaryDraft {
+  return { name: request.name, definition: '', synonyms: [], link: null };
+}
+
 /** Admin workspace for the business glossary: write a draft term, approve it, revoke it with a reason. */
 export function Glossary() {
+  // Set when "Xử lý câu hỏi" sent the administrator here to cover a concept users defined for themselves.
+  const [creation, setCreation] = useState<ConceptRequest | null>(() => takeConceptRequest('glossary'));
   const [termList, setTermList] = useState<GlossaryTermList>(
     { terms: [], current_user_id: null, require_second_reviewer: false },
   );
   const [datasets, setDatasets] = useState<GlossaryDatasetOption[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [editing, setEditing] = useState<'new' | 'existing' | null>(null);
+  const [editing, setEditing] = useState<'new' | 'existing' | null>(creation ? 'new' : null);
   const [stateFilter, setStateFilter] = useState<GlossaryState | 'all'>('all');
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -209,10 +220,19 @@ export function Glossary() {
     ...STATE_ORDER.map(state => ({ value: state, label: `${STATE_LABELS[state]} (${stateCounts.get(state) ?? 0})` })),
   ];
 
+  const startNew = () => { setCreation(null); setEditing('new'); };
+  const closeEditor = () => { setEditing(null); setCreation(null); };
+
   const refreshAfterChange = async (termId: number | null) => {
     if (termId !== null) setSelectedId(termId);
     await load();
     setHistoryRevision(revision => revision + 1);
+  };
+
+  const saveFromEditor = async (termId: number) => {
+    if (creation) await completeConceptCreation(creation);
+    closeEditor();
+    await refreshAfterChange(termId);
   };
 
   const decide = async (decision: TermDecision, reason: string) => {
@@ -271,7 +291,7 @@ export function Glossary() {
               </SelectGroup>
             </SelectContent>
           </Select>
-          <Button variant="outline" disabled={datasets.length === 0} onClick={() => setEditing('new')}>
+          <Button variant="outline" disabled={datasets.length === 0} onClick={() => startNew()}>
             <Plus data-icon="inline-start" /> Tạo thuật ngữ
           </Button>
         </div>
@@ -299,7 +319,9 @@ export function Glossary() {
       </aside>
       <section className="sl-metrics-detail" aria-label="Chi tiết thuật ngữ">
         {error ? <div className="sl-metric-error" role="alert"><AlertCircle /> {error}</div> : null}
-        {editing === 'new' || (editing === 'existing' && editorTerm) ? (
+        {editing === 'new' && loading && datasets.length === 0 ? (
+          <p className="sl-metric-muted"><LoaderCircle className="sl-spin" /> Đang tải dataset…</p>
+        ) : editing === 'new' || (editing === 'existing' && editorTerm) ? (
           <>
             <header className="sl-metrics-detail-heading is-editing">
               <div className="sl-metrics-title">
@@ -307,12 +329,14 @@ export function Glossary() {
                 <p>Lưu xong, thuật ngữ ở trạng thái chờ duyệt và chỉ có hiệu lực sau khi được duyệt.</p>
               </div>
             </header>
+            {creation && !editorTerm ? <CreationOrigin request={creation} /> : null}
             <GlossaryEditor
               key={editorTerm?.id ?? 'new'}
               term={editorTerm}
+              draft={creation && !editorTerm ? draftFromRequest(creation) : null}
               datasets={datasets}
-              onCancel={() => setEditing(null)}
-              onSaved={termId => { setEditing(null); void refreshAfterChange(termId); }}
+              onCancel={closeEditor}
+              onSaved={termId => void saveFromEditor(termId)}
             />
           </>
         ) : !selectedTerm ? (

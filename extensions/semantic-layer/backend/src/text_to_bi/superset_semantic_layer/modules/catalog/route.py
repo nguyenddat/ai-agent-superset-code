@@ -77,6 +77,8 @@ from ..semantic_query.relationships import (
 )
 
 logger = logging.getLogger(__name__)
+# Set in a Superset database's extra JSON by superset/bootstrap_governance.py for the AI Agent reporting views.
+INTERNAL_DATABASE_FLAG = "text_to_bi_internal"
 DICTIONARY_FIELDS = {
     "business_term",
     "default_value",
@@ -378,6 +380,17 @@ def _get_or_create_dataset_dictionary(dataset: SqlaTable, repository: DatasetDic
             )
         )
     return record
+
+
+def _is_internal_dataset(dataset: SqlaTable) -> bool:
+    """Datasets on a connection marked `text_to_bi_internal`, such as the AI Agent reporting views, are not business
+    data, so the Semantic Layer leaves them out of its pickers."""
+    database = getattr(dataset, "database", None)
+    try:
+        extra = json.loads(getattr(database, "extra", None) or "{}")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(extra, dict) and extra.get(INTERNAL_DATABASE_FLAG) is True
 
 
 def _seed_dictionary(dataset: SqlaTable) -> None:
@@ -1458,6 +1471,8 @@ class SemanticLayerAPI(RestApi):
             key_flags.setdefault(row.dataset_id, {})[row.column_name] = {"pk": bool(row.is_pk), "unique": bool(row.is_unique)}
         options = []
         for dataset in datasets:
+            if _is_internal_dataset(dataset):
+                continue
             database_name = getattr(dataset.database, "database_name", None)
             label = ".".join(part for part in (database_name, dataset.schema, dataset.table_name) if part)
             options.append(
@@ -2390,6 +2405,8 @@ class SemanticLayerAPI(RestApi):
             return self.response(403, message="Admin access required.")
         datasets = []
         for dataset in db.session.query(SqlaTable).all():
+            if _is_internal_dataset(dataset):
+                continue
             datasets.append({
                 "id": dataset.id,
                 "name": dataset.table_name,

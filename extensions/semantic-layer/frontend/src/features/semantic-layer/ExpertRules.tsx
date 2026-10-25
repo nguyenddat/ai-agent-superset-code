@@ -4,7 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { expertRulesApi, requestJson } from './api';
+import { CreationOrigin } from './CreationOrigin';
+import { completeConceptCreation, takeConceptRequest } from './creationRequest';
+import type { ConceptRequest } from './creationRequest';
 import { ExpertRuleEditor } from './ExpertRuleEditor';
+import type { ExpertRuleDraft } from './ExpertRuleEditor';
 import { conditionPhrase, expertRuleErrorMessage } from './expertRuleFormat';
 import { formatTime } from './MetricDefinitionPanel';
 import { ReviewDecisionDialog } from './ReviewDecisionDialog';
@@ -172,14 +176,29 @@ function RuleDetail({ rule, historyRevision }: { rule: ExpertRule; historyRevisi
   );
 }
 
+/**
+ * A shared rule for a concept users defined for themselves: its name and a question users asked as the first example.
+ * The conditions stay empty because the business's threshold is the expert's call, not the users' own sense.
+ */
+function draftFromRequest(request: ConceptRequest): ExpertRuleDraft {
+  return {
+    name: request.name,
+    datasetId: null,
+    glossaryTermIds: [],
+    example: request.exampleQuestion ? { question: request.exampleQuestion, intent: '' } : null,
+  };
+}
+
 /** Admin workspace for expert rules: write a draft, have a second administrator approve it, revoke with a reason. */
 export function ExpertRules() {
+  // Set when "Xử lý câu hỏi" sent the administrator here to cover a concept users defined for themselves.
+  const [creation, setCreation] = useState<ConceptRequest | null>(() => takeConceptRequest('expert_rule'));
   const [ruleList, setRuleList] = useState<ExpertRuleList>(
     { rules: [], current_user_id: null, require_second_reviewer: false },
   );
   const [datasets, setDatasets] = useState<ExpertRuleDatasetOption[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [editing, setEditing] = useState<'new' | 'existing' | null>(null);
+  const [editing, setEditing] = useState<'new' | 'existing' | null>(creation ? 'new' : null);
   const [stateFilter, setStateFilter] = useState<ExpertRuleState | 'all'>('all');
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -233,10 +252,19 @@ export function ExpertRules() {
     ...STATE_ORDER.map(state => ({ value: state, label: `${STATE_LABELS[state]} (${stateCounts.get(state) ?? 0})` })),
   ];
 
+  const startNew = () => { setCreation(null); setEditing('new'); };
+  const closeEditor = () => { setEditing(null); setCreation(null); };
+
   const refreshAfterChange = async (ruleId: number | null) => {
     if (ruleId !== null) setSelectedId(ruleId);
     await load();
     setHistoryRevision(revision => revision + 1);
+  };
+
+  const saveFromEditor = async (ruleId: number) => {
+    if (creation) await completeConceptCreation(creation);
+    closeEditor();
+    await refreshAfterChange(ruleId);
   };
 
   const decide = async (decision: RuleDecision, reason: string) => {
@@ -293,7 +321,7 @@ export function ExpertRules() {
               </SelectGroup>
             </SelectContent>
           </Select>
-          <Button variant="outline" disabled={datasets.length === 0} onClick={() => setEditing('new')}>
+          <Button variant="outline" disabled={datasets.length === 0} onClick={() => startNew()}>
             <Plus data-icon="inline-start" /> Tạo rule
           </Button>
         </div>
@@ -326,7 +354,9 @@ export function ExpertRules() {
       </aside>
       <section className="sl-metrics-detail" aria-label="Chi tiết rule">
         {error ? <div className="sl-metric-error" role="alert"><AlertCircle /> {error}</div> : null}
-        {editing === 'new' || (editing === 'existing' && editorRule) ? (
+        {editing === 'new' && loading && datasets.length === 0 ? (
+          <p className="sl-metric-muted"><LoaderCircle className="sl-spin" /> Đang tải dataset…</p>
+        ) : editing === 'new' || (editing === 'existing' && editorRule) ? (
           <>
             <header className="sl-metrics-detail-heading is-editing">
               <div className="sl-metrics-title">
@@ -334,12 +364,18 @@ export function ExpertRules() {
                 <p>Lưu xong, rule ở trạng thái chờ duyệt và chỉ có hiệu lực sau khi được duyệt.</p>
               </div>
             </header>
+            {creation && !editorRule ? (
+              <CreationOrigin request={creation}>
+                <p>Thêm điều kiện bên dưới theo ngưỡng chính thức của nghiệp vụ.</p>
+              </CreationOrigin>
+            ) : null}
             <ExpertRuleEditor
               key={editorRule?.id ?? 'new'}
               rule={editorRule}
+              draft={creation && !editorRule ? draftFromRequest(creation) : null}
               datasets={datasets}
-              onCancel={() => setEditing(null)}
-              onSaved={ruleId => { setEditing(null); void refreshAfterChange(ruleId); }}
+              onCancel={closeEditor}
+              onSaved={ruleId => void saveFromEditor(ruleId)}
             />
           </>
         ) : !selectedRule ? (
