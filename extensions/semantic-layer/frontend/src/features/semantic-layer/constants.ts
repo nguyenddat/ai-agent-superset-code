@@ -6,9 +6,18 @@ export type SemanticLayerModule = 'dictionary' | 'semantic' | 'metrics' | 'gloss
 
 export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: string; description: string }> = [
   { id: 'dictionary', label: 'Data Dictionary', description: 'Chỉnh metadata datasets và columns' },
-  { id: 'semantic', label: 'Semantic Layer', description: 'Nghiệp vụ và data lineage' },
+  { id: 'semantic', label: 'Semantic Model', description: 'Nghiệp vụ và data lineage' },
   { id: 'metrics', label: 'Metrics', description: 'Duyệt định nghĩa metric và chạy thử' },
   { id: 'glossary', label: 'Business Glossary', description: 'Governed business terms' },
+];
+
+/**
+ * The navbar shows one menu per audience: data engineers model datasets, business owners govern what AI Agent may
+ * use. Both menus open the same page.
+ */
+export const semanticLayerModuleGroups: Array<{ id: string; label: string; modules: SemanticLayerModule[] }> = [
+  { id: 'modeling', label: 'Mô hình dữ liệu', modules: ['dictionary', 'semantic'] },
+  { id: 'governance', label: 'Quản trị nghiệp vụ', modules: ['metrics', 'glossary'] },
 ];
 
 export function semanticLayerModuleHref(module: SemanticLayerModule): string {

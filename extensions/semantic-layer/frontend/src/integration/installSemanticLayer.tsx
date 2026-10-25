@@ -13,6 +13,7 @@ import {
   SEMANTIC_LAYER_PAGE,
   semanticLayerEvents,
   semanticLayerModuleFromLocation,
+  semanticLayerModuleGroups,
   semanticLayerModuleHref,
   semanticLayerModules,
   semanticLayerSelectors,
@@ -318,7 +319,7 @@ function SemanticLayerPage() {
   );
 }
 
-/** Adds an admin-only Semantic Layer entry to Superset's navigation bar and renders its page. */
+/** Adds the admin-only Semantic Layer menus to Superset's navigation bar and renders their page. */
 export function installSemanticLayer(): () => void {
   let host: HTMLDivElement | undefined;
   let frame = 0;
@@ -328,16 +329,19 @@ export function installSemanticLayer(): () => void {
   let dropdown: HTMLDivElement | undefined;
   let closeTimer = 0;
 
-  const openDropdown = (anchor: Element) => {
+  const currentModuleGroup = () => {
+    if (!isSemanticLayerPage()) return null;
+    const currentModule = semanticLayerModuleFromLocation();
+    return semanticLayerModuleGroups.find(group => group.modules.includes(currentModule)) ?? null;
+  };
+
+  const openDropdown = (anchor: Element, group: typeof semanticLayerModuleGroups[number]) => {
     window.clearTimeout(closeTimer);
     if (!dropdown) {
       dropdown = document.createElement('div');
       dropdown.className = 'sl-nav-dropdown';
       dropdown.setAttribute('role', 'menu');
       dropdown.setAttribute('data-test', 'semantic-layer-nav-dropdown');
-      dropdown.innerHTML = semanticLayerModules.map(module => (
-        `<a role="menuitem" data-module="${module.id}" href="${semanticLayerModuleHref(module.id)}"><strong>${module.label}</strong><span>${module.description}</span></a>`
-      )).join('');
       dropdown.addEventListener('mouseenter', () => window.clearTimeout(closeTimer));
       dropdown.addEventListener('mouseleave', scheduleClose);
       dropdown.addEventListener('click', event => {
@@ -350,6 +354,13 @@ export function installSemanticLayer(): () => void {
         window.dispatchEvent(new CustomEvent(semanticLayerEvents.moduleRequest, { detail: link.dataset.module }));
       });
       document.body.append(dropdown);
+    }
+    if (dropdown.dataset.moduleGroup !== group.id) {
+      dropdown.dataset.moduleGroup = group.id;
+      dropdown.innerHTML = semanticLayerModules.filter(module => group.modules.includes(module.id)).map(module => (
+        `<a role="menuitem" data-module="${module.id}" href="${semanticLayerModuleHref(module.id)}">`
+        + `<strong>${module.label}</strong><span>${module.description}</span></a>`
+      )).join('');
     }
     const rect = anchor.getBoundingClientRect();
     dropdown.style.top = `${rect.bottom}px`;
@@ -383,26 +394,33 @@ export function installSemanticLayer(): () => void {
     frame = 0;
     const navbar = document.querySelector<HTMLUListElement>(semanticLayerSelectors.navbar);
     if (navbar) {
-      let item = navbar.querySelector(semanticLayerSelectors.navItem);
-      if (!item) {
-        item = document.createElement('li');
-        item.className = 'ant-menu-item ant-menu-item-only-child';
-        item.setAttribute('role', 'menuitem');
-        item.setAttribute('data-test', 'semantic-layer-nav-item');
-        item.setAttribute('aria-haspopup', 'menu');
-        item.innerHTML = `<span class="ant-menu-title-content"><a class="sl-nav-trigger" href="${SEMANTIC_LAYER_PAGE}">Semantic Layer<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></a></span>`;
-        const trigger = item;
-        trigger.addEventListener('mouseenter', () => openDropdown(trigger));
-        trigger.addEventListener('mouseleave', scheduleClose);
-        trigger.addEventListener('focusin', () => openDropdown(trigger));
-        trigger.addEventListener('click', event => {
-          event.preventDefault();
-          if (dropdown?.classList.contains('is-open')) closeDropdown();
-          else openDropdown(trigger);
-        });
-        navbar.append(item);
-      }
-      item.classList.toggle('ant-menu-item-selected', isSemanticLayerPage());
+      const activeGroup = currentModuleGroup();
+      semanticLayerModuleGroups.forEach(group => {
+        let item = navbar.querySelector(`${semanticLayerSelectors.navItem}[data-module-group="${group.id}"]`);
+        if (!item) {
+          item = document.createElement('li');
+          item.className = 'ant-menu-item ant-menu-item-only-child';
+          item.setAttribute('role', 'menuitem');
+          item.setAttribute('data-test', 'semantic-layer-nav-item');
+          item.setAttribute('data-module-group', group.id);
+          item.setAttribute('aria-haspopup', 'menu');
+          const chevron = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+          const href = semanticLayerModuleHref(group.modules[0]);
+          item.innerHTML = `<span class="ant-menu-title-content"><a class="sl-nav-trigger" href="${href}">`
+            + `${group.label}${chevron}</a></span>`;
+          const trigger = item;
+          trigger.addEventListener('mouseenter', () => openDropdown(trigger, group));
+          trigger.addEventListener('mouseleave', scheduleClose);
+          trigger.addEventListener('focusin', () => openDropdown(trigger, group));
+          trigger.addEventListener('click', event => {
+            event.preventDefault();
+            if (dropdown?.classList.contains('is-open') && dropdown.dataset.moduleGroup === group.id) closeDropdown();
+            else openDropdown(trigger, group);
+          });
+          navbar.append(item);
+        }
+        item.classList.toggle('ant-menu-item-selected', activeGroup?.id === group.id);
+      });
     }
 
     if (!isSemanticLayerPage()) {
@@ -440,7 +458,7 @@ export function installSemanticLayer(): () => void {
     window.removeEventListener('popstate', schedule);
     if (frame) window.cancelAnimationFrame(frame);
     window.clearTimeout(closeTimer);
-    document.querySelector(semanticLayerSelectors.navItem)?.remove();
+    document.querySelectorAll(semanticLayerSelectors.navItem).forEach(item => item.remove());
     dropdown?.remove();
     unmountPage();
   };
