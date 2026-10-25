@@ -142,12 +142,22 @@ dictionary `id` shares the corresponding Superset dataset ID through
 `dataset_id`. Opening the Semantic Layer as an administrator creates these
 tables and seeds dictionary rows from the existing Superset datasets.
 
-## Python style
+## Code style
+
+These rules apply to Python and TypeScript alike:
+
+- Lines may be up to 120 characters. Wrap only past that limit; keep a short
+  call, import, object or JSX element on one line instead of splitting it.
+- Name variables, functions and components for what they mean in the domain,
+  such as `metricContract`, `selectedDataset` or `approvedAt`. Do not abbreviate
+  (`ds`, `col`, `m`, `tmp`, `res`); single letters are only for short loop
+  indexes.
 
 Ruff configuration is in the root `pyproject.toml` and each extension backend's
-`pyproject.toml`. Keep the configured 120-character line length to avoid
-unnecessary wrapping. Ruff rule `D100` is ignored, so Python modules do not need
-a module-level docstring solely to satisfy that rule.
+`pyproject.toml`, with the 120-character line length. Ruff rule `D100` is
+ignored, so Python modules do not need a module-level docstring solely to
+satisfy that rule. The frontends have no formatter; follow the same limit by
+hand.
 
 ## Local configuration and secrets
 
