@@ -63,7 +63,7 @@ from ..semantic_query.contracts import (
     contract_is_approved_current,
     execute_approved_chart_query,
     metric_contract_hash,
-    metric_is_eligible_for_contract,
+    metric_contract_ineligibility,
 )
 from ..semantic_query.relationships import (
     RelationshipEnd,
@@ -799,18 +799,20 @@ class SemanticLayerAPI(RestApi):
         metric = self._dataset_metric(dataset, metric_id)
         if metric is None:
             return self.response(404, message="Metric not found in this dataset.")
-        if not metric_is_eligible_for_contract(dataset, metric):
-            return self.response_400(message="Metric must be a simple aggregate over one active physical-table column.")
+        if ineligibility := metric_contract_ineligibility(dataset, metric):
+            return self.response_400(message=ineligibility)
         contract = self._contract_for(dataset_id, metric_id)
         if contract is not None and contract.status == "approved" and contract_is_approved_current(contract, dataset, metric):
             return self.response(409, message="Revoke the current approved contract before creating another candidate.")
+        # Hashing lazy-loads the dataset's database, which autoflushes the session, so it must run before a new
+        # contract joins the session: a pending contract without its hash would be flushed and break NOT NULL.
+        expression_hash = metric_contract_hash(dataset, metric)
         if contract is None:
-            contract = MetricContract(dataset_id=dataset_id, metric_id=metric_id)
-            db.session.add(contract)
-            contract.owner_id = current_user.id
+            contract = MetricContract(dataset_id=dataset_id, metric_id=metric_id, owner_id=current_user.id)
         contract.metric_name = metric.metric_name
         contract.expression = metric.expression
-        contract.expression_hash = metric_contract_hash(dataset, metric)
+        contract.expression_hash = expression_hash
+        db.session.add(contract)
         contract.status = "candidate"
         contract.approver_id = None
         contract.approved_at = None
@@ -838,8 +840,8 @@ class SemanticLayerAPI(RestApi):
             return self.response(404, message="Metric contract not found in this dataset.")
         if contract.status != "candidate":
             return self.response_400(message="Only a candidate metric contract can be approved.")
-        if not metric_is_eligible_for_contract(dataset, metric):
-            return self.response_400(message="Metric must be a simple aggregate over one active physical-table column.")
+        if ineligibility := metric_contract_ineligibility(dataset, metric):
+            return self.response_400(message=ineligibility)
         if contract.expression_hash != metric_contract_hash(dataset, metric):
             return self.response_400(message="Metric changed; create a new candidate before approval.")
         contract.status = "approved"
@@ -991,14 +993,17 @@ class SemanticLayerAPI(RestApi):
         contract = self._relationship_contract_for(source.dataset.id, source.entry.column_name)
         if contract is not None and relationship_is_approved_current(contract, source, target):
             return self.response(409, message="Revoke the current approved contract before creating another candidate.")
+        # As for metric contracts, hash before a new contract joins the session so autoflush cannot insert it half-set.
+        contract_hash = relationship_contract_hash(source, target, cardinality)
         if contract is None:
-            contract = RelationshipContract(from_dataset_id=source.dataset.id, from_column=source.entry.column_name)
-            contract.owner_id = current_user.id
-            db.session.add(contract)
+            contract = RelationshipContract(
+                from_dataset_id=source.dataset.id, from_column=source.entry.column_name, owner_id=current_user.id
+            )
         contract.to_dataset_id = target.dataset.id
         contract.to_column = target.entry.column_name
         contract.cardinality = cardinality
-        contract.contract_hash = relationship_contract_hash(source, target, cardinality)
+        contract.contract_hash = contract_hash
+        db.session.add(contract)
         contract.approver_id = None
         contract.approved_at = None
         contract.revoker_id = None

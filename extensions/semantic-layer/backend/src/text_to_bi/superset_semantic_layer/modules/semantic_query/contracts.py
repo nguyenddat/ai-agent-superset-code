@@ -3,43 +3,154 @@
 import hashlib
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import SqlglotError
 
 _SIMPLE_AGGREGATE = re.compile(
     r'^\s*(?P<aggregation>avg|count|max|min|sum)\s*\(\s*"?(?P<column>[A-Za-z_][A-Za-z0-9_]*)"?\s*\)\s*$',
     re.IGNORECASE,
 )
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_AGGREGATES = (exp.Avg, exp.Count, exp.Max, exp.Min, exp.Sum)
+# Every node a contract metric may contain. Anything else, such as a subquery, another function, DISTINCT, FILTER or
+# a window, makes the metric ineligible.
+_CONTRACT_METRIC_NODES = (
+    *_AGGREGATES,
+    exp.Case,
+    exp.If,
+    exp.And,
+    exp.Or,
+    exp.Not,
+    exp.Paren,
+    exp.EQ,
+    exp.NEQ,
+    exp.GT,
+    exp.GTE,
+    exp.LT,
+    exp.LTE,
+    exp.In,
+    exp.Is,
+    exp.Column,
+    exp.Identifier,
+    exp.Literal,
+    exp.Null,
+    exp.Boolean,
+    exp.Neg,
+)
+METRIC_CONTRACT_RULE = (
+    "Công thức phải là đúng một AVG, COUNT, MAX, MIN hoặc SUM trên cột của dataset, có thể ở dạng "
+    "CASE WHEN <so sánh cột với hằng số> THEN <cột hoặc số> END."
+)
 MAX_DIMENSIONS = 50
 MAX_FILTERS = 50
 MAX_FILTER_VALUES = 100
 MAX_FILTER_STRING_LENGTH = 1024
 
 
-def _metric_column(dataset: Any, metric: Any) -> Any | None:
-    match = _SIMPLE_AGGREGATE.fullmatch(str(getattr(metric, "expression", "") or ""))
-    if match is None:
+@dataclass(frozen=True)
+class ContractMetricFormula:
+    """The parts of a metric formula that contracts accept, for review and for binding to live columns."""
+
+    aggregation: str
+    measure_column: str | None
+    measure_constant: str | None
+    condition: str | None
+    columns: frozenset[str]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "aggregation": self.aggregation,
+            "measure_column": self.measure_column,
+            "measure_constant": self.measure_constant,
+            "condition": self.condition,
+            "columns": sorted(self.columns),
+        }
+
+
+def parse_contract_metric(expression: str) -> ContractMetricFormula | None:
+    """Parse ``AGG(column)`` or ``AGG(CASE WHEN condition THEN column-or-number END)``; None for any other formula.
+
+    The condition may only compare unqualified columns with constants.
+    """
+    try:
+        tree = sqlglot.parse_one(expression)
+    except SqlglotError:
         return None
-    column_name = match.group("column")
-    return next((column for column in getattr(dataset, "columns", []) if getattr(column, "column_name", None) == column_name), None)
+    if not isinstance(tree, _AGGREGATES):
+        return None
+    nodes = list(tree.walk())
+    if any(not isinstance(node, _CONTRACT_METRIC_NODES) for node in nodes):
+        return None
+    if any(isinstance(node, _AGGREGATES) for node in nodes if node is not tree):
+        return None
+    columns = list(tree.find_all(exp.Column))
+    if not columns or any(column.table for column in columns):
+        return None
+    measure = tree.this
+    condition = None
+    if isinstance(measure, exp.Case):
+        branches = measure.args.get("ifs") or []
+        default = measure.args.get("default")
+        if len(branches) != 1 or not (default is None or isinstance(default, exp.Null)):
+            return None
+        condition = branches[0].this.sql(dialect="postgres")
+        measure = branches[0].args.get("true")
+        if not isinstance(measure, (exp.Column, exp.Literal, exp.Neg)):
+            return None
+    elif not isinstance(measure, exp.Column):
+        return None
+    return ContractMetricFormula(
+        aggregation=tree.key.upper(),
+        measure_column=measure.name if isinstance(measure, exp.Column) else None,
+        measure_constant=None if isinstance(measure, exp.Column) else measure.sql(dialect="postgres"),
+        condition=condition,
+        columns=frozenset(column.name for column in columns),
+    )
 
 
-def metric_is_eligible_for_contract(dataset: Any, metric: Any) -> bool:
-    """Allow only a physical-table, active, direct-column simple aggregate.
+def _live_columns(dataset: Any) -> dict[Any, Any]:
+    return {getattr(column, "column_name", None): column for column in getattr(dataset, "columns", [])}
+
+
+def _metric_column(dataset: Any, metric: Any) -> Any | None:
+    """The live column a contract metric measures, or None for a constant measure or an ineligible formula."""
+    formula = parse_contract_metric(str(getattr(metric, "expression", "") or ""))
+    return _live_columns(dataset).get(formula.measure_column) if formula and formula.measure_column else None
+
+
+def metric_contract_ineligibility(dataset: Any, metric: Any) -> str | None:
+    """Why a metric cannot have a contract, or None when it can.
 
     Superset's ``TableColumn`` does not expose sensitivity metadata.  This layer
     therefore does not invent a non-authoritative ``is_sensitive`` flag; any
     sensitivity policy must be enforced by Superset datasource/RLS permissions.
     """
-    column = _metric_column(dataset, metric)
-    return bool(
-        not getattr(dataset, "sql", None)
-        and isinstance(getattr(metric, "metric_name", None), str)
-        and _IDENTIFIER.fullmatch(metric.metric_name)
-        and column is not None
-        and getattr(column, "is_active", None) is True
-        and not getattr(column, "expression", None)
-    )
+    if getattr(dataset, "sql", None):
+        return "Dataset ảo (định nghĩa bằng SQL) chưa được hỗ trợ."
+    metric_name = getattr(metric, "metric_name", None)
+    if not isinstance(metric_name, str) or not _IDENTIFIER.fullmatch(metric_name):
+        return "Tên metric chỉ được gồm chữ cái không dấu, chữ số và dấu gạch dưới."
+    formula = parse_contract_metric(str(getattr(metric, "expression", "") or ""))
+    if formula is None:
+        return METRIC_CONTRACT_RULE
+    live_columns = _live_columns(dataset)
+    for column_name in sorted(formula.columns):
+        column = live_columns.get(column_name)
+        if column is None:
+            return f"Cột {column_name} không có trong dataset."
+        if getattr(column, "is_active", None) is not True:
+            return f"Cột {column_name} đang bị tắt (không active)."
+        if getattr(column, "expression", None):
+            return f"Cột {column_name} là cột tính toán."
+    return None
+
+
+def metric_is_eligible_for_contract(dataset: Any, metric: Any) -> bool:
+    return metric_contract_ineligibility(dataset, metric) is None
 
 
 def _safe_connection_identity(database: Any) -> dict[str, Any]:
@@ -92,6 +203,24 @@ def contract_is_approved_current(contract: Any, dataset: Any, metric: Any) -> bo
         and metric_is_eligible_for_contract(dataset, metric)
         and getattr(contract, "expression_hash", None) == metric_contract_hash(dataset, metric)
     )
+
+
+def metric_contract_state(contract: Any, dataset: Any, metric: Any) -> str:
+    """The review state an administrator sees for a metric.
+
+    ``outdated`` is a candidate or approval whose metric changed after it was recorded, so it can be neither
+    approved nor executed until a new candidate is created.
+    """
+    eligible = metric_is_eligible_for_contract(dataset, metric)
+    status = getattr(contract, "status", None)
+    if contract is None:
+        return "not_started" if eligible else "ineligible"
+    if status == "revoked":
+        return "revoked"
+    if status == "approved":
+        return "approved" if contract_is_approved_current(contract, dataset, metric) else "outdated"
+    unchanged = eligible and getattr(contract, "expression_hash", None) == metric_contract_hash(dataset, metric)
+    return "candidate" if unchanged else "outdated"
 
 
 def build_metric_chart_payload(dataset: Any, metric: Any, query: Any, max_rows: int) -> dict[str, Any]:

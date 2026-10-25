@@ -23,6 +23,7 @@ from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import 
     build_metric_chart_payload,
     contract_is_approved_current,
     metric_contract_hash,
+    metric_contract_ineligibility,
     metric_is_eligible_for_contract,
 )
 from text_to_bi.superset_semantic_layer.modules.semantic_query.relationships import (
@@ -73,9 +74,9 @@ class _ModelField:
 class _MetricContract:
     status = _ModelField()
 
-    def __init__(self, dataset_id, metric_id):
-        self.id, self.dataset_id, self.metric_id = 91, dataset_id, metric_id
-        self.owner_id = self.approver_id = self.revoker_id = self.approved_at = self.revoked_at = None
+    def __init__(self, dataset_id, metric_id, owner_id=None):
+        self.id, self.dataset_id, self.metric_id, self.owner_id = 91, dataset_id, metric_id, owner_id
+        self.approver_id = self.revoker_id = self.approved_at = self.revoked_at = None
 
 
 class _RelationshipContract:
@@ -127,6 +128,7 @@ def _route_api(datasets):
         "request": SimpleNamespace(get_json=lambda silent=True: {"dimensions": [], "filters": []}, args=SimpleNamespace(get=lambda *_args, **_kwargs: None)),
         "current_app": SimpleNamespace(config={}), "_ensure_dictionary_tables": lambda: None,
         "metric_is_eligible_for_contract": metric_is_eligible_for_contract, "metric_contract_hash": metric_contract_hash,
+        "metric_contract_ineligibility": metric_contract_ineligibility,
         "contract_is_approved_current": contract_is_approved_current, "execute_approved_chart_query": None,
         "relationship_cardinality": relationship_cardinality, "relationship_contract_hash": relationship_contract_hash,
         "relationship_is_approved_current": lambda contract, *_: contract.status == "approved",
@@ -157,6 +159,26 @@ def test_candidate_requires_admin_and_redacts_contract_details():
     assert "expression" not in payload["contract"] and "expression_hash" not in payload["contract"]
     namespace["current_user"].roles = []
     assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 403
+
+
+def test_new_candidates_carry_their_hash_before_joining_the_session():
+    """Hashing lazy-loads the dataset's database and autoflushes, so a contract must be complete when added."""
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    session = namespace["db"].session
+    snapshots = []
+    session.add = lambda item: snapshots.append(dict(vars(item)))
+    api._contract_for = lambda *_: None
+    assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
+    assert snapshots[0]["expression_hash"] == metric_contract_hash(dataset, dataset.metrics[0])
+    assert snapshots[0]["owner_id"] == 3
+
+    source, target = _relationship_context()
+    api._relationship_contract_context = lambda *_: (source, target, None)
+    api._relationship_contract_for = lambda *_: None
+    assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 201
+    assert snapshots[1]["contract_hash"] and snapshots[1]["to_dataset_id"] == target.dataset.id
+    assert snapshots[1]["owner_id"] == 3
 
 
 def test_metric_contract_approve_and_revoke_lifecycle():
