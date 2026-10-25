@@ -142,7 +142,10 @@ The Semantic Layer owns `text_to_bi_dataset_dictionary` and
 `text_to_bi_column_dictionary` in Superset's metadata database. A dataset
 dictionary `id` shares the corresponding Superset dataset ID through
 `tables.id`; each column dictionary row references its dataset dictionary with
-`dataset_id`. Opening the Semantic Layer as an administrator creates these
+`dataset_id`. `text_to_bi_dataset_proposal` holds the virtual datasets the AI
+Agent drafts over base (`dm_*`, `tb_*`) datasets when no aggregate dataset can
+answer a question; an administrator creates or rejects them in "Xử lý câu hỏi" →
+"Đề xuất dataset". Opening the Semantic Layer as an administrator creates these
 tables and seeds dictionary rows from the existing Superset datasets.
 
 ## Code style

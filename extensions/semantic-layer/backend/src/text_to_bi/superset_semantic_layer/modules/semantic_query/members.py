@@ -106,3 +106,52 @@ def time_ranges_from_rows(rows: list[dict[str, Any]], columns: list[str]) -> lis
         for name in columns
     ]
     return [item for item in ranges if item["min"] and item["max"]]
+
+
+MAX_CODED_VALUES = 20
+MAX_CODE_LENGTH = 60
+_TEXT_TYPE = re.compile(r"CHAR|TEXT|STRING", re.IGNORECASE)
+
+
+def coded_value_columns(dataset: Any, entries: dict[str, Any]) -> list[str]:
+    """Text columns that hold codes such as a status, whose stored values a formula must spell exactly.
+
+    Keys and unique columns are left out: their values identify rows rather than name a kind of row.
+    """
+    text_columns = {
+        str(column.column_name) for column in getattr(dataset, "columns", []) if _TEXT_TYPE.search(str(column.type or ""))
+    }
+    coded = []
+    for name in _physical_columns(dataset):
+        entry = entries.get(name)
+        if name not in text_columns or not SIMPLE_IDENTIFIER.match(name):
+            continue
+        if any(getattr(entry, flag, False) for flag in ("is_pk", "is_fk", "is_unique")):
+            continue
+        coded.append(name)
+    return coded
+
+
+def build_values_payload(dataset: Any, columns: list[str]) -> dict[str, Any]:
+    """One grouped query per column, each stopping one row past the limit so a free-text column shows as too many."""
+    return {
+        "datasource": {"id": dataset.id, "type": "table"},
+        "queries": [
+            {
+                "columns": [name],
+                "metrics": [{"expressionType": "SQL", "sqlExpression": "COUNT(*)", "label": "row_count"}],
+                "row_limit": MAX_CODED_VALUES + 1,
+            }
+            for name in columns
+        ],
+        "result_type": "full",
+        "result_format": "json",
+    }
+
+
+def coded_values_from_rows(rows: list[dict[str, Any]], column: str) -> list[str] | None:
+    """The column's distinct values, sorted; None when it has more, or longer ones, than a code list would."""
+    values = {str(row[column]) for row in rows if row.get(column) not in (None, "")}
+    if len(rows) > MAX_CODED_VALUES or any(len(value) > MAX_CODE_LENGTH for value in values):
+        return None
+    return sorted(values)

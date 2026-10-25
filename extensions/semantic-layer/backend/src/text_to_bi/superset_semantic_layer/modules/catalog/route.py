@@ -14,7 +14,7 @@ from flask_wtf.csrf import validate_csrf
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from superset import db, security_manager
-from superset.connectors.sqla.models import SqlaTable
+from superset.connectors.sqla.models import SqlaTable, SqlMetric
 from superset.exceptions import SupersetSecurityException
 from superset.models.core import Database
 from superset_core.rest_api.api import RestApi
@@ -28,12 +28,30 @@ from ...models.business_domain import BusinessDomain, business_domain_dataset
 from ...models.column_dictionary import ColumnDictionary
 from ...models.data_layer import DataLayer
 from ...models.dataset_dictionary import DatasetDictionary
+from ...models.dataset_proposal import DatasetProposal
 from ...models.expert_rule import ExpertRule, ExpertRuleAuditEvent, ExpertRuleLink, ExpertRuleRevision
 from ...models.glossary_term import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
 from ...models.lineage_canvas import LineageCanvas
 from ...models.lineage_edge import LineageEdge
 from ...models.metric_contract import MetricContract, MetricContractEvent, MetricDefinition
 from ...models.relationship_contract import RelationshipContract
+from ..agent_ladder.service import (
+    AGENT_DATASET_TYPES,
+    AGENT_ORIGIN,
+    AGGREGATE_DATASET,
+    BASE_DATASET,
+    MAX_PENDING_AGENT_METRICS,
+    MAX_PENDING_PROPOSALS,
+    asked_question,
+    checked_dataset_proposal,
+    checked_metric_draft,
+    derived_column_keys,
+    is_default_count,
+    matching_metric,
+    source_columns,
+    source_metric,
+    unique_metric_name,
+)
 from ..business_model.service import (
     EDGE_KINDS,
     dataset_classifications,
@@ -72,6 +90,9 @@ from ..semantic_query.contracts import (
 from ..semantic_query.members import (
     build_members_payload,
     build_time_range_payload,
+    build_values_payload,
+    coded_value_columns,
+    coded_values_from_rows,
     labelled_key_columns,
     members_from_rows,
     temporal_columns,
@@ -527,6 +548,7 @@ def _migrate_dictionary_tables():
     ExpertRuleRevision.__table__.create(bind=db.engine, checkfirst=True)
     ExpertRuleLink.__table__.create(bind=db.engine, checkfirst=True)
     ExpertRuleAuditEvent.__table__.create(bind=db.engine, checkfirst=True)
+    DatasetProposal.__table__.create(bind=db.engine, checkfirst=True)
 
     with db.engine.begin() as connection:
         contract_columns = {column["name"] for column in inspect(connection).get_columns(MetricContract.__tablename__)}
@@ -535,6 +557,10 @@ def _migrate_dictionary_tables():
             connection.execute(text(f"ALTER TABLE text_to_bi_metric_contract ADD COLUMN revoker_id {revoker_column}"))
         if "revoked_at" not in contract_columns:
             connection.execute(text("ALTER TABLE text_to_bi_metric_contract ADD COLUMN revoked_at TIMESTAMP WITH TIME ZONE"))
+        if "origin" not in contract_columns:
+            connection.execute(
+                text("ALTER TABLE text_to_bi_metric_contract ADD COLUMN origin VARCHAR(16) NOT NULL DEFAULT 'manual'")
+            )
         if postgres:
             contract_constraints = inspect(connection).get_foreign_keys(MetricContract.__tablename__)
             has_revoker_fk = any(
@@ -741,6 +767,7 @@ class SemanticLayerAPI(RestApi):
             "metric_id": contract.metric_id,
             "metric_name": metric.metric_name,
             "status": contract.status,
+            "origin": contract.origin or "manual",
             "owner_id": contract.owner_id,
             "approver_id": contract.approver_id,
             "approved_at": contract.approved_at.isoformat() if contract.approved_at else None,
@@ -1026,6 +1053,8 @@ class SemanticLayerAPI(RestApi):
             contract = MetricContract(dataset_id=dataset_id, metric_id=metric_id, owner_id=current_user.id)
         # Whoever proposes this candidate owns it, even when an earlier proposal came from someone else.
         contract.owner_id = current_user.id
+        # An administrator who proposes it again takes it over, so it no longer answers as an AI Agent figure.
+        contract.origin = "manual"
         contract.metric_name = metric.metric_name
         contract.expression = metric.expression
         contract.expression_hash = expression_hash
@@ -1210,9 +1239,12 @@ class SemanticLayerAPI(RestApi):
                 command.validate()
                 return command.run()["queries"][0]
 
-            # Administrators may preview a candidate so a reviewer sees real numbers before approving it.
+            # Administrators may preview a candidate so a reviewer sees real numbers before approving it; a candidate
+            # the AI Agent built answers anyone as a provisional figure until it is approved or revoked.
+            provisional = getattr(contract, "origin", None) == AGENT_ORIGIN
             result = execute_approved_chart_query(
-                contract, dataset, metric, body, _semantic_query_row_cap(), run_chart, allow_candidate=self._is_admin()
+                contract, dataset, metric, body, _semantic_query_row_cap(), run_chart,
+                allow_candidate=self._is_admin() or provisional,
             )
         except PermissionError as ex:
             db.session.rollback()
@@ -1245,9 +1277,10 @@ class SemanticLayerAPI(RestApi):
     @safe
     @permission_name("read")
     def dimension_members(self, dataset_id: int):
-        """Key and label pairs of the dataset's labelled key columns, for filtering an approved metric by a name.
+        """Key and label pairs of the dataset's labelled key columns, for filtering a metric by a name.
 
-        Only a dataset with an approved metric is served; the pairs are read through Superset ChartData as the caller.
+        Only a dataset with an approved metric, or an aggregate dataset the AI Agent may build a metric on, is served;
+        the pairs are read through Superset ChartData as the caller.
         """
         dataset = db.session.get(SqlaTable, dataset_id)
         if dataset is None:
@@ -1257,7 +1290,8 @@ class SemanticLayerAPI(RestApi):
         approved = db.session.query(MetricContract).filter(
             MetricContract.dataset_id == dataset_id, MetricContract.status == "approved",
         ).first()
-        if approved is None:
+        dictionary = db.session.get(DatasetDictionary, dataset_id) if approved is None else None
+        if approved is None and getattr(dictionary, "dataset_type", None) != AGGREGATE_DATASET:
             return self.response(403, message="A dataset with an approved metric contract is required.")
         from superset.charts.schemas import ChartDataQueryContextSchema
         from superset.commands.chart.data.get_data_command import ChartDataCommand
@@ -1306,6 +1340,428 @@ class SemanticLayerAPI(RestApi):
                 logger.exception("Reading the date range of %s failed", dataset.table_name)
             return []
         return [] if result.get("error") else time_ranges_from_rows(result.get("data", []), columns)
+
+    @staticmethod
+    def _coded_values(dataset: SqlaTable, entries: dict[str, ColumnDictionary]) -> dict[str, list[str]]:
+        """The stored values of each code column, read through ChartData as the caller; a free-text column is left out."""
+        from superset.charts.schemas import ChartDataQueryContextSchema
+        from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+        columns = coded_value_columns(dataset, entries)
+        if not columns:
+            return {}
+        try:
+            command = ChartDataCommand(ChartDataQueryContextSchema().load(build_values_payload(dataset, columns)))
+            command.validate()
+            results = command.run()["queries"]
+        except Exception as ex:
+            if not _is_superset_access_error(ex):
+                logger.exception("Reading the coded values of %s failed", dataset.table_name)
+            return {}
+        coded = {}
+        for name, result in zip(columns, results):
+            values = None if result.get("error") else coded_values_from_rows(result.get("data", []), name)
+            if values:
+                coded[name] = values
+        return coded
+
+    @expose("/agent-sources", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def agent_sources(self):
+        """Aggregate and base datasets the caller may query, described by the data dictionary.
+
+        When no approved metric answers a question, the AI Agent builds a metric on an aggregate dataset, following the
+        formulas already saved on it, or else drafts a dataset over base datasets, joined through their foreign keys.
+        """
+        _ensure_dictionary_tables()
+        dictionaries = {
+            dictionary.id: dictionary
+            for dictionary in db.session.query(DatasetDictionary)
+            .filter(DatasetDictionary.dataset_type.in_(AGENT_DATASET_TYPES))
+            .all()
+        }
+        datasets = [
+            dataset
+            for dataset in db.session.query(SqlaTable).filter(SqlaTable.id.in_(list(dictionaries))).all()
+            if not _is_internal_dataset(dataset) and self._can_access_semantic_query_dataset(dataset)
+        ] if dictionaries else []
+        dataset_ids = [dataset.id for dataset in datasets]
+        entries_by_dataset: dict[int, dict[str, ColumnDictionary]] = {}
+        for entry in db.session.query(ColumnDictionary).filter(ColumnDictionary.dataset_id.in_(dataset_ids)).all():
+            entries_by_dataset.setdefault(entry.dataset_id, {})[entry.column_name] = entry
+        target_ids = {
+            entry.referenced_column
+            for entries in entries_by_dataset.values() for entry in entries.values() if entry.referenced_column
+        }
+        referenced = {
+            entry.id: (entry.dataset_id, entry.column_name)
+            for entry in db.session.query(ColumnDictionary).filter(ColumnDictionary.id.in_(list(target_ids))).all()
+        } if target_ids else {}
+        contracts = {
+            (contract.dataset_id, contract.metric_id): contract
+            for contract in db.session.query(MetricContract).filter(MetricContract.dataset_id.in_(dataset_ids)).all()
+        } if dataset_ids else {}
+        definitions = {
+            (definition.dataset_id, definition.metric_id): definition
+            for definition in db.session.query(MetricDefinition).filter(MetricDefinition.dataset_id.in_(dataset_ids))
+        } if dataset_ids else {}
+        described = []
+        for dataset in sorted(datasets, key=lambda item: item.table_name):
+            dictionary = dictionaries[dataset.id]
+            aggregate = dictionary.dataset_type == AGGREGATE_DATASET
+            entries = entries_by_dataset.get(dataset.id, {})
+            described.append({
+                "id": dataset.id,
+                "name": dataset.table_name,
+                "label": dictionary.display_name,
+                "dataset_type": dictionary.dataset_type,
+                "description": dictionary.description,
+                "grain": dictionary.grain,
+                "columns": source_columns(dataset, entries, referenced, self._coded_values(dataset, entries)),
+                "metrics": [
+                    source_metric(
+                        metric,
+                        metric_contract_state(contracts.get((dataset.id, metric.id)), dataset, metric),
+                        getattr(contracts.get((dataset.id, metric.id)), "origin", None),
+                        definitions.get((dataset.id, metric.id)),
+                    )
+                    for metric in dataset.metrics if not is_default_count(metric)
+                ] if aggregate else [],
+            })
+        return self.response(200, datasets=described)
+
+    @expose("/agent-metrics", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @_csrf_protected
+    @_rollback_on_error
+    def create_agent_metric(self):
+        """Save the metric the AI Agent built on an aggregate dataset as a candidate for review, or reuse one.
+
+        A metric with the same formula already on the dataset is reused: an approved one answers as it is, one the agent
+        proposed earlier answers as provisional again. A new metric gets its business definition and an AI Agent
+        candidate contract, so it answers the asker at once as a provisional figure and waits for an administrator.
+        """
+        _ensure_dictionary_tables()
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return self.response_400(message="A JSON object is required.")
+        dataset_id = body.get("dataset_id")
+        if not isinstance(dataset_id, int) or isinstance(dataset_id, bool):
+            return self.response_400(message="dataset_id is required.")
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        dictionary = db.session.get(DatasetDictionary, dataset_id)
+        if getattr(dictionary, "dataset_type", None) != AGGREGATE_DATASET or _is_internal_dataset(dataset):
+            return self.response_400(message="AI Agent chỉ tạo metric trên dataset tổng hợp (aggregate).")
+        if not self._can_access_semantic_query_dataset(dataset):
+            return self.response(403, message="Dataset and database access required.")
+        try:
+            draft = checked_metric_draft(body, dataset)
+            question = asked_question(body)
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+
+        metric = matching_metric(dataset, draft.expression)
+        contract = self._contract_for(dataset_id, metric.id) if metric is not None else None
+        if contract is not None:
+            state = metric_contract_state(contract, dataset, metric)
+            if state == "approved":
+                return self.response(200, metric=self._agent_metric(dataset, metric), provisional=False)
+            if state == "candidate" and contract.origin == AGENT_ORIGIN:
+                return self.response(200, metric=self._agent_metric(dataset, metric), provisional=True)
+            if state == "revoked":
+                return self.response(409, message="Một metric cùng công thức đã bị quản trị viên thu hồi.")
+            return self.response(409, message="Một metric cùng công thức đang chờ quản trị viên xử lý.")
+        if metric is None:
+            pending = db.session.query(MetricContract).filter(
+                MetricContract.dataset_id == dataset_id,
+                MetricContract.origin == AGENT_ORIGIN,
+                MetricContract.status == "candidate",
+            ).count()
+            if pending >= MAX_PENDING_AGENT_METRICS:
+                return self.response(429, message="Dataset này có quá nhiều metric AI Agent đang chờ duyệt.")
+            metric = SqlMetric(
+                metric_name=unique_metric_name(dataset, draft.metric_name),
+                verbose_name=draft.label,
+                expression=draft.expression,
+                description=draft.definition,
+            )
+            dataset.metrics.append(metric)
+            db.session.flush()
+        definition = self._metric_definition(dataset_id, metric.id)
+        if definition is None:
+            definition = MetricDefinition(
+                dataset_id=dataset_id, metric_id=metric.id, business_definition=draft.definition, unit=draft.unit,
+            )
+            db.session.add(definition)
+        # Hashing lazy-loads the dataset's database, which autoflushes, so it runs before the contract joins the session.
+        expression_hash = metric_contract_hash(dataset, metric)
+        contract = MetricContract(
+            dataset_id=dataset_id,
+            metric_id=metric.id,
+            metric_name=metric.metric_name,
+            expression=metric.expression,
+            expression_hash=expression_hash,
+            status="candidate",
+            origin=AGENT_ORIGIN,
+            owner_id=current_user.id,
+        )
+        db.session.add(contract)
+        note = f"AI Agent đề xuất khi trả lời: {question}" if question else "AI Agent đề xuất."
+        self._record_metric_event(dataset_id, metric.id, "candidate", note, contract)
+        db.session.commit()
+        return self.response(201, metric=self._agent_metric(dataset, metric), provisional=True)
+
+    def _agent_metric(self, dataset: SqlaTable, metric: Any) -> dict[str, Any]:
+        """The metric in the shape of a semantic catalog metric, which the agent queries like an approved one."""
+        definition = self._metric_definition(dataset.id, metric.id)
+        return {
+            "dataset_id": dataset.id,
+            "metric_id": metric.id,
+            "metric_name": metric.metric_name,
+            "verbose_name": metric.verbose_name,
+            "business_definition": getattr(definition, "business_definition", None) or metric.description,
+            "unit": getattr(definition, "unit", None),
+            "d3format": metric.d3format,
+        }
+
+    def _base_datasets(self, for_agent: bool) -> dict[str, SqlaTable]:
+        """Base datasets by table name: those the caller may query for the agent, every one for an administrator."""
+        base_ids = [
+            row.id for row in db.session.query(DatasetDictionary).filter(DatasetDictionary.dataset_type == BASE_DATASET)
+        ]
+        datasets = db.session.query(SqlaTable).filter(SqlaTable.id.in_(base_ids)).all() if base_ids else []
+        return {
+            dataset.table_name: dataset
+            for dataset in datasets
+            if not _is_internal_dataset(dataset) and (not for_agent or self._can_access_semantic_query_dataset(dataset))
+        }
+
+    def _serialize_dataset_proposal(self, proposal: DatasetProposal, user_name: Any) -> dict[str, Any]:
+        sources = db.session.query(SqlaTable).filter(SqlaTable.id.in_(proposal.source_dataset_ids or [])).all()
+        return {
+            "id": proposal.id,
+            "name": proposal.name,
+            "label": proposal.label,
+            "description": proposal.description,
+            "sql": proposal.sql,
+            "metric": proposal.metric,
+            "sources": [{"id": dataset.id, "name": dataset.table_name} for dataset in sources],
+            "question": proposal.question,
+            "status": proposal.status,
+            "proposer_name": user_name(proposal.proposer_id),
+            "created_on": proposal.created_on.isoformat() if proposal.created_on else None,
+            "reviewer_name": user_name(proposal.reviewer_id),
+            "reviewed_on": proposal.reviewed_on.isoformat() if proposal.reviewed_on else None,
+            "review_note": proposal.review_note,
+            "dataset_id": proposal.dataset_id,
+        }
+
+    @expose("/agent-dataset-proposals", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @_csrf_protected
+    @_rollback_on_error
+    def propose_agent_dataset(self):
+        """Keep the dataset the AI Agent drafted over base datasets for an administrator; nothing runs until then.
+
+        The same SQL already waiting for review is returned instead of a second proposal.
+        """
+        _ensure_dictionary_tables()
+        try:
+            values = checked_dataset_proposal(request.get_json(silent=True), self._base_datasets(for_agent=True))
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        user_name = self._user_names()
+        waiting = db.session.query(DatasetProposal).filter(
+            DatasetProposal.sql_fingerprint == values["sql_fingerprint"], DatasetProposal.status == "pending",
+        ).first()
+        if waiting is not None:
+            return self.response(200, proposal=self._serialize_dataset_proposal(waiting, user_name))
+        if db.session.query(DatasetProposal).filter(DatasetProposal.status == "pending").count() >= MAX_PENDING_PROPOSALS:
+            return self.response(429, message="Đã có quá nhiều đề xuất dataset đang chờ duyệt.")
+        proposal = DatasetProposal(
+            **values, status="pending", proposer_id=current_user.id, created_on=datetime.now(tz=timezone.utc),
+        )
+        db.session.add(proposal)
+        db.session.commit()
+        return self.response(201, proposal=self._serialize_dataset_proposal(proposal, user_name))
+
+    @expose("/dataset-proposals", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def list_dataset_proposals(self):
+        """Every dataset the AI Agent proposed, waiting ones first, then newest first."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        proposals = db.session.query(DatasetProposal).order_by(DatasetProposal.created_on.desc()).all()
+        proposals.sort(key=lambda proposal: proposal.status != "pending")
+        user_name = self._user_names()
+        return self.response(200, proposals=[self._serialize_dataset_proposal(item, user_name) for item in proposals])
+
+    def _pending_proposal(self, proposal_id: int) -> tuple[DatasetProposal | None, Any]:
+        if not self._is_admin():
+            return None, self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        proposal = db.session.get(DatasetProposal, proposal_id)
+        if proposal is None:
+            return None, self.response(404, message="Dataset proposal not found.")
+        if proposal.status != "pending":
+            return None, self.response_400(message="Đề xuất này đã được xử lý.")
+        return proposal, None
+
+    @expose("/dataset-proposals/<int:proposal_id>", methods=("PUT",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def update_dataset_proposal(self, proposal_id: int):
+        """Let an administrator correct the name, SQL or metric of a waiting proposal before creating it."""
+        proposal, error = self._pending_proposal(proposal_id)
+        if error is not None:
+            return error
+        body = request.get_json(silent=True)
+        try:
+            values = checked_dataset_proposal(
+                {**body, "question": proposal.question} if isinstance(body, dict) else body,
+                self._base_datasets(for_agent=False),
+            )
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        for attribute, value in values.items():
+            setattr(proposal, attribute, value)
+        db.session.commit()
+        return self.response(200, proposal=self._serialize_dataset_proposal(proposal, self._user_names()))
+
+    @expose("/dataset-proposals/<int:proposal_id>/reject", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def reject_dataset_proposal(self, proposal_id: int):
+        proposal, error = self._pending_proposal(proposal_id)
+        if error is not None:
+            return error
+        try:
+            reason = self._review_reason()
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        if reason is None:
+            return self.response_400(message="Nhập lý do từ chối.")
+        proposal.status, proposal.review_note = "rejected", reason
+        proposal.reviewer_id, proposal.reviewed_on = current_user.id, datetime.now(tz=timezone.utc)
+        db.session.commit()
+        return self.response(200, proposal=self._serialize_dataset_proposal(proposal, self._user_names()))
+
+    @expose("/dataset-proposals/<int:proposal_id>/create", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def create_proposed_dataset(self, proposal_id: int):
+        """Create the reviewed dataset in Superset and its metric as an AI Agent candidate.
+
+        Superset reads the SQL's columns while creating the virtual dataset, so SQL that does not run is refused here.
+        The dataset is an aggregate dataset in the data dictionary, so the agent builds further metrics on it.
+        """
+        proposal, error = self._pending_proposal(proposal_id)
+        if error is not None:
+            return error
+        base_datasets = self._base_datasets(for_agent=False)
+        try:
+            values = checked_dataset_proposal(
+                {
+                    "name": proposal.name, "label": proposal.label, "description": proposal.description,
+                    "sql": proposal.sql, "metric": proposal.metric, "question": proposal.question,
+                },
+                base_datasets,
+            )
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        from superset.commands.dataset.create import CreateDatasetCommand
+        from superset.commands.dataset.exceptions import DatasetCreateFailedError, DatasetInvalidError
+
+        try:
+            dataset = CreateDatasetCommand({
+                "database": values["database_id"], "schema": values["schema"], "table_name": values["name"],
+                "sql": values["sql"], "owners": [current_user.id],
+            }).run()
+        except DatasetInvalidError as ex:
+            db.session.rollback()
+            return self.response_400(message=f"Superset không tạo được dataset: {ex.normalized_messages()}")
+        except DatasetCreateFailedError:
+            db.session.rollback()
+            logger.exception("Creating the proposed dataset %s failed", values["name"])
+            return self.response_400(message="Superset không chạy được câu SQL để đọc các cột của dataset.")
+        _seed_dictionary(dataset)
+        dictionary = db.session.get(DatasetDictionary, dataset.id)
+        dictionary.display_name = values["label"]
+        dictionary.description = values["description"]
+        dictionary.dataset_type = AGGREGATE_DATASET
+        self._carry_column_keys(dataset, values, base_datasets)
+        metric_values = values["metric"]
+        metric = SqlMetric(
+            metric_name=metric_values["metric_name"],
+            verbose_name=metric_values["label"],
+            expression=metric_values["expression"],
+            description=metric_values["definition"],
+        )
+        dataset.metrics.append(metric)
+        db.session.flush()
+        db.session.add(MetricDefinition(
+            dataset_id=dataset.id, metric_id=metric.id,
+            business_definition=metric_values["definition"], unit=metric_values["unit"],
+        ))
+        expression_hash = metric_contract_hash(dataset, metric)
+        contract = MetricContract(
+            dataset_id=dataset.id, metric_id=metric.id, metric_name=metric.metric_name, expression=metric.expression,
+            expression_hash=expression_hash, status="candidate", origin=AGENT_ORIGIN, owner_id=proposal.proposer_id,
+        )
+        db.session.add(contract)
+        note = f"Tạo từ đề xuất dataset của AI Agent: {proposal.question or proposal.label}"
+        self._record_metric_event(dataset.id, metric.id, "candidate", note, contract)
+        proposal.status, proposal.dataset_id = "created", dataset.id
+        proposal.reviewer_id, proposal.reviewed_on = current_user.id, datetime.now(tz=timezone.utc)
+        db.session.commit()
+        return self.response(200, proposal=self._serialize_dataset_proposal(proposal, self._user_names()))
+
+    @staticmethod
+    def _carry_column_keys(dataset: SqlaTable, values: dict[str, Any], base_datasets: dict[str, SqlaTable]) -> None:
+        """Set PK, FK, unique and the referenced column on the new dataset's dictionary from the base columns it reads.
+
+        Lineage is inferred from these references. A source that no output column references, because the query reads
+        no key of it or its dictionary marks none, gets a manual flow edge into the new dataset instead, so the lineage
+        diagram always shows where the dataset comes from.
+        """
+        sources = [dataset for dataset in base_datasets.values() if dataset.id in values["source_dataset_ids"]]
+        entries: dict[int, dict[str, ColumnDictionary]] = {}
+        for entry in db.session.query(ColumnDictionary).filter(
+            ColumnDictionary.dataset_id.in_(values["source_dataset_ids"])
+        ):
+            entries.setdefault(entry.dataset_id, {})[entry.column_name] = entry
+        derived = derived_column_keys(values["sql"], sources, entries)
+        for entry in db.session.query(ColumnDictionary).filter(ColumnDictionary.dataset_id == dataset.id):
+            keys = derived.get(entry.column_name)
+            if keys is None:
+                continue
+            referenced = entries[keys.referenced[0]][keys.referenced[1]]
+            entry.is_pk, entry.is_unique = keys.is_pk, keys.is_unique
+            entry.is_fk, entry.referenced_column = True, referenced.id
+        referenced_sources = {keys.referenced[0] for keys in derived.values()}
+        for source in sources:
+            if source.id not in referenced_sources:
+                db.session.add(LineageEdge(source_dataset_id=source.id, target_dataset_id=dataset.id, kind="flow"))
 
     @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
     @protect()

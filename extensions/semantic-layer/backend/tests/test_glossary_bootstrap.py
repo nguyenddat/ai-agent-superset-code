@@ -149,8 +149,9 @@ def _migration_namespace():
         "ExpertRuleRevision",
         "ExpertRuleLink",
         "ExpertRuleAuditEvent",
+        "DatasetProposal",
     )
-    namespace = {name: SimpleNamespace(__tablename__=name, __table__=Table(name)) for name in names}
+    namespace ={name: SimpleNamespace(__tablename__=name, __table__=Table(name)) for name in names}
     namespace.update(
         db=db,
         inspect=inspect,

@@ -19,6 +19,9 @@ class MetricContract(AuditMixinNullable, Model):
     expression = Column(Text, nullable=False)
     expression_hash = Column(String(64), nullable=False, index=True)
     status = Column(String(16), nullable=False, default="candidate", index=True)
+    # `ai_agent` for a metric the AI Agent built from an aggregate dataset: its candidate may answer the asker as a
+    # provisional figure until an administrator approves it; `manual` candidates only run as an administrator preview.
+    origin = Column(String(16), nullable=False, default="manual")
     owner_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
     approver_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)

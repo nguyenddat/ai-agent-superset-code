@@ -66,6 +66,14 @@ export const semanticLayerApi = {
   glossaryRevoke: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/revoke`,
   glossaryAudit: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/audit`,
   glossaryDiscovery: `${SEMANTIC_LAYER_API}/glossary/discovery`,
+  datasetProposals: `${SEMANTIC_LAYER_API}/dataset-proposals`,
+  datasetProposal: (proposalId: number) => `${SEMANTIC_LAYER_API}/dataset-proposals/${encodeURIComponent(proposalId)}`,
+  datasetProposalCreate: (proposalId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset-proposals/${encodeURIComponent(proposalId)}/create`
+  ),
+  datasetProposalReject: (proposalId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset-proposals/${encodeURIComponent(proposalId)}/reject`
+  ),
 } as const;
 
 export const supersetApi = {

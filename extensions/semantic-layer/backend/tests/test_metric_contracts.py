@@ -134,9 +134,6 @@ def test_ineligibility_names_the_offending_column_or_dataset():
     assert metric_contract_ineligibility(dataset, metric) == "Cột loai_quan_sat là cột tính toán."
     dataset.columns[0].expression = None
     assert metric_contract_ineligibility(dataset, metric) is None
-    dataset.sql = "SELECT 1"
-    assert metric_contract_ineligibility(dataset, metric) == "Dataset ảo (định nghĩa bằng SQL) chưa được hỗ trợ."
-    dataset.sql = None
     metric.expression = "SUM(a) / COUNT(b)"
     assert metric_contract_ineligibility(dataset, metric) == METRIC_CONTRACT_RULE
 
@@ -159,11 +156,17 @@ def test_metric_contract_state_covers_every_review_stage():
     assert metric_contract_state(None, dataset, metric) == "ineligible"
 
 
-def test_contract_rejects_virtual_dataset_and_computed_metric_column():
+def test_a_virtual_dataset_is_eligible_but_editing_its_sql_voids_the_approval():
     dataset, metric = _objects()
-    dataset.sql = "SELECT * FROM weather_daily"
-    assert not metric_is_eligible_for_contract(dataset, metric)
-    dataset.sql = None
+    dataset.sql = "SELECT city, temperature_c FROM weather_daily"
+    assert metric_is_eligible_for_contract(dataset, metric)
+    approved_hash = metric_contract_hash(dataset, metric)
+    dataset.sql = "SELECT city, temperature_c FROM weather_daily WHERE city = 'Hue'"
+    assert metric_contract_hash(dataset, metric) != approved_hash
+
+
+def test_contract_rejects_computed_metric_column():
+    dataset, metric = _objects()
     dataset.columns[0].expression = "temperature_c + 1"
     assert not metric_is_eligible_for_contract(dataset, metric)
 

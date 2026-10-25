@@ -38,6 +38,9 @@ function reviewSummary(metric: MetricReviewItem, viewerId: number | null, second
     case 'approved':
       return `Duyệt bởi ${contract?.approver_name ?? '—'} · ${formatDate(contract?.approved_at ?? null)}`;
     case 'candidate':
+      if (contract?.origin === 'ai_agent') {
+        return `AI Agent dựng khi trả lời ${contract.owner_name ?? '—'} · đang trả lời tạm tính, chờ duyệt`;
+      }
       if (contract?.owner_id !== viewerId) return `Đề xuất bởi ${contract?.owner_name ?? '—'} · chờ duyệt`;
       return `Bạn đã đề xuất · ${secondReviewerRequired ? 'cần một quản trị viên khác duyệt' : 'chờ duyệt'}`;
     case 'revoked':

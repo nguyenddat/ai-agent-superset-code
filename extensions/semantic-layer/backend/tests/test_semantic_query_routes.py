@@ -78,11 +78,13 @@ class _ModelField:
 
 
 class _MetricContract:
-    status = dataset_id = _ModelField()
+    status = dataset_id = origin = _ModelField()
 
-    def __init__(self, dataset_id, metric_id, owner_id=None):
+    def __init__(self, dataset_id, metric_id, owner_id=None, **fields):
         self.id, self.dataset_id, self.metric_id, self.owner_id = 91, dataset_id, metric_id, owner_id
         self.approver_id = self.revoker_id = self.approved_at = self.revoked_at = None
+        self.origin = "manual"
+        self.__dict__.update(fields)
 
 
 class _RelationshipContract:
@@ -107,9 +109,10 @@ class _MetricContractEvent:
 class _MetricDefinition:
     dataset_id = metric_id = _ModelField()
 
-    def __init__(self, dataset_id, metric_id):
+    def __init__(self, dataset_id, metric_id, **fields):
         self.dataset_id, self.metric_id = dataset_id, metric_id
         self.business_definition = self.unit = self.steward_id = None
+        self.__dict__.update(fields)
 
 
 class _CatalogDataset:
@@ -134,7 +137,7 @@ def _route_api(datasets):
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
         "list_metric_contracts", "_user_names", "_active_users", "_metric_definition", "_serialize_metric_definition",
         "_review_reason", "_record_metric_event", "save_metric_definition", "list_metric_contract_events",
-        "_second_reviewer_required",
+        "_second_reviewer_required", "create_agent_metric", "_agent_metric",
     }
     class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
     class_node.decorator_list = []
@@ -152,6 +155,7 @@ def _route_api(datasets):
         "request": SimpleNamespace(get_json=lambda silent=True: {"dimensions": [], "filters": []}, args=SimpleNamespace(get=lambda *_args, **_kwargs: None)),
         "current_app": SimpleNamespace(config={}), "_ensure_dictionary_tables": lambda: None,
         "_label_dimensions": len,
+        "AGENT_ORIGIN": "ai_agent",
         "metric_is_eligible_for_contract": metric_is_eligible_for_contract, "metric_contract_hash": metric_contract_hash,
         "metric_contract_ineligibility": metric_contract_ineligibility, "metric_contract_state": metric_contract_state,
         "parse_contract_metric": parse_contract_metric,
@@ -627,8 +631,93 @@ def test_only_administrators_may_preview_a_candidate(monkeypatch):
     namespace["current_user"].roles = []
     api.execute_metric_contract(dataset.id, 4)
     assert grants == [True, False]
+    # A candidate the AI Agent built answers any user who may read the dataset, as a provisional figure.
+    contract.origin = "ai_agent"
+    status, payload = api.execute_metric_contract(dataset.id, 4)
+    assert grants[-1] is True and status == 200 and payload["preview"] is True
 
 
 def test_route_source_has_no_sqllab_or_raw_execution_path():
     source = ROUTE_PATH.read_text(encoding="utf-8").lower()
     assert "sqllab" not in source and ".engine.execute" not in source
+
+
+class _AgentMetric:
+    next_id = 40
+
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
+        self.d3format = None
+        self.id = type(self).next_id
+        type(self).next_id += 1
+
+
+def _agent_metric_api(contract=None, dataset_type="aggregate"):
+    from text_to_bi.superset_semantic_layer.modules.agent_ladder import service
+
+    dataset = _dataset()
+    dataset.metrics[0].verbose_name = dataset.metrics[0].description = dataset.metrics[0].d3format = None
+    api, namespace = _route_api({dataset.id: dataset})
+    session = namespace["db"].session
+    dictionary = SimpleNamespace(dataset_type=dataset_type)
+    session.get = lambda model, identifier: dictionary if model == "DatasetDictionary" else dataset
+    session.flush = lambda: None
+    session.query = lambda model: SimpleNamespace(filter=lambda *_: SimpleNamespace(count=lambda: 0))
+    namespace.update({
+        "DatasetDictionary": "DatasetDictionary", "SqlMetric": _AgentMetric, "_is_internal_dataset": lambda _: False,
+        "AGGREGATE_DATASET": "aggregate", "MAX_PENDING_AGENT_METRICS": 50,
+        "checked_metric_draft": service.checked_metric_draft, "asked_question": service.asked_question,
+        "matching_metric": service.matching_metric, "unique_metric_name": service.unique_metric_name,
+    })
+    api._metric_definition = lambda *_: None
+    api._contract_for = lambda *_: contract
+    api._can_access_semantic_query_dataset = lambda _: True
+    return api, namespace, dataset
+
+
+def test_the_agent_builds_a_provisional_candidate_on_an_aggregate_dataset():
+    api, namespace, dataset = _agent_metric_api()
+    namespace["current_user"].roles = []
+    _use_request_body(namespace, {
+        "dataset_id": dataset.id, "metric_name": "nhiet_do_cao_nhat", "label": "Nhiệt độ cao nhất",
+        "expression": "MAX(temperature)", "definition": "Nhiệt độ cao nhất trong kỳ.", "unit": "°C",
+        "question": "Tuần trước nóng nhất bao nhiêu độ?",
+    })
+
+    status, payload = api.create_agent_metric()
+
+    assert status == 201 and payload["provisional"] is True
+    assert payload["metric"]["metric_name"] == "nhiet_do_cao_nhat" and len(dataset.metrics) == 2
+    added = namespace["db"].session.added
+    contract = next(item for item in added if isinstance(item, _MetricContract))
+    assert (contract.status, contract.origin, contract.owner_id) == ("candidate", "ai_agent", 3)
+    assert contract.expression_hash == metric_contract_hash(dataset, dataset.metrics[1])
+    event = next(item for item in added if isinstance(item, _MetricContractEvent))
+    assert event.reason == "AI Agent đề xuất khi trả lời: Tuần trước nóng nhất bao nhiêu độ?"
+
+
+def test_the_agent_reuses_a_metric_with_the_same_formula_and_respects_its_review():
+    existing = _MetricContract(7, 4)
+    api, namespace, dataset = _agent_metric_api(existing)
+    existing.status, existing.expression_hash = "approved", metric_contract_hash(dataset, dataset.metrics[0])
+    body = {"dataset_id": 7, "metric_name": "tb", "label": "TB", "expression": "avg( temperature )", "definition": "x"}
+    _use_request_body(namespace, body)
+    assert api.create_agent_metric()[1]["provisional"] is False and len(dataset.metrics) == 1
+
+    existing.status = "candidate"
+    assert api.create_agent_metric()[0] == 409
+    existing.origin = "ai_agent"
+    assert api.create_agent_metric()[1]["provisional"] is True
+
+
+@pytest.mark.parametrize(("dataset_type", "changes"), [
+    ("base", {}),
+    ("aggregate", {"expression": "MAX(temperature) + 1"}),
+    ("aggregate", {"expression": "MAX(rainfall)"}),
+    ("aggregate", {"metric_name": "Nhiệt độ"}),
+])
+def test_the_agent_only_builds_contract_formulas_on_aggregate_datasets(dataset_type, changes):
+    api, namespace, dataset = _agent_metric_api(dataset_type=dataset_type)
+    body = {"metric_name": "x", "label": "X", "expression": "MAX(temperature)", "definition": "x", **changes}
+    _use_request_body(namespace, {"dataset_id": dataset.id, **body})
+    assert api.create_agent_metric()[0] == 400 and len(dataset.metrics) == 1

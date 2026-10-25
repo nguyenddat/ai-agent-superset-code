@@ -13,6 +13,11 @@ const TOOL_LABELS: Record<string, string> = {
   understand_question: 'Hiểu câu hỏi, chọn thuật ngữ, metric, rule và lập truy vấn',
   query_metrics: 'Truy vấn số liệu',
   propose_missing_items: 'Đề xuất phần còn thiếu',
+  load_data_model: 'Chưa có metric đã duyệt: đọc mô hình dữ liệu',
+  draft_metric: 'Tìm bảng tổng hợp và dựng metric',
+  create_metric: 'Lưu metric chờ quản trị viên duyệt',
+  draft_dataset: 'Không có bảng tổng hợp phù hợp: soạn dataset từ bảng cơ sở',
+  propose_dataset: 'Gửi đề xuất dataset cho quản trị viên',
   // Steps of conversations answered before the steps were merged.
   rewrite_question: 'Viết lại câu hỏi',
   identify_glossary_terms: 'Xác định thuật ngữ',
@@ -152,9 +157,13 @@ function OutcomeBadge({ turn, outcome }: { turn: Turn; outcome: NonNullable<Turn
   const metricMissing = outcome.missing.includes('metric');
   const unasked = outcome.missing.filter(kind => kind !== 'metric' && !askedKinds.has(kind));
   if (!metricMissing && unasked.length === 0) return null;
+  // A metric the agent built on an aggregate table answered already; it only waits for an administrator's approval.
+  const metricText = turn.result?.provisional
+    ? 'Số liệu tạm tính bằng metric AI Agent vừa dựng từ bảng tổng hợp; metric đang chờ quản trị viên duyệt. '
+    : 'Chưa có metric phù hợp; quản trị viên sẽ xem xét bổ sung. ';
   return (
     <p className="ai-outcome is-review">
-      {metricMissing ? 'Chưa có metric phù hợp; quản trị viên sẽ xem xét bổ sung. ' : ''}
+      {metricMissing ? metricText : ''}
       {unasked.length > 0 ? `Chưa xác định được ${unasked.map(kind => MISSING_LABELS[kind]).join(', ')}.` : ''}
     </p>
   );

@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field
 
 from . import prompts
 from .query import QueryPlanError, combined_result, plan_query, result_for_answer
-from .semantic_source import MetricQueryError, SemanticCatalog
+from .semantic_source import DataModelSources, MetricQueryError, SemanticCatalog, catalog_metric
 
 MAX_HISTORY_TURNS = 3
 MAX_HISTORY_MESSAGE_LENGTH = 2000
@@ -114,6 +114,45 @@ class MissingProposals(BaseModel):
     metric: MetricProposal | None = None
 
 
+class MetricDraft(BaseModel):
+    dataset_id: int | None = None
+    metric_name: str = ""
+    label: str = ""
+    expression: str = ""
+    definition: str = ""
+    unit: str = ""
+    query: QueryPlan | None = None
+    reason: str = ""
+
+
+class DatasetMetricDraft(BaseModel):
+    metric_name: str
+    label: str
+    expression: str
+    definition: str
+    unit: str = ""
+
+
+class DatasetDraft(BaseModel):
+    name: str = ""
+    label: str = ""
+    description: str = ""
+    sql: str = ""
+    metric: DatasetMetricDraft | None = None
+    reason: str = ""
+
+
+@dataclass
+class MetricBuilder:
+    """The data model steps taken when no approved metric answers: read its aggregate datasets, save a built metric."""
+
+    load_sources: Callable[[], DataModelSources]
+    # Saves a metric draft; returns the metric in the Semantic Layer's shape and whether it still waits for approval.
+    create_metric: Callable[[dict[str, Any]], tuple[dict[str, Any], bool]]
+    # Keeps a dataset drafted over base datasets for an administrator; returns the proposal.
+    propose_dataset: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+
 @dataclass
 class AgentOutcome:
     rewritten_question: str | None = None
@@ -143,7 +182,8 @@ class AgentOutcome:
         has_user_rule = any(item["kind"] == "expert_rule" for item in self.user_definitions)
         gaps = {
             "glossary": bool(self.undefined_concepts),
-            "metric": not self.metrics,
+            # A metric the agent built answers provisionally, but it is still missing until an administrator approves it.
+            "metric": all(metric.get("provisional") for metric in self.metrics),
             "expert_rule": self.requires_expert_rule and not self.expert_rules and not has_user_rule,
         }
         return [kind for kind in MISSING_KINDS if gaps[kind]]
@@ -315,6 +355,133 @@ def _query_shown(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _draft_shown(draft: MetricDraft) -> dict[str, Any]:
+    if draft.dataset_id is None:
+        return {"dataset_id": None, "reason": draft.reason}
+    return {key: getattr(draft, key) for key in ("dataset_id", "label", "expression", "unit", "reason")}
+
+
+def _built_plan(draft: MetricDraft, metric_id: int) -> dict[str, Any] | None:
+    """The draft's query, aimed at the metric the Semantic Layer saved."""
+    if draft.query is None:
+        return None
+    plan = {**draft.query.model_dump(), "dataset_id": draft.dataset_id, "metric_ids": [metric_id]}
+    if plan.get("order_by"):
+        plan["order_by"] = {**plan["order_by"], "metric_id": metric_id}
+    return plan
+
+
+def _build_metric(
+    step: int,
+    sources: DataModelSources,
+    asked: str,
+    found: dict[str, Any],
+    today: date,
+    model: Any,
+    builder: MetricBuilder,
+    run_metric: MetricRunner,
+    rules: list[dict[str, Any]],
+    outcome: AgentOutcome,
+):
+    """Step 3: build a metric on an aggregate dataset and answer with it, provisionally until it is approved.
+
+    Returns the next step number and the metric used, or None when no aggregate dataset measures what was asked.
+    """
+    if not sources.aggregates:
+        return step, None
+    draft_input = "\n\n".join((
+        _today_block(today),
+        f"Câu hỏi: {asked}",
+        _data_block("Nội dung nghiệp vụ đã xác định", found),
+        _data_block("Dataset tổng hợp: cột, giá trị có nhãn và metric đã có", sources.aggregates),
+    ))
+    draft = yield from _tool_call(
+        step, "draft_metric", {"question": asked},
+        lambda: _ask(model, MetricDraft, prompts.DRAFT_METRIC, draft_input), _draft_shown,
+    )
+    step += 1
+    dataset = next((item for item in sources.aggregates if item["id"] == draft.dataset_id), None)
+    if dataset is None or not draft.expression.strip():
+        return step, None
+    body = {
+        "dataset_id": dataset["id"], "metric_name": draft.metric_name, "label": draft.label,
+        "expression": draft.expression, "definition": draft.definition, "unit": draft.unit or None, "question": asked,
+    }
+    drafted = {"name": draft.label, "definition": draft.definition, "unit": draft.unit}
+    try:
+        created, provisional = yield from _tool_call(
+            step, "create_metric", {key: body[key] for key in ("dataset_id", "label", "expression")},
+            lambda: builder.create_metric(body),
+            lambda value: {"metric": value[0]["metric_name"], "provisional": value[1]},
+        )
+        step += 1
+        metric = catalog_metric(created, dataset.get("name"), provisional)
+        outcome.metrics = [
+            {key: metric[key] for key in ("dataset_id", "metric_id", "name", "provisional")},
+        ]
+        planned = plan_query(_built_plan(draft, metric["metric_id"]), [dataset], [metric], rules)
+        outcome.result = yield from _tool_call(
+            step, "query_metrics", {"plan": _built_plan(draft, metric["metric_id"])},
+            lambda: _run_metrics(planned, run_metric), _query_shown,
+        )
+        outcome.result["provisional"] = provisional
+        yield "result", outcome.result
+    except (QueryPlanError, MetricQueryError) as ex:
+        outcome.query_error = str(ex)
+    if not outcome.metrics:
+        # The Semantic Layer refused the metric: an administrator gets it as a proposal instead.
+        outcome.suggestions = {"metric": drafted}
+        return step + 1, drafted
+    return step + 1, metric
+
+
+def _propose_dataset(
+    step: int,
+    sources: DataModelSources,
+    asked: str,
+    found: dict[str, Any],
+    today: date,
+    model: Any,
+    builder: MetricBuilder,
+    outcome: AgentOutcome,
+):
+    """Step 4: no aggregate dataset measures it, so draft a dataset over base datasets for an administrator to create.
+
+    Nothing runs: the asker is told a dataset was proposed. Returns the next step number.
+    """
+    if builder.propose_dataset is None:
+        return step
+    draft_input = "\n\n".join((
+        _today_block(today),
+        f"Câu hỏi: {asked}",
+        _data_block("Nội dung nghiệp vụ đã xác định", found),
+        _data_block("Dataset cơ sở: cột và khoá liên kết", sources.bases),
+    ))
+    draft = yield from _tool_call(
+        step, "draft_dataset", {"question": asked},
+        lambda: _ask(model, DatasetDraft, prompts.DRAFT_DATASET, draft_input),
+        lambda value: value.model_dump(),
+    )
+    step += 1
+    if not draft.sql.strip() or draft.metric is None:
+        return step
+    body = {**draft.model_dump(exclude={"reason"}), "question": asked}
+    try:
+        proposal = yield from _tool_call(
+            step, "propose_dataset", {"name": draft.name, "label": draft.label},
+            lambda: builder.propose_dataset(body),
+            lambda value: {key: value.get(key) for key in ("id", "name", "status")},
+        )
+    except MetricQueryError as ex:
+        outcome.query_error = str(ex)
+        return step + 1
+    outcome.suggestions = {"dataset": {
+        "proposal_id": proposal.get("id"), "label": proposal.get("label") or draft.label,
+        "description": draft.description, "metric": draft.metric.label,
+    }}
+    return step + 1
+
+
 def run_agent(
     question: str,
     history: list[dict[str, str]],
@@ -323,8 +490,12 @@ def run_agent(
     user_definitions: Sequence[dict[str, Any]] = (),
     run_metric: MetricRunner | None = None,
     today: date | None = None,
+    builder: MetricBuilder | None = None,
 ) -> Iterator[Event]:
-    """Run one question; `user_definitions` are what the user confirmed on this dashboard."""
+    """Run one question; `user_definitions` are what the user confirmed on this dashboard.
+
+    With a `builder`, a question that only lacks a metric climbs to the data model and builds one (step 3).
+    """
     today = today or date.today()
     outcome = AgentOutcome()
     definitions_by_id = {item["id"]: item for item in user_definitions}
@@ -379,7 +550,23 @@ def run_agent(
 
     missing = outcome.missing
     step = 3
-    if missing:
+    used_definitions = [definitions_by_id[item["id"]] for item in outcome.user_definitions]
+    rules = chosen_rules + _stored_conditions(used_definitions)
+    built_metric = None
+    if missing == ["metric"] and builder is not None and run_metric is not None:
+        found = {
+            "glossary_terms": _described(chosen_terms, ("name", "definition")),
+            "expert_rules": _described(chosen_rules, ("name", "conditions")),
+            "user_definitions": _described(used_definitions, ("name", "definition", "conditions")),
+        }
+        sources = yield from _tool_call(step, "load_data_model", {}, builder.load_sources, DataModelSources.summary)
+        step, built_metric = yield from _build_metric(
+            step + 1, sources, asked, found, today, model, builder, run_metric, rules, outcome,
+        )
+        if built_metric is None and sources.bases:
+            step = yield from _propose_dataset(step, sources, asked, found, today, model, builder, outcome)
+    # A metric or dataset proposed to administrators by the steps above already says what is missing.
+    if missing and built_metric is None and not outcome.suggestions:
         proposal_context = {
             "question": asked,
             "question_kind": understanding.question_kind,
@@ -408,12 +595,10 @@ def run_agent(
             proposals = MissingProposals()
         outcome.clarifications = _clarifications(proposals, missing)
         outcome.suggestions = _suggestions(proposals, missing)
-    elif run_metric is not None:
+    elif not missing and run_metric is not None:
         plan = understanding.query.model_dump() if understanding.query else None
         try:
-            used_definitions = [definitions_by_id[item["id"]] for item in outcome.user_definitions]
-            stored = _stored_conditions(used_definitions)
-            planned = plan_query(plan, catalog.datasets, catalog.metrics, chosen_rules + stored)
+            planned = plan_query(plan, catalog.datasets, catalog.metrics, rules)
             outcome.result = yield from _tool_call(
                 step, "query_metrics", {"plan": plan, "expert_rule_ids": [rule["id"] for rule in chosen_rules]},
                 lambda: _run_metrics(planned, run_metric),
@@ -423,14 +608,16 @@ def run_agent(
         except (QueryPlanError, MetricQueryError) as ex:
             outcome.query_error = str(ex)
 
+    answered_metrics = chosen_metrics or ([built_metric] if built_metric else [])
     context = {
         "today": today.isoformat(),
         "question": asked,
         "glossary_terms": _described(chosen_terms, ("name", "definition")),
-        "metrics": _described(chosen_metrics, ("name", "definition", "unit")),
+        "metrics": _described(answered_metrics, ("name", "definition", "unit")),
         "expert_rules": _described(chosen_rules, ("name", "conditions", "exceptions")),
         "user_definitions": outcome.user_definitions,
-        "missing": missing,
+        # A provisional answer is not a missing metric to the asker; the administrator still sees it as one.
+        "missing": [kind for kind in missing if not (kind == "metric" and outcome.result is not None)],
         "clarifications": outcome.clarifications,
         "suggestions": outcome.suggestions,
     }

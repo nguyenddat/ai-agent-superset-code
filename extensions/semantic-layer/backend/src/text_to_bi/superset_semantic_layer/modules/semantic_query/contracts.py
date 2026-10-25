@@ -128,9 +128,9 @@ def metric_contract_ineligibility(dataset: Any, metric: Any) -> str | None:
     Superset's ``TableColumn`` does not expose sensitivity metadata.  This layer
     therefore does not invent a non-authoritative ``is_sensitive`` flag; any
     sensitivity policy must be enforced by Superset datasource/RLS permissions.
+
+    A virtual dataset is eligible: its SQL is part of the contract hash, so editing it voids an approval.
     """
-    if getattr(dataset, "sql", None):
-        return "Dataset ảo (định nghĩa bằng SQL) chưa được hỗ trợ."
     metric_name = getattr(metric, "metric_name", None)
     if not isinstance(metric_name, str) or not _IDENTIFIER.fullmatch(metric_name):
         return "Tên metric chỉ được gồm chữ cái không dấu, chữ số và dấu gạch dưới."
@@ -289,8 +289,9 @@ def execute_approved_chart_query(
 ) -> Any:
     """Gate the ChartData runner before it can validate or execute anything.
 
-    ``allow_candidate`` lets a reviewer preview a candidate whose metric is unchanged since it was proposed; callers
-    grant it to administrators only, so nobody else can run a metric before it is approved.
+    ``allow_candidate`` lets a candidate whose metric is unchanged since it was proposed run: callers grant it to
+    administrators, as a review preview, and to a candidate the AI Agent built, as a provisional figure. Any other
+    metric runs only once approved.
     """
     previewable = (
         allow_candidate and contract is not None and metric_contract_state(contract, dataset, metric) == "candidate"

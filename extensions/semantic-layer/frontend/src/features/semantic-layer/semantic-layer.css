@@ -1319,3 +1319,19 @@
 .sl-definition-review-text { margin: 0; color: var(--sl-text); font-size: 13px; font-weight: 500; line-height: 1.5; }
 .sl-definition-review-list q { color: var(--sl-text-secondary); font-size: 12px; font-style: italic; }
 .sl-definition-review-meta { color: var(--sl-muted); font-size: 12px; }
+
+/* "Đề xuất dataset": virtual datasets the AI Agent drafted over base datasets, created only by an administrator. */
+.sl-proposal-count { flex: 1; color: var(--sl-text-secondary); font-size: 12px; }
+.sl-proposal .sl-metrics-section { display: grid; gap: 10px; }
+.sl-proposal-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.sl-proposal-sql { min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.sl-proposal-status {
+  --sl-state-color: #d97706; padding: 0 7px; border: 1px solid color-mix(in srgb, var(--sl-state-color) 45%, transparent);
+  border-radius: 999px; color: var(--sl-state-color); font-size: 10px; font-weight: 600; line-height: 16px;
+}
+.sl-proposal-status.is-created { --sl-state-color: #16a34a; }
+.sl-proposal-status.is-rejected { --sl-state-color: #dc2626; }
+.sl-proposal-note {
+  margin: 0; padding: 9px 12px; border: 1px solid var(--sl-border); border-radius: 7px; background: var(--sl-surface-muted);
+  color: var(--sl-text-secondary); font-size: 12px;
+}

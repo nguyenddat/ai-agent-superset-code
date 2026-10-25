@@ -78,6 +78,8 @@ export type QueryResult = {
   comparison?: { label: string; start: string; end: string; coverage: Coverage | null } | null;
   coverage?: Coverage | null;
   notes: string[];
+  /** True when the metric is one the agent built on an aggregate dataset that no administrator has approved yet. */
+  provisional?: boolean;
   /** What the agent asked the Semantic Layer for each metric; `sql` only when it shows it (to administrators). */
   queries?: Array<{
     metric: string;

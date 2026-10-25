@@ -21,6 +21,8 @@ export type MetricContract = {
   metric_id: number;
   metric_name: string;
   status: 'candidate' | 'approved' | 'revoked';
+  /** `ai_agent`: built by the AI Agent on an aggregate dataset; while a candidate it answers users provisionally. */
+  origin: 'manual' | 'ai_agent';
   owner_id: number | null;
   approver_id: number | null;
   approved_at: string | null;
@@ -30,6 +32,33 @@ export type MetricContract = {
 };
 
 export type MetricContractResponse = { contract: MetricContract };
+
+export type ProposedMetric = {
+  metric_name: string;
+  label: string;
+  expression: string;
+  definition: string;
+  unit: string | null;
+};
+
+/** A dataset the AI Agent drafted over base datasets; nothing runs until an administrator creates it. */
+export type DatasetProposal = {
+  id: number;
+  name: string;
+  label: string;
+  description: string | null;
+  sql: string;
+  metric: ProposedMetric;
+  sources: Array<{ id: number; name: string }>;
+  question: string | null;
+  status: 'pending' | 'created' | 'rejected';
+  proposer_name: string | null;
+  created_on: string | null;
+  reviewer_name: string | null;
+  reviewed_on: string | null;
+  review_note: string | null;
+  dataset_id: number | null;
+};
 
 export type MetricContractExecution = {
   columns: string[];

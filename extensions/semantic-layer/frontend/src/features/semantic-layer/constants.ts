@@ -23,7 +23,7 @@ export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: strin
   { id: 'metrics', label: 'Metrics', description: 'Duyệt định nghĩa metric và chạy thử' },
   { id: 'glossary', label: 'Business Glossary', description: 'Thuật ngữ nghiệp vụ được quản trị' },
   { id: 'rules', label: 'Expert Rules', description: 'Quy tắc nghiệp vụ của chuyên gia' },
-  { id: 'questions', label: 'Xử lý câu hỏi', description: 'Cách hiểu riêng của người dùng và câu hỏi thiếu metric' },
+  { id: 'questions', label: 'Xử lý câu hỏi', description: 'Cách hiểu riêng của người dùng, câu hỏi thiếu metric và đề xuất dataset' },
 ];
 
 /**

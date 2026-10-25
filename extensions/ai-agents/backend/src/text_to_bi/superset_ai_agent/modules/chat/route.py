@@ -15,8 +15,15 @@ from superset_core.rest_api.decorators import api
 from ...core.chat_models import get_chat_model
 from ...models.question_log import AgentChatSession, AgentQuestion, ensure_question_tables
 from ..definitions.route import user_definitions
-from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, recent_history, run_agent
-from .semantic_source import SemanticSourceError, cached_semantic_catalog, run_metric_query
+from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, MetricBuilder, recent_history, run_agent
+from .semantic_source import (
+    SemanticSourceError,
+    cached_data_model_sources,
+    cached_semantic_catalog,
+    create_agent_metric,
+    propose_agent_dataset,
+    run_metric_query,
+)
 
 logger = logging.getLogger(__name__)
 MAX_QUESTION_LENGTH = 2000
@@ -217,6 +224,11 @@ class TextToBIAgentAPI(RestApi):
                     dataset_id, metric_id, query, cookie_header, csrf_token,
                 ),
                 today=datetime.now(BUSINESS_TIMEZONE).date(),
+                builder=MetricBuilder(
+                    load_sources=lambda: cached_data_model_sources(user_id, cookie_header),
+                    create_metric=lambda draft: create_agent_metric(draft, cookie_header, csrf_token),
+                    propose_dataset=lambda draft: propose_agent_dataset(draft, cookie_header, csrf_token),
+                ),
             )
             try:
                 while True:

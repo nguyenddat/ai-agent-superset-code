@@ -369,7 +369,14 @@ export function QueryResultView({ result }: { result: QueryResult }) {
     <section className="ai-result" aria-label="Số liệu truy vấn">
       <header className="ai-result-header">
         <div className="ai-result-heading">
-          <strong>{result.scope || 'Số liệu'}</strong>
+          <strong>
+            {result.scope || 'Số liệu'}
+            {result.provisional && (
+              <span className="ai-result-provisional" title="Metric AI Agent dựng từ bảng tổng hợp, chưa được duyệt">
+                Tạm tính · chờ duyệt
+              </span>
+            )}
+          </strong>
           <span>
             {result.row_count === 0 && result.coverage?.status === 'none' ? 'Ngoài khoảng thời gian có dữ liệu' : null}
             {result.row_count === 0 && result.coverage?.status !== 'none' ? 'Không có dòng nào thoả điều kiện' : null}

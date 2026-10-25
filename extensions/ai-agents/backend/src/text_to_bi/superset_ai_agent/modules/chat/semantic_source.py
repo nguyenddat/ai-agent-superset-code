@@ -219,6 +219,113 @@ def cached_semantic_catalog(user_id: int, cookie_header: str) -> SemanticCatalog
     return catalog
 
 
+@dataclass
+class DataModelSources:
+    """What the data model offers when no approved metric answers: aggregate datasets to build a metric on, with the
+    formulas already saved there, and base datasets to draft a dataset over."""
+
+    aggregates: list[dict[str, Any]] = field(default_factory=list)
+    bases: list[dict[str, Any]] = field(default_factory=list)
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "aggregate_datasets": [dataset.get("label") or dataset["name"] for dataset in self.aggregates],
+            "base_datasets": [dataset.get("label") or dataset["name"] for dataset in self.bases],
+        }
+
+
+def _source_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str, Any]:
+    """An aggregate or base dataset, shaped like a catalog dataset so the query planner can use it as one."""
+    entry = {
+        **_dataset_entry({"id": dataset["id"], "name": dataset.get("name"), "dimensions": []}, members),
+        "columns": dataset.get("columns", []),
+    }
+    for key in ("label", "description", "grain", "metrics"):
+        if dataset.get(key):
+            entry[key] = dataset[key]
+    return entry
+
+
+def load_data_model_sources(cookie_header: str) -> DataModelSources:
+    """The aggregate and base datasets the user may query, with the labelled values and date ranges of aggregates."""
+    payload = _get_json(f"{SEMANTIC_LAYER_API}/agent-sources", cookie_header)
+    datasets = payload.get("datasets", [])
+    aggregates = [dataset for dataset in datasets if dataset.get("dataset_type") == "aggregate"]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        members = list(pool.map(lambda dataset: _members(dataset["id"], cookie_header), aggregates))
+    return DataModelSources(
+        aggregates=[_source_entry(dataset, found) for dataset, found in zip(aggregates, members)],
+        bases=[_source_entry(dataset, {}) for dataset in datasets if dataset.get("dataset_type") == "base"],
+    )
+
+
+_cached_sources: dict[int, tuple[float, DataModelSources]] = {}
+
+
+def cached_data_model_sources(user_id: int, cookie_header: str) -> DataModelSources:
+    now = time.monotonic()
+    with _cache_lock:
+        cached = _cached_sources.get(user_id)
+    if cached and now - cached[0] < CATALOG_CACHE_SECONDS:
+        return cached[1]
+    sources = load_data_model_sources(cookie_header)
+    with _cache_lock:
+        _cached_sources[user_id] = (now, sources)
+    return sources
+
+
+def _post_json(path: str, body: dict[str, Any], cookie_header: str, csrf_token: str, failure: str) -> dict[str, Any]:
+    """POST as the asking user; a refusal raises `MetricQueryError` with the Semantic Layer's own message."""
+    try:
+        response = requests.post(
+            internal_superset_url() + path,
+            json=body,
+            headers={"Cookie": cookie_header, "X-CSRFToken": csrf_token, "Accept": "application/json"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as ex:
+        raise MetricQueryError(failure) from ex
+    answer = response.json() if response.headers.get("Content-Type", "").startswith("application/json") else {}
+    if response.status_code not in (200, 201):
+        message = answer.get("message") if isinstance(answer.get("message"), str) else None
+        raise MetricQueryError(message or f"Semantic Layer trả về lỗi {response.status_code}.")
+    return answer
+
+
+def catalog_metric(metric: dict[str, Any], dataset_name: str | None, provisional: bool) -> dict[str, Any]:
+    """A metric the Semantic Layer returned, in the shape of an approved catalog metric."""
+    return {
+        "dataset_id": metric["dataset_id"],
+        "dataset_name": dataset_name,
+        "metric_id": metric["metric_id"],
+        "name": metric.get("verbose_name") or metric["metric_name"],
+        "metric_name": metric["metric_name"],
+        "definition": metric.get("business_definition"),
+        "unit": metric.get("unit"),
+        "d3format": metric.get("d3format"),
+        "glossary_term_ids": [],
+        "provisional": provisional,
+    }
+
+
+def create_agent_metric(draft: dict[str, Any], cookie_header: str, csrf_token: str) -> tuple[dict[str, Any], bool]:
+    """Save the metric the agent built on an aggregate dataset; returns it and whether it is still provisional."""
+    answer = _post_json(
+        f"{SEMANTIC_LAYER_API}/agent-metrics", draft, cookie_header, csrf_token,
+        "Không kết nối được tới Semantic Layer để tạo metric.",
+    )
+    return answer["metric"], bool(answer.get("provisional"))
+
+
+def propose_agent_dataset(draft: dict[str, Any], cookie_header: str, csrf_token: str) -> dict[str, Any]:
+    """Keep the dataset the agent drafted over base datasets for an administrator; returns the proposal."""
+    answer = _post_json(
+        f"{SEMANTIC_LAYER_API}/agent-dataset-proposals", draft, cookie_header, csrf_token,
+        "Không kết nối được tới Semantic Layer để gửi đề xuất dataset.",
+    )
+    return answer["proposal"]
+
+
 def run_metric_query(
     dataset_id: int, metric_id: int, query: dict[str, Any], cookie_header: str, csrf_token: str,
 ) -> dict[str, Any]:

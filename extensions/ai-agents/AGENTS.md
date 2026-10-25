@@ -79,10 +79,40 @@ numbers, and logs the question so administrators can fill the gaps:
    catalog's `time_ranges` (first and last date of each dataset date column, from
    `dimension-members`) let it pick dates the data covers. The model runs with
    `reasoning_effort="low"`.
-4. When something is missing, `propose_missing_items` drafts the questions back
-   to the user for a missing term or rule (`clarifications`) and a metric
-   proposal for administrators (`suggestions`), and no query runs. A failure here
-   is reported but does not stop the answer.
+4. When only a metric is missing, the agent climbs from approved content to the
+   data model (`run_agent(..., builder=MetricBuilder(...))`). A missing term or
+   rule is always asked back first.
+   - `load_data_model` reads the Semantic Layer's `/agent-sources`: aggregate
+     datasets (`dataset_type='aggregate'`, the fact/dim tables) with their
+     columns, data dictionary text and saved formulas, and base datasets
+     (`'base'`, the dm/tb tables) with foreign keys. Short text code columns
+     carry their stored `values` (such as `THANH_CONG|THAT_BAI`), so a formula
+     filters on a real value rather than a guess.
+   - `draft_metric` writes one metric on an aggregate column, following the
+     formulas already there (for example `loai_quan_sat = 'DU_BAO_NGAY'` for daily
+     figures), plus the query. `create_metric` posts it to `/agent-metrics`,
+     which checks the formula, reuses a metric with the same formula, or saves a
+     new one as an `ai_agent` candidate. The question is answered at once with a
+     `provisional` result ("Tạm tính · chờ duyệt"), and still logged as
+     `needs_review` until an administrator approves the metric.
+   - If no aggregate column fits, `draft_dataset` writes one read-only SELECT
+     over base datasets plus the metric to put on it, and `propose_dataset`
+     posts it to `/agent-dataset-proposals`. Nothing runs: an administrator
+     reviews it in "Xử lý câu hỏi" → "Đề xuất dataset", where creating it makes
+     a Superset virtual dataset, classes it as aggregate, and adds the metric as
+     an AI Agent candidate, so the next such question takes the previous step.
+     Creating it also fills the new dataset's data dictionary keys: a column
+     read unchanged from a key column (PK, FK or unique) of a base dataset is an
+     FK referencing that column, and stays PK or unique only while the query
+     keeps the base rows one to one (read from the FROM table, no GROUP BY or
+     DISTINCT, every join on a unique column). Data lineage is inferred from
+     those references; a source no column references gets a manual `flow` edge
+     into the new dataset.
+   - Otherwise, or when the Semantic Layer refuses a draft,
+     `propose_missing_items` drafts the questions back to the user
+     (`clarifications`) and a metric proposal for administrators
+     (`suggestions`), and no query runs. A failure here is reported but does not
+     stop the answer.
 5. Otherwise `query_metrics` checks the plan against the catalog
    (`modules/chat/query.py`): only listed columns, filterable or groupable as
    used, and the supported operators. An approved expert rule's filters come
