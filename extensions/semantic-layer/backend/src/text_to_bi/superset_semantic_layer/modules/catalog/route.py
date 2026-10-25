@@ -805,6 +805,15 @@ class SemanticLayerAPI(RestApi):
         return user_name
 
     @staticmethod
+    def _second_reviewer_required() -> bool:
+        """Whether a proposal's author must leave its approval to another administrator.
+
+        Off by default so a single administrator can approve their own work; a deployment with several reviewers
+        sets TEXT_TO_BI_REQUIRE_SECOND_REVIEWER = True in superset_config.
+        """
+        return bool(current_app.config.get("TEXT_TO_BI_REQUIRE_SECOND_REVIEWER", False))
+
+    @staticmethod
     def _active_users() -> list[dict[str, Any]]:
         """Active Superset users an administrator can name as a metric's steward."""
         user_model = security_manager.user_model
@@ -941,6 +950,7 @@ class SemanticLayerAPI(RestApi):
             metrics=metrics,
             users=self._active_users(),
             current_user_id=current_user.id,
+            require_second_reviewer=self._second_reviewer_required(),
         )
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/candidate", methods=("POST",))
@@ -1011,8 +1021,8 @@ class SemanticLayerAPI(RestApi):
             return self.response(404, message="Metric contract not found in this dataset.")
         if contract.status != "candidate":
             return self.response_400(message="Only a candidate metric contract can be approved.")
-        # Approval means a second person checked the formula, so the proposer can never approve it.
-        if contract.owner_id is not None and contract.owner_id == current_user.id:
+        proposed_by_viewer = contract.owner_id is not None and contract.owner_id == current_user.id
+        if proposed_by_viewer and self._second_reviewer_required():
             return self.response(403, message="Người đề xuất không thể tự duyệt; cần một quản trị viên khác duyệt.")
         if ineligibility := metric_contract_ineligibility(dataset, metric):
             return self.response_400(message=ineligibility)

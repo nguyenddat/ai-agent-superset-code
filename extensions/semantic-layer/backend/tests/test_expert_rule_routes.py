@@ -18,6 +18,8 @@ ENDPOINTS = {
     "revoke": ("/expert-rules/<int:rule_id>/revoke", "POST"),
     "audit": ("/expert-rules/<int:rule_id>/audit", "GET"),
     "discover": ("/expert-rules/discover", "GET"),
+    "list_rules": ("/expert-rules", "GET"),
+    "rule_options": ("/expert-rules/options", "GET"),
 }
 
 
@@ -104,8 +106,10 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     wtforms_module.ValidationError = validation_error
     superset_module = types.ModuleType("superset")
     superset_module.db = db
+    reviewer = SimpleNamespace(username="reviewer", get_full_name=lambda: "Bao Reviewer")
     superset_module.security_manager = SimpleNamespace(
-        raise_for_access=lambda datasource: None if datasource.id in allowed_datasets else (_ for _ in ()).throw(Exception())
+        raise_for_access=lambda datasource: None if datasource.id in allowed_datasets else (_ for _ in ()).throw(Exception()),
+        get_user_by_id=lambda user_id: reviewer if user_id == 42 else None,
     )
     sqla_module = types.ModuleType("superset.connectors.sqla.models")
     sqla_module.SqlaTable = type("SqlaTable", (), {})
@@ -132,6 +136,7 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     dataset_dictionary.DatasetDictionary = type("DatasetDictionary", (), {})
     glossary = types.ModuleType("text_to_bi.superset_semantic_layer.models.glossary_term")
     glossary.GlossaryTermLink = type("GlossaryTermLink", (), {})
+    glossary.GlossaryTerm = type("GlossaryTerm", (), {})
     glossary.GlossaryTermRevision = type("GlossaryTermRevision", (), {})
     metric = types.ModuleType("text_to_bi.superset_semantic_layer.models.metric_contract")
     metric.MetricContract = type("MetricContract", (), {})
@@ -216,7 +221,8 @@ def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):
         rule_id=1, revision_number=2, lifecycle_version=3, status="approved", name="Final only", conditions=[], exceptions=[], examples=[]
     )
     event = SimpleNamespace(
-        rule_id=1, event_type="approved", revision_number=2, lifecycle_version=3, actor_id=42, occurred_at=datetime.now(timezone.utc)
+        rule_id=1, event_type="approved", revision_number=2, lifecycle_version=3, actor_id=42, reason="Đã đối chiếu",
+        occurred_at=datetime.now(timezone.utc),
     )
     session.query = lambda _: _Query([event])
     api = route.ExpertRuleAPI()
@@ -225,4 +231,65 @@ def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):
     with app.test_request_context("/", method="GET"):
         status, body = api.audit(1)
     assert status == 200
-    assert body["audit"] == [{"action": "approved", "revision": 2, "lifecycle_version": 3, "actor_id": 42, "occurred_at": event.occurred_at.isoformat()}]
+    assert body["audit"] == [{
+        "action": "approved", "revision": 2, "lifecycle_version": 3, "actor_id": 42, "actor_name": "Bao Reviewer",
+        "reason": "Đã đối chiếu", "occurred_at": event.occurred_at.isoformat(),
+    }]
+
+
+def test_self_approval_is_refused_with_403_and_rolled_back(monkeypatch):
+    app = Flask(__name__)
+    route, _, session = _load_route(monkeypatch)
+    api = route.ExpertRuleAPI()
+    api._revision = lambda _: SimpleNamespace(rule_id=1)
+    received = {}
+
+    def refuse(*_, require_second_reviewer):
+        received["require_second_reviewer"] = require_second_reviewer
+        raise route.ExpertRuleSelfApprovalError("Người soạn rule không thể tự duyệt")
+
+    route.approve_rule = refuse
+    app.config["TEXT_TO_BI_REQUIRE_SECOND_REVIEWER"] = True
+    with app.test_request_context("/", method="POST", json={"expected_revision": 1}):
+        status, body = api.approve(1)
+    assert received == {"require_second_reviewer": True}
+    assert status == 403 and "tự duyệt" in body["message"]
+    assert session.rollback_calls == 1 and session.commit_calls == 0
+
+
+def test_review_list_and_options_are_admin_only(monkeypatch):
+    app = Flask(__name__)
+    route, user, _ = _load_route(monkeypatch)
+    user.roles = []
+    api = route.ExpertRuleAPI()
+    with app.test_request_context("/", method="GET"):
+        assert api.list_rules()[0] == 403
+        assert api.rule_options()[0] == 403
+
+
+def test_review_revisions_prefer_the_current_one_and_fall_back_to_the_latest(monkeypatch):
+    route, _, session = _load_route(monkeypatch)
+    revisions = [
+        SimpleNamespace(rule_id=1, revision_number=1, is_current=False),
+        SimpleNamespace(rule_id=1, revision_number=2, is_current=True),
+        SimpleNamespace(rule_id=2, revision_number=1, is_current=False),
+        SimpleNamespace(rule_id=2, revision_number=2, is_current=False),
+    ]
+    route.ExpertRuleRevision.revision_number = object()
+    session.query = lambda _: _Query(revisions)
+    chosen = route.ExpertRuleAPI._review_revisions()
+    assert [(item.rule_id, item.revision_number) for item in chosen] == [(1, 2), (2, 2)]
+
+
+def test_an_approved_rule_with_a_changed_link_is_outdated(monkeypatch):
+    route, _, _ = _load_route(monkeypatch)
+    api = route.ExpertRuleAPI()
+    api._fingerprint = lambda kind, _, __: {"dataset": "dataset", "metric": "metric-changed"}[kind]
+    approved = SimpleNamespace(status="approved", is_current=True)
+    links = [
+        SimpleNamespace(kind="dataset", target_id=7, dataset_id=7, fingerprint="dataset"),
+        SimpleNamespace(kind="metric", target_id=9, dataset_id=7, fingerprint="metric-at-approval"),
+    ]
+    assert api._review_state(approved, links) == "outdated"
+    assert api._review_state(approved, links[:1]) == "approved"
+    assert api._review_state(SimpleNamespace(status="draft", is_current=True), links) == "draft"

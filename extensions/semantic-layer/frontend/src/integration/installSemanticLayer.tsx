@@ -5,6 +5,7 @@ import '@xyflow/react/dist/style.css';
 import '@/styles/globals.css';
 import { PortalContainerContext } from '@/lib/portal-container';
 import { DataDictionary } from '../features/semantic-layer/DataDictionary';
+import { ExpertRules } from '../features/semantic-layer/ExpertRules';
 import { BusinessCanvas } from '../features/semantic-layer/BusinessCanvas';
 import { Glossary } from '../features/semantic-layer/Glossary';
 import { MetricContracts } from '../features/semantic-layer/MetricContracts';
@@ -259,7 +260,7 @@ function SemanticLayerPage() {
                 placeholder="Chọn database"
               />
             </div>
-            {activeModule !== 'metrics' ? (
+            {activeModule !== 'metrics' && activeModule !== 'rules' ? (
               <div className="sl-header-select sl-dataset-select">
                 <HeaderPicker
                   ariaLabel="Dataset"
@@ -283,6 +284,8 @@ function SemanticLayerPage() {
             <div className="sl-content">
               {activeModule === 'glossary' ? (
                 <main className="sl-details"><Glossary datasets={datasets} /></main>
+              ) : activeModule === 'rules' ? (
+                <main className="sl-details"><ExpertRules /></main>
               ) : activeModule === 'metrics' ? (
                 <main className="sl-details"><MetricContracts databaseId={selectedDatabase} /></main>
               ) : currentDataset ? (

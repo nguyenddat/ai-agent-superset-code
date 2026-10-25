@@ -109,6 +109,8 @@ export type MetricReviewList = {
   metrics: MetricReviewItem[];
   users: MetricUser[];
   current_user_id: number | null;
+  /** True when a proposer must leave approval to another administrator (TEXT_TO_BI_REQUIRE_SECOND_REVIEWER). */
+  require_second_reviewer: boolean;
 };
 
 export type MetricFilterOperator = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'IN' | 'NOT IN';
@@ -322,4 +324,86 @@ export type BusinessModel = {
   classifications: Record<string, { layer_id: number | null; dataset_type: DatasetDictionary['dataset_type'] }>;
   edges: LineageEdge[];
   metrics: ModelMetric[];
+};
+
+export type ExpertRuleState = 'draft' | 'approved' | 'outdated' | 'revoked';
+
+export type ExpertRuleOperator =
+  | 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'greater_than' | 'greater_than_or_equal'
+  | 'less_than' | 'less_than_or_equal' | 'in' | 'not_in' | 'is_null' | 'is_not_null';
+
+export type ExpertRuleValueType = 'string' | 'number' | 'boolean' | 'null' | 'array';
+
+export type ExpertRuleConditionValue = string | number | boolean | null | Array<string | number | boolean | null>;
+
+export type ExpertRuleCondition = {
+  field_ref: { column_dictionary_id: number };
+  operator: ExpertRuleOperator;
+  value_type: ExpertRuleValueType;
+  value: ExpertRuleConditionValue;
+};
+
+export type ExpertRuleException = { when: string; outcome: string };
+
+export type ExpertRuleExample = { question: string; intent: string };
+
+export type ExpertRuleReference = { id: number; name: string };
+
+/** One rule's current revision as the administrator review page sees it. */
+export type ExpertRule = {
+  id: number;
+  revision: number;
+  lifecycle_version: number;
+  status: 'draft' | 'approved' | 'revoked';
+  name: string;
+  conditions: ExpertRuleCondition[];
+  exceptions: ExpertRuleException[];
+  examples: ExpertRuleExample[];
+  dataset_id: number | null;
+  dataset_name: string | null;
+  state: ExpertRuleState;
+  /** Display names of the dictionary columns the conditions use, keyed by column dictionary ID. */
+  column_names: Record<string, string>;
+  glossary_terms: ExpertRuleReference[];
+  metrics: ExpertRuleReference[];
+  author_id: number | null;
+  author_name: string | null;
+  approver_name: string | null;
+  approved_at: string | null;
+  revoker_name: string | null;
+  revoked_at: string | null;
+};
+
+export type ExpertRuleList = { rules: ExpertRule[]; current_user_id: number | null; require_second_reviewer: boolean };
+
+export type ExpertRuleAuditEntry = {
+  action: 'created' | 'updated' | 'approved' | 'revoked';
+  revision: number;
+  lifecycle_version: number;
+  actor_id: number | null;
+  actor_name: string | null;
+  reason: string | null;
+  occurred_at: string;
+};
+
+export type ExpertRuleColumnOption = { id: number; column_name: string; display_name: string; data_type: string };
+
+/** A dataset a rule may be written for, with the columns, approved terms and approved metrics it may reference. */
+export type ExpertRuleDatasetOption = {
+  id: number;
+  name: string;
+  columns: ExpertRuleColumnOption[];
+  glossary_terms: ExpertRuleReference[];
+  metrics: ExpertRuleReference[];
+};
+
+export type ExpertRulePayload = {
+  schema_version: 2;
+  name: string;
+  dataset_id: number;
+  conditions: ExpertRuleCondition[];
+  exceptions: ExpertRuleException[];
+  examples: ExpertRuleExample[];
+  glossary_term_ids: number[];
+  metric_ids: number[];
 };

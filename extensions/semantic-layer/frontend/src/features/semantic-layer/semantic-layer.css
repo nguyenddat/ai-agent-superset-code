@@ -294,6 +294,7 @@
 .sl-metric-state.is-approved, .sl-metrics-dot.is-approved { --sl-state-color: #16a34a; }
 .sl-metric-state.is-outdated, .sl-metrics-dot.is-outdated { --sl-state-color: #ea580c; }
 .sl-metric-state.is-revoked, .sl-metrics-dot.is-revoked { --sl-state-color: #dc2626; }
+.sl-metric-state.is-draft, .sl-metrics-dot.is-draft { --sl-state-color: #d97706; }
 .sl-metrics-detail > .sl-metric-error { margin: 12px 16px 0; }
 .sl-metrics-detail-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 14px 16px 0; }
 .sl-metrics-title { min-width: 0; }
@@ -1207,7 +1208,7 @@
   .sl-details { padding: 14px 12px 20px; }
   .sl-dictionary { margin: 8px; overflow: clip; }
   .sl-dictionary-toolbar { align-items: flex-start; flex-direction: column; background: var(--sl-surface-raised); }
-  .sl-metrics { grid-template-columns: 1fr; }.sl-metrics-browser { max-height: 300px; }.sl-metric-filter { grid-template-columns: 1fr 1fr; }
+  .sl-metrics { grid-template-columns: 1fr; }.sl-metrics-browser { max-height: 300px; }.sl-metric-filter, .sl-rule-condition, .sl-rule-pair { grid-template-columns: 1fr 1fr; }
   .sl-glossary-layout { grid-template-columns: 1fr; }.sl-glossary-list { max-height: 220px; }.sl-glossary-fields { grid-template-columns: 1fr; }.sl-glossary-link { grid-template-columns: 1fr; }
   .sl-dictionary-actions { width: 100%; flex-wrap: wrap; }
   .sl-dictionary-actions > button { flex: 1; }
@@ -1217,3 +1218,17 @@
 .sl-member-changes { display: flex; flex-direction: column; gap: 6px; max-height: 240px; margin: 0; padding: 0; overflow: auto; list-style: none; font-size: 13px; }
 .sl-member-changes li { padding: 6px 10px; border-left: 3px solid var(--sl-accent); border-radius: 6px; background: var(--sl-surface-muted, rgb(127 127 127 / 8%)); }
 .sl-member-changes li.is-remove { border-left-color: #dc2626; }
+
+/* Expert rules reuse the Metrics workspace layout; these cover what a rule adds. */
+.sl-metrics-detail-heading + .sl-metrics-definition { margin-top: 14px; border-top: 1px solid var(--sl-border); }
+.sl-metrics-detail-heading.is-editing .sl-metrics-title p { max-width: 640px; }
+.sl-rule-empty { padding: 16px; }
+.sl-rule-conditions, .sl-rule-pairs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; color: var(--sl-text); font-size: 14px; }
+.sl-rule-joiner { margin-right: 6px; color: var(--sl-muted); font-size: 12px; font-weight: 600; text-transform: uppercase; }
+.sl-rule-pairs li { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sl-rule-pairs .sl-metric-muted { font-size: 13px; }
+.sl-metric-token.is-static { padding-right: 10px; }
+.sl-rule-static { padding-top: 5px; color: var(--sl-text); font-size: 13px; }
+.sl-rule-wide { width: 100%; max-width: 420px; }
+.sl-rule-condition { display: grid; max-width: 760px; grid-template-columns: minmax(0, 1.4fr) 180px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+.sl-rule-pair { display: grid; max-width: 760px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; align-items: center; }

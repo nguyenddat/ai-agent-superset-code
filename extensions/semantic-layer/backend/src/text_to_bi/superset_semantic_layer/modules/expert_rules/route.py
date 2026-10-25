@@ -7,7 +7,7 @@ import json
 from functools import wraps
 from typing import Any
 
-from flask import request
+from flask import current_app, request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
 from flask_wtf.csrf import validate_csrf
@@ -22,14 +22,16 @@ from wtforms import ValidationError
 from ...models.column_dictionary import ColumnDictionary
 from ...models.dataset_dictionary import DatasetDictionary
 from ...models.expert_rule import ExpertRule, ExpertRuleAuditEvent, ExpertRuleLink, ExpertRuleRevision
-from ...models.glossary_term import GlossaryTermLink, GlossaryTermRevision
+from ...models.glossary_term import GlossaryTerm, GlossaryTermLink, GlossaryTermRevision
 from ...models.metric_contract import MetricContract
 from ..semantic_query.contracts import contract_is_approved_current, metric_contract_hash
 from .service import (
     ExpertRuleConflictError,
+    ExpertRuleSelfApprovalError,
     ExpertRuleValidationError,
     approve_rule,
     create_draft,
+    revision_author_id,
     revoke_rule,
     rule_is_discoverable,
     update_draft,
@@ -162,6 +164,8 @@ class ExpertRuleAPI(RestApi):
             return self.response(201 if rule_id is None else 200, rule=self._serialize(revision))
         except ExpertRuleConflictError as ex:
             db.session.rollback(); return self.response(409, message=str(ex))
+        except ExpertRuleSelfApprovalError as ex:
+            db.session.rollback(); return self.response(403, message=str(ex))
         except ExpertRuleValidationError as ex:
             db.session.rollback(); return self.response_400(message=str(ex))
         except IntegrityError:
@@ -195,7 +199,22 @@ class ExpertRuleAPI(RestApi):
     @_rollback_on_error
     def approve(self, rule_id: int):
         if not self._is_admin(): return self.response(403, message="Admin access required.")
-        return self._mutate(lambda revision, payload: approve_rule(db.session, revision, self._expected(payload), current_user.id, payload.get("reason")), rule_id)
+        return self._mutate(
+            lambda revision, payload: approve_rule(
+                db.session, revision, self._expected(payload), current_user.id, payload.get("reason"),
+                require_second_reviewer=self._second_reviewer_required(),
+            ),
+            rule_id,
+        )
+
+    @staticmethod
+    def _second_reviewer_required() -> bool:
+        """Whether a proposal's author must leave its approval to another administrator.
+
+        Off by default so a single administrator can approve their own work; a deployment with several reviewers
+        sets TEXT_TO_BI_REQUIRE_SECOND_REVIEWER = True in superset_config.
+        """
+        return bool(current_app.config.get("TEXT_TO_BI_REQUIRE_SECOND_REVIEWER", False))
 
     @expose("/expert-rules/<int:rule_id>/revoke", methods=["POST"])
     @protect()
@@ -214,7 +233,148 @@ class ExpertRuleAPI(RestApi):
     def audit(self, rule_id: int):
         if not self._is_admin(): return self.response(403, message="Admin access required.")
         events = db.session.query(ExpertRuleAuditEvent).filter_by(rule_id=rule_id).order_by(ExpertRuleAuditEvent.id).all()
-        return self.response(200, audit=[{"action": event.event_type, "revision": event.revision_number, "lifecycle_version": event.lifecycle_version, "actor_id": event.actor_id, "occurred_at": event.occurred_at.isoformat()} for event in events])
+        user_name = self._user_names()
+        audit = [
+            {
+                "action": event.event_type,
+                "revision": event.revision_number,
+                "lifecycle_version": event.lifecycle_version,
+                "actor_id": event.actor_id,
+                "actor_name": user_name(event.actor_id),
+                "reason": event.reason,
+                "occurred_at": event.occurred_at.isoformat(),
+            }
+            for event in events
+        ]
+        return self.response(200, audit=audit)
+
+    @staticmethod
+    def _user_names() -> Any:
+        """A per-request lookup from user ID to display name: full name, else username."""
+        names: dict[int, str | None] = {}
+
+        def user_name(user_id: int | None) -> str | None:
+            if user_id is None:
+                return None
+            if user_id not in names:
+                user = security_manager.get_user_by_id(user_id)
+                names[user_id] = (user.get_full_name().strip() or user.username) if user else None
+            return names[user_id]
+
+        return user_name
+
+    @staticmethod
+    def _review_revisions() -> list[ExpertRuleRevision]:
+        """Each rule's current revision; a rule revoked while revocation still retired it falls back to its latest."""
+        latest: dict[int, ExpertRuleRevision] = {}
+        for revision in db.session.query(ExpertRuleRevision).order_by(ExpertRuleRevision.revision_number).all():
+            kept = latest.get(revision.rule_id)
+            if kept is None or revision.is_current or not kept.is_current:
+                latest[revision.rule_id] = revision
+        return list(latest.values())
+
+    def _review_state(self, revision: ExpertRuleRevision, links: list[ExpertRuleLink]) -> str:
+        if revision.status != "approved":
+            return revision.status
+        live = rule_is_discoverable(revision, links, self._live_fingerprint)
+        # An approved rule whose linked metric or term changed since approval is hidden from discovery.
+        return "approved" if live else "outdated"
+
+    def _live_fingerprint(self, link: ExpertRuleLink) -> str | None:
+        return self._fingerprint(link.kind, link.target_id, link.dataset_id)
+
+    @staticmethod
+    def _glossary_term_name(term_id: int) -> str:
+        term = db.session.get(GlossaryTerm, term_id)
+        return term.canonical_name if term else f"#{term_id}"
+
+    @staticmethod
+    def _column_name(column_id: int) -> str:
+        column = db.session.get(ColumnDictionary, column_id)
+        return (column.display_name or column.column_name) if column else f"#{column_id}"
+
+    @expose("/expert-rules", methods=["GET"])
+    @protect()
+    @safe
+    @permission_name("read")
+    def list_rules(self):
+        """Every rule with its current revision and review state, for the administrator review page."""
+        if not self._is_admin(): return self.response(403, message="Admin access required.")
+        user_name = self._user_names()
+        rules = []
+        for revision in self._review_revisions():
+            rule = db.session.get(ExpertRule, revision.rule_id)
+            dataset = self._dataset(rule.dataset_id) if rule else None
+            links = db.session.query(ExpertRuleLink).filter_by(revision_id=revision.id).all()
+            metrics = getattr(dataset, "metrics", [])
+            metric_names = {metric.id: metric.verbose_name or metric.metric_name for metric in metrics}
+            column_ids = {condition["field_ref"]["column_dictionary_id"] for condition in revision.conditions}
+            author_id = revision_author_id(db.session, revision)
+            rules.append({
+                **self._serialize(revision),
+                "dataset_id": rule.dataset_id if rule else None,
+                "dataset_name": getattr(dataset, "table_name", None),
+                "state": self._review_state(revision, links),
+                "column_names": {str(column_id): self._column_name(column_id) for column_id in column_ids},
+                "glossary_terms": [
+                    {"id": link.target_id, "name": self._glossary_term_name(link.target_id)}
+                    for link in links if link.kind == "glossary"
+                ],
+                "metrics": [
+                    {"id": link.target_id, "name": metric_names.get(link.target_id, f"#{link.target_id}")}
+                    for link in links if link.kind == "metric"
+                ],
+                "author_id": author_id,
+                "author_name": user_name(author_id),
+                "approver_name": user_name(revision.approver_id),
+                "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
+                "revoker_name": user_name(revision.revoker_id),
+                "revoked_at": revision.revoked_at.isoformat() if revision.revoked_at else None,
+            })
+        rules.sort(key=lambda item: item["name"].casefold())
+        return self.response(
+            200, rules=rules, current_user_id=current_user.id, require_second_reviewer=self._second_reviewer_required()
+        )
+
+    @expose("/expert-rules/options", methods=["GET"])
+    @protect()
+    @safe
+    @permission_name("read")
+    def rule_options(self):
+        """What a rule editor may reference per dataset: dictionary columns, approved glossary terms and metrics."""
+        if not self._is_admin(): return self.response(403, message="Admin access required.")
+        terms_by_dataset: dict[int, list[dict[str, Any]]] = {}
+        for revision in db.session.query(GlossaryTermRevision).filter_by(status="approved", is_current=True).all():
+            term = {"id": revision.term_id, "name": self._glossary_term_name(revision.term_id)}
+            links = db.session.query(GlossaryTermLink).filter_by(revision_id=revision.id).all()
+            for dataset_id in {link.dataset_id for link in links}:
+                terms_by_dataset.setdefault(dataset_id, []).append(term)
+        datasets = []
+        for dictionary in db.session.query(DatasetDictionary).all():
+            dataset = self._dataset(dictionary.id)
+            if dataset is None or not self.can_access_datasource(dataset):
+                continue
+            columns = (
+                db.session.query(ColumnDictionary).filter_by(dataset_id=dataset.id).order_by(ColumnDictionary.id).all()
+            )
+            datasets.append({
+                "id": dataset.id,
+                "name": dataset.table_name,
+                "columns": [
+                    {"id": column.id, "column_name": column.column_name, "display_name": column.display_name,
+                     "data_type": column.data_type}
+                    for column in columns
+                ],
+                "glossary_terms": sorted(
+                    terms_by_dataset.get(dataset.id, []), key=lambda term: term["name"].casefold()
+                ),
+                "metrics": [
+                    {"id": metric.id, "name": metric.verbose_name or metric.metric_name}
+                    for metric in getattr(dataset, "metrics", []) if self._metric(metric.id) is not None
+                ],
+            })
+        datasets.sort(key=lambda item: item["name"].casefold())
+        return self.response(200, datasets=datasets)
 
     @expose("/expert-rules/discover", methods=["GET"])
     @protect()

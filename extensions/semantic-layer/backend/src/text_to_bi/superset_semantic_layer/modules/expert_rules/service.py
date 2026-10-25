@@ -136,6 +136,10 @@ class ExpertRuleConflictError(ValueError):
     """Optimistic revision conflict."""
 
 
+class ExpertRuleSelfApprovalError(ValueError):
+    """The author of a revision tried to approve it; a second administrator must."""
+
+
 def _text(value: Any, field: str, limit: int = MAX_TEXT) -> str:
     if not isinstance(value, str) or not (clean := " ".join(value.split())) or len(clean) > limit:
         raise ExpertRuleValidationError(f"Invalid {field}.")
@@ -188,8 +192,8 @@ def _id_list(value: Any, field: str) -> list[int]:
     return value
 
 
-def _items(value: Any, field: str, keys: set[str]) -> list[dict[str, str]]:
-    if not isinstance(value, list) or not value or len(value) > MAX_ITEMS:
+def _items(value: Any, field: str, keys: set[str], allow_empty: bool = False) -> list[dict[str, str]]:
+    if not isinstance(value, list) or (not value and not allow_empty) or len(value) > MAX_ITEMS:
         raise ExpertRuleValidationError(f"Invalid {field}.")
     result = []
     for item in value:
@@ -270,7 +274,8 @@ def normalize_rule_payload(payload: Any, column_resolver: Callable[[Any], Any] |
         "normalized_name": " ".join(payload["name"].split()).casefold(),
         "dataset_id": dataset_id,
         "conditions": _conditions(payload.get("conditions"), schema_version, dataset_id, column_resolver),
-        "exceptions": _items(payload.get("exceptions"), "exceptions", {"when", "outcome"}),
+        # Many rules hold without exception; examples stay required because they show how the rule is asked about.
+        "exceptions": _items(payload.get("exceptions"), "exceptions", {"when", "outcome"}, allow_empty=True),
         "examples": _items(payload.get("examples"), "examples", {"question", "intent"}),
         "glossary_term_ids": _id_list(payload.get("glossary_term_ids", []), "glossary_term_ids"),
         "metric_ids": _id_list(payload.get("metric_ids", []), "metric_ids"),
@@ -346,7 +351,9 @@ def update_draft(session: Any, revision: Any, payload: Any, expected_revision: i
 
     revision = _lock(session, revision)
     if revision.lifecycle_version != expected_revision: raise ExpertRuleConflictError("The expert rule changed; refresh and retry.")
-    if revision.status not in {"draft", "approved"}: raise ExpertRuleValidationError("Only a current draft or approved rule can be updated.")
+    # A revoked rule stays current so its author can correct it and send it for review again.
+    if revision.status not in {"draft", "approved", "revoked"}:
+        raise ExpertRuleValidationError("Only a current expert rule can be updated.")
     values = normalize_rule_payload(payload, column_resolver); validate_semantic_links(values, dataset_resolver, glossary_resolver, metric_resolver)
     # Do not rely on an unloaded ORM relationship: ``_lock`` deliberately
     # resolved the authoritative rule under a row lock for this transaction.
@@ -363,21 +370,45 @@ def update_draft(session: Any, revision: Any, payload: Any, expected_revision: i
     return next_revision
 
 
-def _transition(session: Any, revision: Any, expected_revision: int, actor_id: int, action: str, reason: str | None = None) -> Any:
+def revision_author_id(session: Any, revision: Any) -> int | None:
+    """The administrator who wrote this revision's content, from its created or updated audit event."""
+    from ...models.expert_rule import ExpertRuleAuditEvent
+
+    event = (
+        session.query(ExpertRuleAuditEvent)
+        .filter(ExpertRuleAuditEvent.revision_id == revision.id, ExpertRuleAuditEvent.event_type.in_(("created", "updated")))
+        .order_by(ExpertRuleAuditEvent.id.desc())
+        .first()
+    )
+    return None if event is None else event.actor_id
+
+
+def _transition(
+    session: Any, revision: Any, expected_revision: int, actor_id: int, action: str, reason: str | None = None,
+    require_second_reviewer: bool = False,
+) -> Any:
     from ...models.expert_rule import ExpertRuleAuditEvent
     revision = _lock(session, revision)
     if revision.lifecycle_version != expected_revision: raise ExpertRuleConflictError("The expert rule changed; refresh and retry.")
     clean_reason = _reason(reason)
-    if action == "approved" and revision.status == "draft": revision.status, revision.approver_id, revision.approved_at = "approved", actor_id, datetime.now(timezone.utc)
-    elif action == "revoked" and revision.status == "approved" and clean_reason: revision.status, revision.is_current, revision.revoker_id, revision.revoked_at = "revoked", False, actor_id, datetime.now(timezone.utc)
+    approving_draft = action == "approved" and revision.status == "draft"
+    if approving_draft and require_second_reviewer and revision_author_id(session, revision) == actor_id:
+        raise ExpertRuleSelfApprovalError("Người soạn rule không thể tự duyệt; cần một quản trị viên khác duyệt.")
+    if action == "approved" and revision.status == "draft":
+        revision.status, revision.approver_id, revision.approved_at = "approved", actor_id, datetime.now(timezone.utc)
+    elif action == "revoked" and revision.status == "approved" and clean_reason:
+        revision.status, revision.revoker_id, revision.revoked_at = "revoked", actor_id, datetime.now(timezone.utc)
     else: raise ExpertRuleValidationError(f"Cannot {action} this expert rule.")
     revision.lifecycle_version += 1
     session.add(ExpertRuleAuditEvent(rule_id=revision.rule_id, revision_id=revision.id, event_type=action, actor_id=actor_id, reason=clean_reason, revision_number=revision.revision_number, lifecycle_version=revision.lifecycle_version, occurred_at=datetime.now(timezone.utc)))
     return revision
 
 
-def approve_rule(session: Any, revision: Any, expected_revision: int, actor_id: int, reason: str | None = None) -> Any:
-    return _transition(session, revision, expected_revision, actor_id, "approved", reason)
+def approve_rule(
+    session: Any, revision: Any, expected_revision: int, actor_id: int, reason: str | None = None,
+    require_second_reviewer: bool = False,
+) -> Any:
+    return _transition(session, revision, expected_revision, actor_id, "approved", reason, require_second_reviewer)
 
 
 def revoke_rule(session: Any, revision: Any, expected_revision: int, actor_id: int, reason: str | None = None) -> Any:

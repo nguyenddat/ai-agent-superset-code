@@ -1,14 +1,17 @@
 export const SEMANTIC_LAYER_API = '/extensions/text-to-bi/superset-semantic-layer/semantic-layer';
 
+export const EXPERT_RULES_API = '/extensions/text-to-bi/superset-semantic-layer/expert-rules';
+
 export const SEMANTIC_LAYER_PAGE = '/semantic-layer/';
 
-export type SemanticLayerModule = 'dictionary' | 'semantic' | 'metrics' | 'glossary';
+export type SemanticLayerModule = 'dictionary' | 'semantic' | 'metrics' | 'glossary' | 'rules';
 
 export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: string; description: string }> = [
   { id: 'dictionary', label: 'Data Dictionary', description: 'Chỉnh metadata datasets và columns' },
   { id: 'semantic', label: 'Semantic Model', description: 'Nghiệp vụ và data lineage' },
   { id: 'metrics', label: 'Metrics', description: 'Duyệt định nghĩa metric và chạy thử' },
   { id: 'glossary', label: 'Business Glossary', description: 'Governed business terms' },
+  { id: 'rules', label: 'Expert Rules', description: 'Quy tắc nghiệp vụ của chuyên gia' },
 ];
 
 /**
@@ -17,7 +20,7 @@ export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: strin
  */
 export const semanticLayerModuleGroups: Array<{ id: string; label: string; modules: SemanticLayerModule[] }> = [
   { id: 'modeling', label: 'Mô hình dữ liệu', modules: ['dictionary', 'semantic'] },
-  { id: 'governance', label: 'Quản trị nghiệp vụ', modules: ['metrics', 'glossary'] },
+  { id: 'governance', label: 'Quản trị nghiệp vụ', modules: ['metrics', 'glossary', 'rules'] },
 ];
 
 export function semanticLayerModuleHref(module: SemanticLayerModule): string {

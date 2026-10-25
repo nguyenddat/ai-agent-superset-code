@@ -29,15 +29,14 @@ const metricLabel = (metric: MetricReviewItem) => metric.verbose_name || metric.
 const formatDate = (value: string | null) => formatTime(value).split(' ').pop() ?? '';
 
 /** One line on who moved the metric into its current state, or what it needs next. */
-function reviewSummary(metric: MetricReviewItem, viewerId: number | null): string {
+function reviewSummary(metric: MetricReviewItem, viewerId: number | null, secondReviewerRequired: boolean): string {
   const contract = metric.contract;
   switch (metric.state) {
     case 'approved':
       return `Duyệt bởi ${contract?.approver_name ?? '—'} · ${formatDate(contract?.approved_at ?? null)}`;
     case 'candidate':
-      return contract?.owner_id === viewerId
-        ? 'Bạn đã đề xuất · cần một quản trị viên khác duyệt'
-        : `Đề xuất bởi ${contract?.owner_name ?? '—'} · chờ duyệt`;
+      if (contract?.owner_id !== viewerId) return `Đề xuất bởi ${contract?.owner_name ?? '—'} · chờ duyệt`;
+      return `Bạn đã đề xuất · ${secondReviewerRequired ? 'cần một quản trị viên khác duyệt' : 'chờ duyệt'}`;
     case 'revoked':
       return `Thu hồi bởi ${contract?.revoker_name ?? '—'} · ${formatDate(contract?.revoked_at ?? null)}`;
     case 'outdated':
@@ -76,7 +75,7 @@ type MetricContractsProps = { databaseId: number | null };
 /** Admin workspace listing every saved metric with its review state: propose, approve, revoke and try each metric. */
 export function MetricContracts({ databaseId }: MetricContractsProps) {
   const [reviewList, setReviewList] = useState<MetricReviewList>(
-    { datasets: [], metrics: [], users: [], current_user_id: null },
+    { datasets: [], metrics: [], users: [], current_user_id: null, require_second_reviewer: false },
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<MetricReviewState | 'all'>('all');
@@ -172,9 +171,12 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
   const canRevoke = state === 'candidate' || state === 'approved' || state === 'outdated';
   const hasDefinition = Boolean(selectedMetric?.definition);
   const proposedByViewer = state === 'candidate' && selectedMetric?.contract?.owner_id === reviewList.current_user_id;
+  const approvalBlocked = proposedByViewer && reviewList.require_second_reviewer;
   const canTry = state === 'approved' || state === 'candidate';
   const visibleTab: DetailTab = canTry ? activeTab : 'definition';
-  const summary = selectedMetric ? reviewSummary(selectedMetric, reviewList.current_user_id) : '';
+  const summary = selectedMetric
+    ? reviewSummary(selectedMetric, reviewList.current_user_id, reviewList.require_second_reviewer)
+    : '';
 
   return (
     <div className="sl-metrics">
@@ -251,8 +253,8 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
                 ) : null}
                 {state === 'candidate' ? (
                   <Button
-                    disabled={deciding || proposedByViewer}
-                    title={proposedByViewer ? 'Người đề xuất không thể tự duyệt.' : undefined}
+                    disabled={deciding || approvalBlocked}
+                    title={approvalBlocked ? 'Người đề xuất không thể tự duyệt.' : undefined}
                     onClick={() => setOpenDecision('approve')}
                   >
                     <Check data-icon="inline-start" /> Duyệt

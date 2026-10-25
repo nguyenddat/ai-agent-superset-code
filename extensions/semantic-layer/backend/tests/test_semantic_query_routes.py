@@ -134,6 +134,7 @@ def _route_api(datasets):
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
         "list_metric_contracts", "_user_names", "_active_users", "_metric_definition", "_serialize_metric_definition",
         "_review_reason", "_record_metric_event", "save_metric_definition", "list_metric_contract_events",
+        "_second_reviewer_required",
     }
     class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
     class_node.decorator_list = []
@@ -490,9 +491,19 @@ def _proposed_contract(dataset, owner_id=3):
     return contract
 
 
-def test_the_proposer_cannot_approve_their_own_candidate():
+def test_the_proposer_approves_alone_by_default():
+    dataset = _dataset()
+    api, _ = _route_api({dataset.id: dataset})
+    contract = _proposed_contract(dataset, owner_id=3)
+    api._contract_for = lambda *_: contract
+    assert api.approve_metric_contract(dataset.id, 4)[0] == 200
+    assert contract.status == "approved" and contract.approver_id == 3
+
+
+def test_the_proposer_cannot_approve_when_a_second_reviewer_is_required():
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
+    namespace["current_app"].config["TEXT_TO_BI_REQUIRE_SECOND_REVIEWER"] = True
     contract = _proposed_contract(dataset, owner_id=3)
     api._contract_for = lambda *_: contract
     status, payload = api.approve_metric_contract(dataset.id, 4)

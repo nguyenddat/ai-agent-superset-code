@@ -333,11 +333,64 @@ def test_sqlite_lifecycle_create_update_approve_revoke_audit_conflict_and_rollba
     session.rollback()
     service.revoke_rule(session, updated, 3, 14, "superseded")
     session.commit()
-    assert updated.status == "revoked" and updated.is_current is False and updated.lifecycle_version == 4
+    # A revoked rule stays current so it can be corrected and reviewed again; discovery skips it by status.
+    assert updated.status == "revoked" and updated.is_current is True and updated.lifecycle_version == 4
     assert [event.event_type for event in session.query(audit_model).order_by(audit_model.id)] == [
         "created", "updated", "approved", "revoked"
     ]
     assert [event.lifecycle_version for event in session.query(audit_model).order_by(audit_model.id)] == [1, 2, 3, 4]
+
+
+def _lifecycle_resolvers():
+    dataset = lambda key: SimpleNamespace(id=key) if key == 7 else None
+    glossary = lambda key: SimpleNamespace(status="approved", is_current=True, dataset_id=7) if key == 3 else None
+    metric = lambda key: SimpleNamespace(status="approved", is_current=True, dataset_id=7) if key == 9 else None
+    fingerprint = lambda kind, target_id, dataset_id: f"{kind}:{target_id}:{dataset_id}"
+    return dataset, glossary, metric, fingerprint
+
+
+def test_the_author_may_approve_unless_a_second_reviewer_is_required(monkeypatch):
+    session, _, _, _ = _lifecycle_session(monkeypatch)
+    resolvers = _lifecycle_resolvers()
+    created = service.create_draft(session, _payload(), 11, *resolvers)
+    session.commit()
+    with pytest.raises(service.ExpertRuleSelfApprovalError):
+        service.approve_rule(session, created, 1, 11, require_second_reviewer=True)
+    session.rollback()
+
+    # Whoever edited the latest revision is its author, even if someone else created the rule.
+    updated = service.update_draft(session, created, _payload(name="Exclude draft observations"), 1, 12, *resolvers)
+    session.commit()
+    assert service.revision_author_id(session, updated) == 12
+    with pytest.raises(service.ExpertRuleSelfApprovalError):
+        service.approve_rule(session, updated, 2, 12, require_second_reviewer=True)
+    session.rollback()
+    service.approve_rule(session, updated, 2, 11, require_second_reviewer=True)
+    session.commit()
+    assert updated.status == "approved" and updated.approver_id == 11
+
+
+def test_a_single_administrator_approves_their_own_draft_by_default(monkeypatch):
+    session, _, _, _ = _lifecycle_session(monkeypatch)
+    created = service.create_draft(session, _payload(), 11, *_lifecycle_resolvers())
+    session.commit()
+    service.approve_rule(session, created, 1, 11)
+    assert created.status == "approved" and created.approver_id == 11
+
+
+def test_a_revoked_rule_can_be_corrected_into_a_new_draft(monkeypatch):
+    session, _, revision_model, _ = _lifecycle_session(monkeypatch)
+    resolvers = _lifecycle_resolvers()
+    created = service.create_draft(session, _payload(), 11, *resolvers)
+    session.commit()
+    service.approve_rule(session, created, 1, 12)
+    service.revoke_rule(session, created, 2, 12, "Ngưỡng không còn đúng")
+    session.commit()
+
+    corrected = service.update_draft(session, created, _payload(name="Exclude provisional rows"), 3, 11, *resolvers)
+    session.commit()
+    assert corrected.status == "draft" and corrected.revision_number == 2 and corrected.lifecycle_version == 4
+    assert session.query(revision_model).filter_by(is_current=True).one().id == corrected.id
 
 
 @pytest.mark.parametrize(
@@ -412,3 +465,9 @@ def test_two_sqlite_sessions_allow_only_one_sequential_same_token_transition(mon
         service.approve_rule(session_two, second, 1, 13, "duplicate approval")
     session_two.rollback()
     assert session_one.query(audit_model).filter_by(event_type="approved").count() == 1
+
+
+def test_a_rule_may_have_no_exceptions_but_needs_an_example():
+    assert service.normalize_rule_payload(_payload(exceptions=[]))["exceptions"] == []
+    with pytest.raises(service.ExpertRuleValidationError):
+        service.normalize_rule_payload(_payload(examples=[]))

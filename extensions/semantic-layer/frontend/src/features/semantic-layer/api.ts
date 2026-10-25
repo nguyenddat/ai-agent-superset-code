@@ -1,4 +1,13 @@
-import { SEMANTIC_LAYER_API } from './constants';
+import { EXPERT_RULES_API, SEMANTIC_LAYER_API } from './constants';
+
+export const expertRulesApi = {
+  rules: `${EXPERT_RULES_API}/expert-rules`,
+  options: `${EXPERT_RULES_API}/expert-rules/options`,
+  draft: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/draft`,
+  approve: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/approve`,
+  revoke: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/revoke`,
+  audit: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/audit`,
+};
 
 export const semanticLayerApi = {
   access: `${SEMANTIC_LAYER_API}/access`,
