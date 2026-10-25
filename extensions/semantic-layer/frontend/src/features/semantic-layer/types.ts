@@ -14,6 +14,30 @@ export type DatasetMetric = {
   description?: string | null;
 };
 
+/** The intentionally redacted lifecycle state returned by metric-contract endpoints. */
+export type MetricContract = {
+  id: number;
+  dataset_id: number;
+  metric_id: number;
+  metric_name: string;
+  status: 'candidate' | 'approved' | 'revoked';
+  owner_id: number | null;
+  approver_id: number | null;
+  approved_at: string | null;
+  revoker_id: number | null;
+  revoked_at: string | null;
+  current: boolean;
+};
+
+export type MetricContractResponse = { contract: MetricContract };
+
+export type MetricContractExecution = {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  row_count: number;
+  truncated: boolean;
+};
+
 export type SupersetDatabase = {
   id: number;
   database_name: string;

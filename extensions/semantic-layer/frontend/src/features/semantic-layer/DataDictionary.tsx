@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -20,7 +20,8 @@ import { requestJson, semanticLayerApi, supersetApi } from './api';
 import { layerLevels } from './datasets';
 import { ReferenceFields } from './ReferenceFields';
 import type {
-  ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DataLayer, DatasetDictionary, ReferenceDataset,
+  ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DataLayer, DatasetDictionary, MetricContract,
+  MetricContractExecution, MetricContractResponse, ReferenceDataset,
 } from './types';
 
 type DataDictionaryProps = {
@@ -92,6 +93,12 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
   // Bumped after a save so the reference picker sees newly declared key columns.
   const [referenceRevision, setReferenceRevision] = useState(0);
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(() => new Set());
+  const [selectedMetricId, setSelectedMetricId] = useState<number | null>(null);
+  const [metricContract, setMetricContract] = useState<MetricContract | null>(null);
+  const [metricResult, setMetricResult] = useState<MetricContractExecution | null>(null);
+  const [metricError, setMetricError] = useState('');
+  const [metricPending, setMetricPending] = useState(false);
+  const metricRequest = useRef(0);
 
   const columns = dictionary?.columns ?? [];
   const datasetDirty = dictionary !== null && (
@@ -161,6 +168,22 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     void loadDictionary(controller.signal);
     return () => controller.abort();
   }, [dataset.id]);
+
+  const liveMetricIds = useMemo(
+    () => (dataset.metrics ?? []).filter(metric => Number.isInteger(metric.id) && metric.id > 0).map(metric => metric.id).join(','),
+    [dataset.metrics],
+  );
+
+  useEffect(() => {
+    metricRequest.current += 1;
+    setSelectedMetricId(null);
+    setMetricContract(null);
+    setMetricResult(null);
+    setMetricError('');
+    setMetricPending(false);
+  }, [dataset.id, liveMetricIds]);
+
+  useEffect(() => () => { metricRequest.current += 1; }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -406,6 +429,46 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     }
   };
 
+  const selectMetric = (metricId: number | null) => {
+    metricRequest.current += 1;
+    setSelectedMetricId(metricId);
+    setMetricContract(null);
+    setMetricResult(null);
+    setMetricError('');
+    setMetricPending(false);
+  };
+
+  const runMetricAction = async (action: 'candidate' | 'approve' | 'execute' | 'revoke') => {
+    if (selectedMetricId === null || metricPending) return;
+    const requestId = metricRequest.current + 1;
+    metricRequest.current = requestId;
+    setMetricPending(true);
+    setMetricError('');
+    if (action !== 'execute') setMetricResult(null);
+    try {
+      if (action === 'execute') {
+        const result = await requestJson<MetricContractExecution>(
+          semanticLayerApi.metricContractExecute(dataset.id, selectedMetricId), 'POST', { dimensions: [], filters: [] },
+        );
+        if (metricRequest.current === requestId) setMetricResult(result);
+      } else {
+        const endpoint = action === 'candidate'
+          ? semanticLayerApi.metricContractCandidate(dataset.id, selectedMetricId)
+          : action === 'approve'
+            ? semanticLayerApi.metricContractApprove(dataset.id, selectedMetricId)
+            : semanticLayerApi.metricContractRevoke(dataset.id, selectedMetricId);
+        const response = await requestJson<MetricContractResponse>(endpoint, 'POST', {});
+        if (metricRequest.current === requestId) setMetricContract(response.contract);
+      }
+    } catch (reason) {
+      if (metricRequest.current === requestId) {
+        setMetricError(reason instanceof Error ? reason.message : 'Metric contract request failed.');
+      }
+    } finally {
+      if (metricRequest.current === requestId) setMetricPending(false);
+    }
+  };
+
   if (loading) {
     return <div className="sl-dictionary-state"><LoaderCircle className="sl-spin" /><span>Đang tải data dictionary…</span></div>;
   }
@@ -432,6 +495,8 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
   }
 
   const readOnly = dictionary.read_only === true;
+  const liveMetrics = (dataset.metrics ?? []).filter(metric => Number.isInteger(metric.id) && metric.id > 0);
+  const selectedMetric = liveMetrics.find(metric => metric.id === selectedMetricId) ?? null;
   const layerItems: Array<{ label: string; value: number | null }> = [
     { label: 'Chưa phân tầng', value: null },
     ...layerLevels(layers).flatMap((level, index) => level.map(layer => ({ label: `${layer.name} · Cấp ${index + 1}`, value: layer.id }))),
@@ -518,6 +583,56 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             <Textarea id="sl-dataset-grain" className="max-h-36" disabled={readOnly || saving} value={dictionary.grain ?? ''} onChange={event => updateDataset('grain', normalizeNullableText(event.target.value))} />
           </Field>
         </div>
+        <section className="sl-metric-contract" aria-label="Safe metric contract">
+          <div className="sl-metric-contract-heading">
+            <div>
+              <h4>Metric contract</h4>
+              <p>Admin workflow for saved metrics. Execution uses fixed, empty dimensions and filters.</p>
+            </div>
+            {metricPending ? <LoaderCircle className="sl-spin" aria-label="Metric request in progress" /> : null}
+          </div>
+          {liveMetrics.length === 0 ? <p className="sl-metric-contract-empty">No saved metrics are attached to this dataset.</p> : (
+            <>
+              <label className="sl-metric-contract-picker" htmlFor="sl-metric-contract-select">
+                Saved metric
+                <select
+                  id="sl-metric-contract-select"
+                  value={selectedMetricId ?? ''}
+                  disabled={metricPending}
+                  onChange={event => selectMetric(event.target.value ? Number(event.target.value) : null)}
+                >
+                  <option value="">Select a saved metric</option>
+                  {liveMetrics.map(metric => <option key={metric.id} value={metric.id}>{metric.verbose_name || metric.metric_name}</option>)}
+                </select>
+              </label>
+              {selectedMetric ? (
+                <div className="sl-metric-contract-content">
+                  <div className="sl-metric-contract-actions">
+                    <Button variant="outline" disabled={readOnly || metricPending} onClick={() => void runMetricAction('candidate')}>Create candidate</Button>
+                    <Button variant="outline" disabled={readOnly || metricPending || metricContract?.status !== 'candidate'} onClick={() => void runMetricAction('approve')}>Approve</Button>
+                    <Button disabled={metricPending || metricContract?.status !== 'approved' || !metricContract.current} onClick={() => void runMetricAction('execute')}>Execute</Button>
+                    <Button variant="outline" disabled={readOnly || metricPending || !metricContract || metricContract.status === 'revoked'} onClick={() => void runMetricAction('revoke')}>Revoke</Button>
+                  </div>
+                  {metricContract ? <dl className="sl-metric-contract-status">
+                    <div><dt>Status</dt><dd>{metricContract.status}</dd></div>
+                    <div><dt>Current</dt><dd>{metricContract.current ? 'Yes' : 'No'}</dd></div>
+                    {metricContract.approved_at ? <div><dt>Approved</dt><dd>{new Date(metricContract.approved_at).toLocaleString()}</dd></div> : null}
+                    {metricContract.revoked_at ? <div><dt>Revoked</dt><dd>{new Date(metricContract.revoked_at).toLocaleString()}</dd></div> : null}
+                  </dl> : <p className="sl-metric-contract-empty">Create a candidate to begin review.</p>}
+                </div>
+              ) : null}
+            </>
+          )}
+          {metricError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {metricError}</div> : null}
+          {metricResult ? <div className="sl-metric-contract-result" aria-live="polite">
+            <strong>Execution result</strong>
+            <span>{metricResult.row_count} rows{metricResult.truncated ? ' (truncated)' : ''}</span>
+            <div className="sl-metric-contract-result-table"><table>
+              <thead><tr>{metricResult.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
+              <tbody>{metricResult.rows.map((row, index) => <tr key={index}>{metricResult.columns.map(column => <td key={column}>{String(row[column] ?? '')}</td>)}</tr>)}</tbody>
+            </table></div>
+          </div> : null}
+        </section>
         <table className="sl-dictionary-table">
           <thead>
             <tr>

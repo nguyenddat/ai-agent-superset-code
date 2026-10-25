@@ -3,17 +3,19 @@ import logging
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
 
-from flask import Response, request, stream_with_context
+from flask import Response, current_app, request, stream_with_context
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
 from flask_wtf.csrf import validate_csrf
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
-from superset import db
+from superset import db, security_manager
 from superset.connectors.sqla.models import SqlaTable
+from superset.exceptions import SupersetSecurityException
 from superset.models.core import Database
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
@@ -28,6 +30,8 @@ from ...models.data_layer import DataLayer
 from ...models.dataset_dictionary import DatasetDictionary
 from ...models.lineage_canvas import LineageCanvas
 from ...models.lineage_edge import LineageEdge
+from ...models.metric_contract import MetricContract
+from ...models.relationship_contract import RelationshipContract
 from ..business_model.service import (
     EDGE_KINDS,
     dataset_classifications,
@@ -41,6 +45,21 @@ from ..business_model.service import (
 )
 from ..data_dictionary.repository.repo_column_dictionary import ColumnDictionaryRepository
 from ..data_dictionary.repository.repo_dataset_dictionary import DatasetDictionaryRepository
+from ..semantic_query.catalog import build_semantic_catalog
+from ..semantic_query.compiler import SemanticQueryError, compile_semantic_query
+from ..semantic_query.contracts import (
+    build_preview_contract,
+    contract_is_approved_current,
+    execute_approved_chart_query,
+    metric_contract_hash,
+    metric_is_eligible_for_contract,
+)
+from ..semantic_query.relationships import (
+    RelationshipEnd,
+    relationship_cardinality,
+    relationship_contract_hash,
+    relationship_is_approved_current,
+)
 
 logger = logging.getLogger(__name__)
 DICTIONARY_FIELDS = {
@@ -73,6 +92,8 @@ LINEAGE_EDGE_KEY = re.compile(r"^((flow|relation)-\d+-\d+|metric-edge-\d+)$")
 LINEAGE_EDGE_STYLES = {"orthogonal", "straight", "curved"}
 LINEAGE_MAX_ITEMS = 5_000
 LINEAGE_MAX_POINTS = 50
+SEMANTIC_QUERY_MAX_ROWS = 1_000
+UTC_ZONE = timezone.utc
 _dictionary_tables_lock = threading.Lock()
 # A suggestion run for a dataset older than this is treated as abandoned, so a lost run cannot block the dataset.
 SUGGEST_INFLIGHT_TTL_SECONDS = 15 * 60
@@ -106,6 +127,16 @@ def _rollback_on_error(method):
             return self.response_500(message="Could not save the change.")
 
     return wrapper
+
+
+def _semantic_query_row_cap() -> int:
+    """Use the deployment cap without accepting a client-selected result limit."""
+    configured = current_app.config.get("SEMANTIC_QUERY_MAX_ROWS", SEMANTIC_QUERY_MAX_ROWS)
+    return min(max(int(configured), 1), SEMANTIC_QUERY_MAX_ROWS)
+
+
+def _is_superset_access_error(error: Exception) -> bool:
+    return any(word in error.__class__.__name__.lower() for word in ("access", "forbidden", "permission", "security"))
 
 
 def _claim_suggestion(dataset_id: int) -> bool:
@@ -429,6 +460,35 @@ def _migrate_dictionary_tables():
     LineageEdge.__table__.create(bind=db.engine, checkfirst=True)
     BusinessCanvas.__table__.create(bind=db.engine, checkfirst=True)
     LineageCanvas.__table__.create(bind=db.engine, checkfirst=True)
+    MetricContract.__table__.create(bind=db.engine, checkfirst=True)
+    RelationshipContract.__table__.create(bind=db.engine, checkfirst=True)
+
+    with db.engine.begin() as connection:
+        contract_columns = {column["name"] for column in inspect(connection).get_columns(MetricContract.__tablename__)}
+        if "revoker_id" not in contract_columns:
+            revoker_column = "INTEGER REFERENCES ab_user (id) ON DELETE SET NULL" if postgres else "INTEGER"
+            connection.execute(text(f"ALTER TABLE text_to_bi_metric_contract ADD COLUMN revoker_id {revoker_column}"))
+        if "revoked_at" not in contract_columns:
+            connection.execute(text("ALTER TABLE text_to_bi_metric_contract ADD COLUMN revoked_at TIMESTAMP WITH TIME ZONE"))
+        if postgres:
+            contract_constraints = inspect(connection).get_foreign_keys(MetricContract.__tablename__)
+            has_revoker_fk = any(
+                constraint.get("constrained_columns") == ["revoker_id"]
+                and constraint.get("referred_table") == "ab_user"
+                and constraint.get("referred_columns") == ["id"]
+                for constraint in contract_constraints
+            )
+            if not has_revoker_fk:
+                connection.execute(
+                    text(
+                        "ALTER TABLE text_to_bi_metric_contract "
+                        "ADD CONSTRAINT fk_text_to_bi_metric_contract_revoker "
+                        "FOREIGN KEY (revoker_id) REFERENCES ab_user (id) ON DELETE SET NULL"
+                    )
+                )
+        contract_indexes = {index["name"] for index in inspect(connection).get_indexes(MetricContract.__tablename__)}
+        if "ix_text_to_bi_metric_contract_revoker_id" not in contract_indexes:
+            connection.execute(text("CREATE INDEX ix_text_to_bi_metric_contract_revoker_id ON text_to_bi_metric_contract (revoker_id)"))
 
     with db.engine.begin() as connection:
         layer_columns = {column["name"] for column in inspect(connection).get_columns(DataLayer.__tablename__)}
@@ -583,6 +643,113 @@ class SemanticLayerAPI(RestApi):
             and any(role.name == "Admin" for role in getattr(current_user, "roles", []))
         )
 
+    @staticmethod
+    def _can_preview_semantic_query(dataset: SqlaTable) -> bool:
+        """Use Superset's native datasource permission gate for previews and execution."""
+        try:
+            security_manager.raise_for_access(datasource=dataset)
+        except SupersetSecurityException:
+            return False
+        return True
+
+    _can_access_semantic_query_dataset = _can_preview_semantic_query
+
+    @staticmethod
+    def _dataset_metric(dataset: SqlaTable, metric_id: int):
+        """Resolve only a metric actually attached to this dataset."""
+        return next((metric for metric in dataset.metrics if metric.id == metric_id), None)
+
+    @staticmethod
+    def _contract_for(dataset_id: int, metric_id: int):
+        return (
+            db.session.query(MetricContract)
+            .filter(MetricContract.dataset_id == dataset_id, MetricContract.metric_id == metric_id)
+            .one_or_none()
+        )
+
+    @staticmethod
+    def _serialize_metric_contract(contract: MetricContract, dataset: SqlaTable, metric: Any) -> dict[str, Any]:
+        """Do not expose expression/hash in execution-facing responses."""
+        return {
+            "id": contract.id,
+            "dataset_id": contract.dataset_id,
+            "metric_id": contract.metric_id,
+            "metric_name": metric.metric_name,
+            "status": contract.status,
+            "owner_id": contract.owner_id,
+            "approver_id": contract.approver_id,
+            "approved_at": contract.approved_at.isoformat() if contract.approved_at else None,
+            "revoker_id": contract.revoker_id,
+            "revoked_at": contract.revoked_at.isoformat() if contract.revoked_at else None,
+            "current": contract_is_approved_current(contract, dataset, metric),
+        }
+
+    @staticmethod
+    def _fk_entry(dataset_id: int, column_id: int) -> ColumnDictionary | None:
+        return (
+            db.session.query(ColumnDictionary)
+            .filter(ColumnDictionary.id == column_id, ColumnDictionary.dataset_id == dataset_id)
+            .one_or_none()
+        )
+
+    @staticmethod
+    def _relationship_ends(fk_entry: ColumnDictionary) -> tuple[RelationshipEnd, RelationshipEnd] | None:
+        """Resolve a dictionary FK to live datasets, retaining composite-key information."""
+        if not fk_entry.referenced_column:
+            return None
+        target_entry = db.session.get(ColumnDictionary, fk_entry.referenced_column)
+        if target_entry is None:
+            return None
+        source = db.session.get(SqlaTable, fk_entry.dataset_id)
+        target = db.session.get(SqlaTable, target_entry.dataset_id)
+        if source is None or target is None:
+            return None
+
+        def end(dataset: SqlaTable, entry: ColumnDictionary) -> RelationshipEnd:
+            live_names = {str(column.column_name) for column in dataset.columns}
+            pk_count = sum(
+                1
+                for row in db.session.query(ColumnDictionary).filter(
+                    ColumnDictionary.dataset_id == dataset.id, ColumnDictionary.is_pk.is_(True)
+                )
+                if row.column_name in live_names
+            )
+            return RelationshipEnd(dataset=dataset, entry=entry, pk_count=pk_count)
+
+        return end(source, fk_entry), end(target, target_entry)
+
+    @staticmethod
+    def _relationship_contract_for(from_dataset_id: int, from_column: str) -> RelationshipContract | None:
+        return (
+            db.session.query(RelationshipContract)
+            .filter(
+                RelationshipContract.from_dataset_id == from_dataset_id,
+                RelationshipContract.from_column == from_column,
+            )
+            .one_or_none()
+        )
+
+    @staticmethod
+    def _serialize_relationship_contract(
+        contract: RelationshipContract, source: RelationshipEnd, target: RelationshipEnd
+    ) -> dict[str, Any]:
+        return {
+            "id": contract.id,
+            "from_dataset_id": contract.from_dataset_id,
+            "from_column": contract.from_column,
+            "to_dataset_id": contract.to_dataset_id,
+            "to_column": contract.to_column,
+            "cardinality": contract.cardinality,
+            "status": contract.status,
+            "owner_id": contract.owner_id,
+            "approver_id": contract.approver_id,
+            "approved_at": contract.approved_at.isoformat() if contract.approved_at else None,
+            "revoker_id": contract.revoker_id,
+            "revoked_at": contract.revoked_at.isoformat() if contract.revoked_at else None,
+            "current": relationship_is_approved_current(contract, source, target),
+            "executable": False,
+        }
+
     @expose("/access", methods=("GET",))
     @protect()
     @safe
@@ -593,6 +760,350 @@ class SemanticLayerAPI(RestApi):
             return self.response(403, message="Admin access required.")
         _ensure_dictionary_tables()
         return self.response(200, is_admin=True)
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/candidate", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def create_metric_contract_candidate(self, dataset_id: int, metric_id: int):
+        """Snapshot a saved metric for an administrator to review."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        metric = self._dataset_metric(dataset, metric_id)
+        if metric is None:
+            return self.response(404, message="Metric not found in this dataset.")
+        if not metric_is_eligible_for_contract(dataset, metric):
+            return self.response_400(message="Metric must be a simple aggregate over one active physical-table column.")
+        contract = self._contract_for(dataset_id, metric_id)
+        if contract is not None and contract.status == "approved" and contract_is_approved_current(contract, dataset, metric):
+            return self.response(409, message="Revoke the current approved contract before creating another candidate.")
+        if contract is None:
+            contract = MetricContract(dataset_id=dataset_id, metric_id=metric_id)
+            db.session.add(contract)
+            contract.owner_id = current_user.id
+        contract.metric_name = metric.metric_name
+        contract.expression = metric.expression
+        contract.expression_hash = metric_contract_hash(dataset, metric)
+        contract.status = "candidate"
+        contract.approver_id = None
+        contract.approved_at = None
+        contract.revoker_id = None
+        contract.revoked_at = None
+        db.session.commit()
+        return self.response(201, contract=self._serialize_metric_contract(contract, dataset, metric))
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/approve", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def approve_metric_contract(self, dataset_id: int, metric_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        metric = self._dataset_metric(dataset, metric_id)
+        contract = self._contract_for(dataset_id, metric_id) if metric else None
+        if metric is None or contract is None:
+            return self.response(404, message="Metric contract not found in this dataset.")
+        if contract.status != "candidate":
+            return self.response_400(message="Only a candidate metric contract can be approved.")
+        if not metric_is_eligible_for_contract(dataset, metric):
+            return self.response_400(message="Metric must be a simple aggregate over one active physical-table column.")
+        if contract.expression_hash != metric_contract_hash(dataset, metric):
+            return self.response_400(message="Metric changed; create a new candidate before approval.")
+        contract.status = "approved"
+        contract.approver_id = current_user.id
+        contract.approved_at = datetime.now(tz=timezone.utc)
+        db.session.commit()
+        return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/revoke", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def revoke_metric_contract(self, dataset_id: int, metric_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        metric = self._dataset_metric(dataset, metric_id)
+        contract = self._contract_for(dataset_id, metric_id) if metric else None
+        if metric is None or contract is None:
+            return self.response(404, message="Metric contract not found in this dataset.")
+        contract.status = "revoked"
+        contract.revoker_id = current_user.id
+        contract.revoked_at = datetime.now(tz=timezone.utc)
+        db.session.commit()
+        return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/semantic-query/execute", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @_csrf_protected
+    @_rollback_on_error
+    def execute_metric_contract(self, dataset_id: int, metric_id: int):
+        """Execute a current approved metric exclusively through Superset ChartData."""
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        if not self._can_access_semantic_query_dataset(dataset):
+            return self.response(403, message="Dataset and database access required.")
+        metric = self._dataset_metric(dataset, metric_id)
+        contract = self._contract_for(dataset_id, metric_id) if metric else None
+        if metric is None:
+            return self.response(403, message="A current approved metric contract is required.")
+        body = request.get_json(silent=True)
+        try:
+            # validate() is Superset's datasource/RLS permission gate and runs as
+            # the request's current_user; this route never compiles or runs SQL.
+            from superset.charts.schemas import ChartDataQueryContextSchema
+            from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+            def run_chart(payload):
+                command = ChartDataCommand(ChartDataQueryContextSchema().load(payload))
+                command.validate()
+                return command.run()["queries"][0]
+
+            result = execute_approved_chart_query(
+                contract, dataset, metric, body, _semantic_query_row_cap(), run_chart
+            )
+        except PermissionError as ex:
+            db.session.rollback()
+            return self.response(403, message=str(ex))
+        except ValueError as ex:
+            db.session.rollback()
+            return self.response_400(message=str(ex))
+        except Exception as ex:
+            db.session.rollback()
+            if _is_superset_access_error(ex):
+                return self.response(403, message="Superset denied metric execution.")
+            logger.exception("Superset ChartData metric execution failed")
+            return self.response_500(message="Metric execution was rejected by Superset.")
+        if result.get("error"):
+            return self.response_500(message="Metric execution failed.")
+        rows = result.get("data", [])
+        return self.response(
+            200,
+            columns=result.get("colnames", []),
+            rows=rows[:_semantic_query_row_cap()],
+            row_count=min(len(rows), _semantic_query_row_cap()),
+            truncated=len(rows) > _semantic_query_row_cap(),
+        )
+
+    @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
+    @protect()
+    @permission_name("read")
+    @_csrf_protected
+    def preview_semantic_query(self, dataset_id: int):
+        """Compile, but never execute, a one-dataset semantic query preview."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        if not self._can_preview_semantic_query(dataset):
+            return self.response(403, message="Dataset and database access required.")
+        query_request = request.get_json(silent=True)
+        if not isinstance(query_request, dict):
+            return self.response_400(message="Request body must be a JSON object.")
+
+        dictionary_columns = db.session.query(ColumnDictionary).filter(ColumnDictionary.dataset_id == dataset_id).all()
+        contract = build_preview_contract(dataset, dictionary_columns)
+        try:
+            preview = compile_semantic_query(
+                contract["dataset"],
+                [{**metric, "approved": metric["eligible_for_preview"]} for metric in contract["metrics"]],
+                [{**dimension, "approved": dimension["eligible_for_preview"]} for dimension in contract["dimensions"]],
+                query_request,
+            )
+        except SemanticQueryError as ex:
+            return self.response_400(message=str(ex))
+        preview["provenance"]["contract_source"] = contract["contract_source"]
+        preview["provenance"]["execution"] = "not_executed"
+        return self.response(200, preview=preview)
+
+    def _relationship_contract_context(self, dataset_id: int, column_id: int):
+        entry = self._fk_entry(dataset_id, column_id)
+        if entry is None:
+            return None, None, self.response(404, message="Foreign-key dictionary column not found in this dataset.")
+        ends = self._relationship_ends(entry)
+        if ends is None:
+            return None, None, self.response_400(message="The referenced dictionary column or dataset no longer exists.")
+        source, target = ends
+        try:
+            relationship_cardinality(source, target)
+        except ValueError as ex:
+            return None, None, self.response_400(message=str(ex))
+        return source, target, None
+
+    @expose("/dataset/<int:dataset_id>/relationships/<int:column_id>/contract/candidate", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def create_relationship_contract_candidate(self, dataset_id: int, column_id: int):
+        """Snapshot an eligible declared FK relationship for administrator approval."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        source, target, error = self._relationship_contract_context(dataset_id, column_id)
+        if error is not None:
+            return error
+        cardinality = relationship_cardinality(source, target)
+        contract = self._relationship_contract_for(source.dataset.id, source.entry.column_name)
+        if contract is not None and relationship_is_approved_current(contract, source, target):
+            return self.response(409, message="Revoke the current approved contract before creating another candidate.")
+        if contract is None:
+            contract = RelationshipContract(from_dataset_id=source.dataset.id, from_column=source.entry.column_name)
+            contract.owner_id = current_user.id
+            db.session.add(contract)
+        contract.to_dataset_id = target.dataset.id
+        contract.to_column = target.entry.column_name
+        contract.cardinality = cardinality
+        contract.contract_hash = relationship_contract_hash(source, target, cardinality)
+        contract.approver_id = None
+        contract.approved_at = None
+        contract.revoker_id = None
+        contract.revoked_at = None
+        contract.status = "candidate"
+        db.session.commit()
+        return self.response(201, contract=self._serialize_relationship_contract(contract, source, target))
+
+    @expose("/dataset/<int:dataset_id>/relationships/<int:column_id>/contract/approve", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def approve_relationship_contract(self, dataset_id: int, column_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        source, target, error = self._relationship_contract_context(dataset_id, column_id)
+        if error is not None:
+            return error
+        contract = self._relationship_contract_for(source.dataset.id, source.entry.column_name)
+        if contract is None:
+            return self.response(404, message="Relationship contract not found for this foreign key.")
+        if contract.status != "candidate":
+            return self.response_400(message="Only a candidate relationship contract can be approved.")
+        cardinality = relationship_cardinality(source, target)
+        if contract.contract_hash != relationship_contract_hash(source, target, cardinality):
+            return self.response_400(message="Relationship changed; create a new candidate before approval.")
+        contract.status = "approved"
+        contract.approver_id = current_user.id
+        contract.approved_at = datetime.now(timezone.utc)
+        db.session.commit()
+        return self.response(200, contract=self._serialize_relationship_contract(contract, source, target))
+
+    @expose("/dataset/<int:dataset_id>/relationships/<int:column_id>/contract/revoke", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def revoke_relationship_contract(self, dataset_id: int, column_id: int):
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        entry = self._fk_entry(dataset_id, column_id)
+        contract = self._relationship_contract_for(dataset_id, entry.column_name) if entry is not None else None
+        contract_id = request.args.get("contract_id", type=int)
+        if contract_id is not None:
+            candidate = db.session.get(RelationshipContract, contract_id)
+            # A contract ID is only an alternate key for this route's relationship when
+            # the path FK entry independently binds it to the same source column. If the
+            # entry is gone, the request no longer carries enough information to prove
+            # which relationship the caller intended, even when the ID belongs to this dataset.
+            if (
+                candidate is None
+                or entry is None
+                or candidate.from_dataset_id != dataset_id
+                or candidate.from_column != entry.column_name
+                or (contract is not None and candidate.id != contract.id)
+            ):
+                return self.response(404, message="Relationship contract not found for this foreign key.")
+            contract = candidate
+        if contract is None:
+            return self.response(404, message="Relationship contract not found for this foreign key.")
+        contract.status = "revoked"
+        contract.revoker_id = current_user.id
+        contract.revoked_at = datetime.now(timezone.utc)
+        db.session.commit()
+        ends = self._relationship_ends(entry) if entry is not None else None
+        if ends is None:
+            return self.response(
+                200,
+                contract={
+                    "id": contract.id,
+                    "from_dataset_id": contract.from_dataset_id,
+                    "from_column": contract.from_column,
+                    "to_dataset_id": contract.to_dataset_id,
+                    "to_column": contract.to_column,
+                    "cardinality": contract.cardinality,
+                    "status": contract.status,
+                    "owner_id": contract.owner_id,
+                    "approver_id": contract.approver_id,
+                    "approved_at": contract.approved_at.isoformat() if contract.approved_at else None,
+                    "revoker_id": contract.revoker_id,
+                    "revoked_at": contract.revoked_at.isoformat() if contract.revoked_at else None,
+                    "current": False,
+                    "executable": False,
+                },
+            )
+        return self.response(200, contract=self._serialize_relationship_contract(contract, *ends))
+
+    @expose("/semantic-catalog", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def semantic_catalog(self):
+        """List current approved semantic metadata filtered by caller datasource access."""
+        _ensure_dictionary_tables()
+        metric_contracts = db.session.query(MetricContract).filter(MetricContract.status == "approved").all()
+        relationship_contracts = db.session.query(RelationshipContract).filter(RelationshipContract.status == "approved").all()
+        dataset_ids = {contract.dataset_id for contract in metric_contracts}
+        dataset_ids.update(contract.from_dataset_id for contract in relationship_contracts)
+        dataset_ids.update(contract.to_dataset_id for contract in relationship_contracts)
+        datasets = {
+            dataset.id: dataset for dataset in db.session.query(SqlaTable).filter(SqlaTable.id.in_(dataset_ids)).all()
+        } if dataset_ids else {}
+        relationships = []
+        for contract in relationship_contracts:
+            entry = (
+                db.session.query(ColumnDictionary)
+                .filter(
+                    ColumnDictionary.dataset_id == contract.from_dataset_id,
+                    ColumnDictionary.column_name == contract.from_column,
+                )
+                .one_or_none()
+            )
+            if entry is None:
+                continue
+            ends = self._relationship_ends(entry)
+            if ends is not None:
+                relationships.append((contract, *ends))
+        catalog = build_semantic_catalog(
+            datasets, metric_contracts, relationships, self._can_access_semantic_query_dataset, _semantic_query_row_cap()
+        )
+        return self.response(200, **catalog)
 
     @expose("/datasets/reference-options", methods=("GET",))
     @protect()

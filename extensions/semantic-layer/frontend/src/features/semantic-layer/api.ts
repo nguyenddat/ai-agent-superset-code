@@ -19,6 +19,18 @@ export const semanticLayerApi = {
   dataLayers: `${SEMANTIC_LAYER_API}/data-layers`,
   dataLayer: (layerId: number) => `${SEMANTIC_LAYER_API}/data-layers/${encodeURIComponent(layerId)}`,
   dataLayersOrder: `${SEMANTIC_LAYER_API}/data-layers/order`,
+  metricContractCandidate: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/contract/candidate`
+  ),
+  metricContractApprove: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/contract/approve`
+  ),
+  metricContractRevoke: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/contract/revoke`
+  ),
+  metricContractExecute: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/semantic-query/execute`
+  ),
 } as const;
 
 export const supersetApi = {
