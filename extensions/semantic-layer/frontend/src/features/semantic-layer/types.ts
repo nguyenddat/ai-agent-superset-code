@@ -38,6 +38,49 @@ export type MetricContractExecution = {
   truncated: boolean;
 };
 
+/** Review state of a metric: `outdated` is a candidate or approval whose metric changed after it was recorded. */
+export type MetricReviewState = 'not_started' | 'ineligible' | 'candidate' | 'approved' | 'outdated' | 'revoked';
+
+export type MetricFormula = {
+  aggregation: string;
+  measure_column: string | null;
+  measure_constant: string | null;
+  condition: string | null;
+  columns: string[];
+};
+
+export type MetricReviewItem = {
+  dataset_id: number;
+  metric_id: number;
+  metric_name: string;
+  verbose_name: string | null;
+  description: string | null;
+  expression: string | null;
+  d3format: string | null;
+  formula: MetricFormula | null;
+  ineligibility: string | null;
+  state: MetricReviewState;
+  contract: (MetricContract & { owner_name: string | null; approver_name: string | null; revoker_name: string | null }) | null;
+};
+
+/** A dataset column a metric run may group by or filter on. */
+export type MetricQueryColumn = {
+  column_name: string;
+  verbose_name: string | null;
+  type: string | null;
+  is_dttm: boolean;
+  groupby: boolean;
+  filterable: boolean;
+};
+
+export type MetricQueryDataset = { id: number; name: string; columns: MetricQueryColumn[] };
+
+export type MetricReviewList = { datasets: MetricQueryDataset[]; metrics: MetricReviewItem[] };
+
+export type MetricFilterOperator = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'IN' | 'NOT IN';
+
+export type MetricQueryFilter = { column: string; operator: MetricFilterOperator; value: string | number | boolean | Array<string | number> };
+
 export type GlossaryStatus = 'draft' | 'approved' | 'revoked';
 export type GlossaryProvenance = 'manual' | 'import' | 'ai_suggestion';
 export type GlossaryLink = {

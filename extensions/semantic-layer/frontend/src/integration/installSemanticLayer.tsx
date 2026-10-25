@@ -7,6 +7,7 @@ import { PortalContainerContext } from '@/lib/portal-container';
 import { DataDictionary } from '../features/semantic-layer/DataDictionary';
 import { BusinessCanvas } from '../features/semantic-layer/BusinessCanvas';
 import { Glossary } from '../features/semantic-layer/Glossary';
+import { MetricContracts } from '../features/semantic-layer/MetricContracts';
 import { requestJson, semanticLayerApi, supersetApi } from '../features/semantic-layer/api';
 import {
   SEMANTIC_LAYER_PAGE,
@@ -279,6 +280,8 @@ function SemanticLayerPage() {
             <div className="sl-content">
               {activeModule === 'glossary' ? (
                 <main className="sl-details"><Glossary datasets={datasets} /></main>
+              ) : activeModule === 'metrics' ? (
+                <main className="sl-details"><MetricContracts databaseId={selectedDatabase} /></main>
               ) : currentDataset ? (
                 activeModule === 'dictionary' ? (
                   <main className="sl-dictionary-main">

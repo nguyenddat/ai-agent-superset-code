@@ -64,6 +64,8 @@ from ..semantic_query.contracts import (
     execute_approved_chart_query,
     metric_contract_hash,
     metric_contract_ineligibility,
+    metric_contract_state,
+    parse_contract_metric,
 )
 from ..semantic_query.relationships import (
     RelationshipEnd,
@@ -781,6 +783,85 @@ class SemanticLayerAPI(RestApi):
             return self.response(403, message="Admin access required.")
         _ensure_dictionary_tables()
         return self.response(200, is_admin=True)
+
+    @staticmethod
+    def _query_dataset(dataset: SqlaTable) -> dict[str, Any]:
+        """A dataset with the columns a metric run may group or filter by: active, physical and flagged in Superset."""
+        query_columns = [
+            {
+                "column_name": column.column_name,
+                "verbose_name": column.verbose_name,
+                "type": column.type,
+                "is_dttm": bool(column.is_dttm),
+                "groupby": column.groupby is True,
+                "filterable": column.filterable is True,
+            }
+            for column in dataset.columns
+            if column.is_active is True
+            and not column.expression
+            and (column.groupby is True or column.filterable is True)
+        ]
+        name = f"{dataset.schema}.{dataset.table_name}" if dataset.schema else dataset.table_name
+        return {"id": dataset.id, "name": name, "columns": query_columns}
+
+    @expose("/metric-contracts", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def list_metric_contracts(self):
+        """Every saved metric of one database with its contract state, parsed formula and why it is ineligible."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        database_id = request.args.get("database_id", type=int)
+        if database_id is None:
+            return self.response_400(message="database_id is required.")
+        _ensure_dictionary_tables()
+        dataset_query = db.session.query(SqlaTable).filter(SqlaTable.database_id == database_id)
+        datasets = dataset_query.order_by(SqlaTable.table_name).all()
+        dataset_ids = [dataset.id for dataset in datasets]
+        contracts = {
+            (contract.dataset_id, contract.metric_id): contract
+            for contract in db.session.query(MetricContract).filter(MetricContract.dataset_id.in_(dataset_ids)).all()
+        } if dataset_ids else {}
+        user_names: dict[int, str | None] = {}
+
+        def user_name(user_id: int | None) -> str | None:
+            if user_id is None:
+                return None
+            if user_id not in user_names:
+                user = security_manager.get_user_by_id(user_id)
+                user_names[user_id] = (user.get_full_name().strip() or user.username) if user else None
+            return user_names[user_id]
+
+        metrics = []
+        for dataset in datasets:
+            for metric in dataset.metrics:
+                # Every Superset dataset gets a default COUNT(*) metric; it measures no column, so it is left out.
+                if metric.metric_name == "count" or str(metric.expression or "").replace(" ", "").upper() == "COUNT(*)":
+                    continue
+                contract = contracts.get((dataset.id, metric.id))
+                formula = parse_contract_metric(str(metric.expression or ""))
+                metrics.append(
+                    {
+                        "dataset_id": dataset.id,
+                        "metric_id": metric.id,
+                        "metric_name": metric.metric_name,
+                        "verbose_name": metric.verbose_name,
+                        "description": metric.description,
+                        "expression": metric.expression,
+                        "d3format": metric.d3format,
+                        "formula": formula.as_dict() if formula else None,
+                        "ineligibility": metric_contract_ineligibility(dataset, metric),
+                        "state": metric_contract_state(contract, dataset, metric),
+                        "contract": {
+                            **self._serialize_metric_contract(contract, dataset, metric),
+                            "owner_name": user_name(contract.owner_id),
+                            "approver_name": user_name(contract.approver_id),
+                            "revoker_name": user_name(contract.revoker_id),
+                        } if contract else None,
+                    }
+                )
+        return self.response(200, datasets=[self._query_dataset(dataset) for dataset in datasets], metrics=metrics)
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/candidate", methods=("POST",))
     @protect()

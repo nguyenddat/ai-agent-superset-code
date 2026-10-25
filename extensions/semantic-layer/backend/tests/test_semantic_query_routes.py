@@ -20,11 +20,14 @@ from text_to_bi.superset_semantic_layer.modules.semantic_query.compiler import (
     compile_semantic_query,
 )
 from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import (
+    METRIC_CONTRACT_RULE,
     build_metric_chart_payload,
     contract_is_approved_current,
     metric_contract_hash,
     metric_contract_ineligibility,
+    metric_contract_state,
     metric_is_eligible_for_contract,
+    parse_contract_metric,
 )
 from text_to_bi.superset_semantic_layer.modules.semantic_query.relationships import (
     RelationshipEnd,
@@ -72,7 +75,7 @@ class _ModelField:
 
 
 class _MetricContract:
-    status = _ModelField()
+    status = dataset_id = _ModelField()
 
     def __init__(self, dataset_id, metric_id, owner_id=None):
         self.id, self.dataset_id, self.metric_id, self.owner_id = 91, dataset_id, metric_id, owner_id
@@ -92,7 +95,7 @@ class _RelationshipContract:
 
 
 class _CatalogDataset:
-    id = _ModelField()
+    id = database_id = table_name = _ModelField()
 
 
 def _dataset():
@@ -110,7 +113,8 @@ def _route_api(datasets):
         "_is_admin", "_can_preview_semantic_query", "_dataset_metric", "_serialize_metric_contract",
         "_serialize_relationship_contract", "create_metric_contract_candidate", "approve_metric_contract",
         "revoke_metric_contract", "execute_metric_contract", "create_relationship_contract_candidate",
-        "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog",
+        "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
+        "list_metric_contracts",
     }
     class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
     class_node.decorator_list = []
@@ -128,7 +132,8 @@ def _route_api(datasets):
         "request": SimpleNamespace(get_json=lambda silent=True: {"dimensions": [], "filters": []}, args=SimpleNamespace(get=lambda *_args, **_kwargs: None)),
         "current_app": SimpleNamespace(config={}), "_ensure_dictionary_tables": lambda: None,
         "metric_is_eligible_for_contract": metric_is_eligible_for_contract, "metric_contract_hash": metric_contract_hash,
-        "metric_contract_ineligibility": metric_contract_ineligibility,
+        "metric_contract_ineligibility": metric_contract_ineligibility, "metric_contract_state": metric_contract_state,
+        "parse_contract_metric": parse_contract_metric,
         "contract_is_approved_current": contract_is_approved_current, "execute_approved_chart_query": None,
         "relationship_cardinality": relationship_cardinality, "relationship_contract_hash": relationship_contract_hash,
         "relationship_is_approved_current": lambda contract, *_: contract.status == "approved",
@@ -357,6 +362,68 @@ def test_semantic_catalog_hides_denied_dataset():
     api._can_access_semantic_query_dataset = lambda _: False
     status, payload = api.semantic_catalog()
     assert status == 200 and payload["datasets"] == [] and payload["relationships"] == []
+
+
+def _metric_list_api(dataset, contracts):
+    api, namespace = _route_api({dataset.id: dataset})
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *_):
+            return self
+
+        def order_by(self, *_):
+            return self
+
+        def all(self):
+            return {_CatalogDataset: [dataset], _MetricContract: contracts}.get(self.model, [])
+
+    namespace["db"].session.query = Query
+    namespace["request"] = SimpleNamespace(args=SimpleNamespace(get=lambda key, type=None: 1))
+    namespace["security_manager"] = SimpleNamespace(
+        get_user_by_id=lambda user_id: SimpleNamespace(get_full_name=lambda: "Ada Admin", username="admin")
+    )
+    return api, namespace
+
+
+def test_metric_list_reports_state_formula_and_reason_and_skips_the_default_count():
+    dataset = _dataset()
+    dataset.columns[0].__dict__.update(verbose_name="Temperature", type="FLOAT", is_dttm=False)
+    note_column = SimpleNamespace(column_name="note", is_active=True, groupby=False, filterable=False, expression=None)
+    dataset.columns.append(note_column)
+    metric_fields = {"verbose_name": None, "description": None, "d3format": ",.1f"}
+    dataset.metrics[0].__dict__.update(metric_fields)
+    dataset.metrics += [
+        SimpleNamespace(id=5, metric_name="count", expression="COUNT(*)", **metric_fields),
+        SimpleNamespace(id=6, metric_name="spread", expression="MAX(temperature) - MIN(temperature)", **metric_fields),
+    ]
+    contract = _MetricContract(dataset.id, 4, owner_id=3)
+    contract.status, contract.approver_id = "approved", 3
+    contract.expression_hash = metric_contract_hash(dataset, dataset.metrics[0])
+    api, _ = _metric_list_api(dataset, [contract])
+
+    status, payload = api.list_metric_contracts()
+
+    assert status == 200
+    approved, spread = payload["metrics"]
+    assert (approved["metric_name"], spread["metric_name"]) == ("average_temperature", "spread")
+    assert approved["state"] == "approved" and approved["ineligibility"] is None
+    assert approved["formula"]["aggregation"] == "AVG" and approved["formula"]["measure_column"] == "temperature"
+    assert approved["contract"]["approver_name"] == "Ada Admin" and "expression_hash" not in approved["contract"]
+    assert spread["state"] == "ineligible" and spread["contract"] is None
+    assert spread["ineligibility"] == METRIC_CONTRACT_RULE
+    assert [column["column_name"] for column in payload["datasets"][0]["columns"]] == ["temperature"]
+
+
+def test_metric_list_requires_admin_and_a_database():
+    dataset = _dataset()
+    api, namespace = _metric_list_api(dataset, [])
+    namespace["request"] = SimpleNamespace(args=SimpleNamespace(get=lambda key, type=None: None))
+    assert api.list_metric_contracts()[0] == 400
+    namespace["current_user"].roles = []
+    assert api.list_metric_contracts()[0] == 403
 
 
 def test_route_source_has_no_sqllab_or_raw_execution_path():

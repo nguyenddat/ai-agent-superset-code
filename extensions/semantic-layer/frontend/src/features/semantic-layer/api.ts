@@ -19,6 +19,7 @@ export const semanticLayerApi = {
   dataLayers: `${SEMANTIC_LAYER_API}/data-layers`,
   dataLayer: (layerId: number) => `${SEMANTIC_LAYER_API}/data-layers/${encodeURIComponent(layerId)}`,
   dataLayersOrder: `${SEMANTIC_LAYER_API}/data-layers/order`,
+  metricContracts: (databaseId: number) => `${SEMANTIC_LAYER_API}/metric-contracts?database_id=${encodeURIComponent(databaseId)}`,
   metricContractCandidate: (datasetId: number, metricId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/contract/candidate`
   ),

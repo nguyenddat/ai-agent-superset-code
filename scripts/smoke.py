@@ -83,8 +83,9 @@ def main(argv: list[str] | None = None) -> None:
         dataset = datasets["result"][0]
         endpoints.append(f"{SEMANTIC_API}/dataset/{dataset['id']}/dictionary")
         endpoints.append(f"{SEMANTIC_API}/business-model?database_id={dataset['database']['id']}")
+        endpoints.append(f"{SEMANTIC_API}/metric-contracts?database_id={dataset['database']['id']}")
     else:
-        print("No Superset dataset found; skipping the dataset dictionary and business model endpoints.")
+        print("No Superset dataset found; skipping the dataset dictionary, business model and metric endpoints.")
 
     step("Calling the Semantic Layer API")
     failures = []
