@@ -68,8 +68,7 @@ services:
       - ./superset/bootstrap_warehouse.py:/app/pythonpath/bootstrap_warehouse.py:ro
       - ./superset/bootstrap_metrics.py:/app/pythonpath/bootstrap_metrics.py:ro
       - ./superset/bootstrap_dashboard.py:/app/pythonpath/bootstrap_dashboard.py:ro
-      - ./extensions/superset-ai-agent-0.1.0.supx:/app/superset_home/extensions/superset-ai-agent-0.1.0.supx:ro
-      - ./extensions/superset-semantic-layer-0.1.0.supx:/app/superset_home/extensions/superset-semantic-layer-0.1.0.supx:ro
+      - superset_extensions:/app/superset_home/extensions
     depends_on:
       superset-db:
         condition: service_healthy
@@ -82,7 +81,7 @@ services:
     build:
       context: ./superset
       dockerfile: Dockerfile
-    command: ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:8088 --worker-class gthread --workers 2 --threads 8 --timeout 120 'superset.app:create_app()'"]
+    command: ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:8088 --worker-class gthread --workers 1 --threads 16 --timeout 120 'superset.app:create_app()'"]
     env_file:
       - ./extensions/ai-agents/.env
     environment:
@@ -95,8 +94,9 @@ services:
       - "${SUPERSET_PORT:-8089}:8088"
     volumes:
       - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
-      - ./extensions/superset-ai-agent-0.1.0.supx:/app/superset_home/extensions/superset-ai-agent-0.1.0.supx:ro
-      - ./extensions/superset-semantic-layer-0.1.0.supx:/app/superset_home/extensions/superset-semantic-layer-0.1.0.supx:ro
+      # Extension bundles live in a named volume filled with `docker compose cp` (see AGENTS.md): bind-mounting the
+      # .supx files from the host drive served stale copies under Docker Desktop's Hyper-V file sharing.
+      - superset_extensions:/app/superset_home/extensions
     depends_on:
       superset-init:
         condition: service_completed_successfully
@@ -112,6 +112,7 @@ services:
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
       AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db
       AIRFLOW__LOGGING__SYMLINK_LATEST_LOG: "false"
@@ -140,4 +141,5 @@ services:
 volumes:
   warehouse_db_data:
   superset_db_data:
+  superset_extensions:
   airflow_home:

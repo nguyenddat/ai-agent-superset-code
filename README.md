@@ -32,20 +32,28 @@ Text to BI
 └── README.md
 ```
 
-At runtime, the two root `.supx` bundles are mounted read-only into the
-Superset container at `/app/superset_home/extensions`; extension source code
-is not mounted into the runtime container.
+At runtime, Superset reads the two root `.supx` bundles from the
+`superset_extensions` named volume at `/app/superset_home/extensions`. The
+bundles are copied into that volume with `docker compose cp` rather than
+bind-mounted, because bind mounts from the host drive served stale `.supx`
+content under Docker Desktop's Hyper-V file sharing. Extension source code is
+not mounted into the runtime container.
 
 ## Requirements
 
 - Docker Desktop with Docker Compose
-- Conda environment `ai-agent-superset` for extension tooling
+- [uv](https://docs.astral.sh/uv/) for the local Python environment
 - Node.js and npm for frontend development
 - An OpenRouter API key if AI planning or Semantic Layer AutoFill is enabled
 
 The Superset image installs the backend dependencies needed by the extensions.
-The local Conda environment is used for tests, linting, and
-`superset-extensions bundle`.
+The local uv environment (`.venv`, defined by `pyproject.toml` and `uv.lock`)
+is used for tests, linting, and `superset-extensions bundle`. Create or update
+it from the repository root:
+
+```sh
+uv sync
+```
 
 ## Quick start
 
@@ -53,8 +61,14 @@ From the repository root:
 
 ```sh
 docker compose up --build -d
+docker compose cp extensions/superset-ai-agent-0.1.0.supx superset:/app/superset_home/extensions/
+docker compose cp extensions/superset-semantic-layer-0.1.0.supx superset:/app/superset_home/extensions/
+docker compose restart superset
 docker compose ps
 ```
+
+A fresh `superset_extensions` volume is empty, so the two `docker compose cp`
+commands are needed after the first `docker compose up`.
 
 Superset is available at <http://localhost:8089> by default. Set
 `SUPERSET_PORT` to use another host port. The local default login is
@@ -154,22 +168,25 @@ assistant.
 Build the extension from its directory:
 
 ```sh
-conda activate ai-agent-superset
 cd extensions/ai-agents/frontend
 npm install
 npm run typecheck
 npm run build
 cd ..
-superset-extensions bundle
+uv run superset-extensions bundle
 ```
 
 The bundle is `superset-ai-agent-0.1.0.supx`. Copy it to the repository
-`extensions/` directory and recreate Superset:
+`extensions/` directory, copy it into the running container, and restart
+Superset:
 
 ```sh
 cp superset-ai-agent-0.1.0.supx ..
+rm -f superset-ai-agent-0.1.0.supx
 cd ../..
 docker compose up -d --build superset
+docker compose cp extensions/superset-ai-agent-0.1.0.supx superset:/app/superset_home/extensions/
+docker compose restart superset
 ```
 
 On PowerShell, use `Copy-Item` instead of `cp` if needed.
@@ -212,36 +229,39 @@ tables idempotently.
 Build the extension from its directory:
 
 ```sh
-conda activate ai-agent-superset
 cd extensions/semantic-layer/frontend
 npm install
 npm run typecheck
 npm run build
 cd ..
-superset-extensions bundle
+uv run superset-extensions bundle
 ```
 
 The bundle is `superset-semantic-layer-0.1.0.supx`. Copy it to the repository
-`extensions/` directory and recreate Superset:
+`extensions/` directory, copy it into the running container, and restart
+Superset:
 
 ```sh
 cp superset-semantic-layer-0.1.0.supx ..
+rm -f superset-semantic-layer-0.1.0.supx
 cd ../..
 docker compose up -d --build superset
+docker compose cp extensions/superset-semantic-layer-0.1.0.supx superset:/app/superset_home/extensions/
+docker compose restart superset
 ```
 
 ## Development and validation
 
-Run backend tests with the project Conda environment:
+Run backend tests with the project uv environment:
 
 ```sh
-conda run -n ai-agent-superset python -m pytest extensions/ai-agents/backend/tests
+uv run pytest extensions/ai-agents/backend/tests
 ```
 
-Run Ruff against the extension backend sources when available:
+Run Ruff against the extension backend sources:
 
 ```sh
-conda run -n ai-agent-superset ruff check extensions/ai-agents/backend/src extensions/semantic-layer/backend/src
+uv run ruff check extensions/ai-agents/backend/src extensions/semantic-layer/backend/src
 ```
 
 After changing either extension, rebuild its bundle and recreate the Superset

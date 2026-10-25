@@ -2,9 +2,15 @@
 name = "superset-semantic-layer"
 version = "0.1.0"
 license = "Apache-2.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "sqlglot==28.10.1",
+]
 
 [tool.ruff]
 line-length = 120
+# Superset 6.1 runs extension backends on Python 3.10.
+target-version = "py310"
 
 [tool.ruff.lint]
 ignore = ["D100"]

@@ -5,6 +5,8 @@ license = "Apache-2.0"
 
 [tool.ruff]
 line-length = 120
+# Superset 6.1 runs extension backends on Python 3.10.
+target-version = "py310"
 
 [tool.ruff.lint]
 ignore = ["D100"]

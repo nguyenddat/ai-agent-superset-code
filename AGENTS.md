@@ -18,24 +18,27 @@ metadata database, and two Superset extensions: an AI Agent and a Semantic Layer
   dashboard panel streams chat requests through the Superset extension API.
 - `extensions/semantic-layer/` contains the admin-only semantic metadata UI and
   backend. Its metadata tables live in Superset's metadata database.
-- `extensions/*.supx` contains the bundles mounted into the running Superset
+- `extensions/*.supx` contains the bundles copied into the running Superset
   container. Keep one current bundle per extension here.
 
 ## Python environment
 
-Use the Conda environment `ai-agent-superset` for local Python commands and
-extension tooling. It currently provides Python 3.12 and
-`superset-extensions`.
+Use the uv-managed virtual environment `.venv` at the repository root for local
+Python commands and extension tooling. The root `pyproject.toml` and `uv.lock`
+define it: Python 3.12, the extension backend dependencies, and the `dev` group
+with `apache-superset-extensions-cli` (`superset-extensions`), `pytest`, and
+`ruff`.
 
 ```sh
-conda activate ai-agent-superset
-python --version
+uv sync
+uv run python --version
 ```
 
-When running commands without an activated shell, use
-`conda run -n ai-agent-superset python ...`.
+Run Python tools through `uv run` (for example `uv run pytest` or
+`uv run ruff check`); it finds the root project from any subdirectory. Add or
+change dependencies with `uv add` / `uv add --dev` so `uv.lock` stays current.
 
-Superset's application runtime runs inside the Docker image. The local Conda
+Superset's application runtime runs inside the Docker image. The local uv
 environment is for development commands and extension packaging.
 
 ## Stack commands
@@ -52,34 +55,42 @@ Superset is available at `http://localhost:8089` by default. The analytics
 database is `warehouse-db` (`data_wh`); Superset metadata is stored separately
 in `superset-db`. Both databases use persistent Compose volumes.
 
-## Build, mount, and restart extensions
+## Build, install, and restart extensions
 
 After changing extension source or extension build configuration, rebuild both
-bundles, copy them into the mounted `extensions/` directory, and recreate the
+bundles, copy them into the `superset_extensions` volume, and restart the
 Superset service:
 
 ```sh
-conda activate ai-agent-superset
+uv sync
 
 cd extensions/ai-agents
-superset-extensions bundle
+uv run superset-extensions bundle
 cp superset-ai-agent-0.1.0.supx ..
 rm -f superset-ai-agent-0.1.0.supx
 
 cd ../semantic-layer
-superset-extensions bundle
+uv run superset-extensions bundle
 cp superset-semantic-layer-0.1.0.supx ..
 rm -f superset-semantic-layer-0.1.0.supx
 
 cd ../..
 docker compose up -d --build superset
+docker compose cp extensions/superset-ai-agent-0.1.0.supx superset:/app/superset_home/extensions/
+docker compose cp extensions/superset-semantic-layer-0.1.0.supx superset:/app/superset_home/extensions/
+docker compose restart superset
 docker compose ps
 ```
 
-The source directories hold editable code. The two root `.supx` files are
-mounted read-only at `/app/superset_home/extensions`. Bundle output created
-inside an extension source directory is temporary and can be regenerated with
-the build command.
+The source directories hold editable code. The two root `.supx` files are the
+current bundles; Superset reads them from the `superset_extensions` named
+volume at `/app/superset_home/extensions`, shared by `superset-init` and
+`superset`. The bundles are copied in with `docker compose cp` instead of
+bind-mounted, because bind mounts from the host drive served stale `.supx`
+content under Docker Desktop's Hyper-V file sharing. A fresh volume is empty, so
+run the two `docker compose cp` commands after the first `docker compose up`.
+Bundle output created inside an extension source directory is temporary and can
+be regenerated with the build command.
 
 ## Semantic Layer development scripts
 
