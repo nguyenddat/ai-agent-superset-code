@@ -142,3 +142,31 @@ def test_only_the_supplied_chartdata_runner_validates_and_runs_after_approval():
     result = execute_approved_chart_query(contract, dataset, metric, {"dimensions": []}, 1000, lambda payload: calls.append(payload) or "ran")
     assert result == "ran"
     assert calls[0]["queries"][0]["row_limit"] == 1001
+
+
+@pytest.mark.parametrize(
+    "status, stale, allowed", [("candidate", False, True), ("candidate", True, False), ("revoked", False, False)]
+)
+def test_candidate_preview_runs_only_when_granted_and_unchanged(status, stale, allowed):
+    dataset = _dataset()
+    dataset.catalog = dataset.schema = dataset.table_name = dataset.sql = None
+    dataset.database = SimpleNamespace(database_name="warehouse")
+    metric = SimpleNamespace(id=4, metric_name="average_temperature", expression="AVG(temperature_c)")
+    contract = SimpleNamespace(
+        dataset_id=dataset.id,
+        metric_id=metric.id,
+        status=status,
+        expression_hash="stale" if stale else metric_contract_hash(dataset, metric),
+    )
+
+    def run(payload):
+        return "ran"
+
+    with pytest.raises(PermissionError):
+        execute_approved_chart_query(contract, dataset, metric, {"dimensions": []}, 1000, run)
+    query = {"dimensions": []}
+    if allowed:
+        assert execute_approved_chart_query(contract, dataset, metric, query, 1000, run, allow_candidate=True) == "ran"
+    else:
+        with pytest.raises(PermissionError):
+            execute_approved_chart_query(contract, dataset, metric, query, 1000, run, allow_candidate=True)

@@ -73,6 +73,9 @@ class _ModelField:
     def in_(self, values):
         return values
 
+    def desc(self):
+        return self
+
 
 class _MetricContract:
     status = dataset_id = _ModelField()
@@ -92,6 +95,21 @@ class _RelationshipContract:
         self.owner_id = self.approver_id = self.revoker_id = self.approved_at = self.revoked_at = None
         for key, value in values.items():
             setattr(self, key, value)
+
+
+class _MetricContractEvent:
+    dataset_id = metric_id = created_at = id = _ModelField()
+
+    def __init__(self, **fields):
+        self.__dict__.update(fields)
+
+
+class _MetricDefinition:
+    dataset_id = metric_id = _ModelField()
+
+    def __init__(self, dataset_id, metric_id):
+        self.dataset_id, self.metric_id = dataset_id, metric_id
+        self.business_definition = self.unit = self.steward_id = None
 
 
 class _CatalogDataset:
@@ -114,7 +132,8 @@ def _route_api(datasets):
         "_serialize_relationship_contract", "create_metric_contract_candidate", "approve_metric_contract",
         "revoke_metric_contract", "execute_metric_contract", "create_relationship_contract_candidate",
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
-        "list_metric_contracts",
+        "list_metric_contracts", "_user_names", "_active_users", "_metric_definition", "_serialize_metric_definition",
+        "_review_reason", "_record_metric_event", "save_metric_definition", "list_metric_contract_events",
     }
     class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
     class_node.decorator_list = []
@@ -140,10 +159,24 @@ def _route_api(datasets):
         "RelationshipEnd": RelationshipEnd, "build_semantic_catalog": None,
         "_is_superset_access_error": lambda error: "access" in type(error).__name__.lower(),
         "logger": SimpleNamespace(exception=lambda *args, **kwargs: None), "SEMANTIC_QUERY_MAX_ROWS": 1000,
+        "MetricContractEvent": _MetricContractEvent, "MetricDefinition": _MetricDefinition,
+        "METRIC_REVIEW_REASON_MAX_LENGTH": 2000, "METRIC_DEFINITION_MAX_LENGTH": 4000, "METRIC_UNIT_MAX_LENGTH": 64,
     }
     module = ast.Module(body=[cap_node, class_node], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), str(ROUTE_PATH), "exec"), namespace)  # noqa: S102
-    return namespace["SemanticLayerAPI"](), namespace
+    api = namespace["SemanticLayerAPI"]()
+    # Proposing needs a business definition; tests about other rules start from a metric that has one.
+    api._metric_definition = lambda *_: SimpleNamespace(business_definition="Average air temperature.")
+    return api, namespace
+
+
+def _use_request_body(namespace, body):
+    namespace["request"] = SimpleNamespace(get_json=lambda silent=True: body, args=namespace["request"].args)
+
+
+def _as_user(namespace, user_id):
+    admin_role = SimpleNamespace(name="Admin")
+    namespace["current_user"] = SimpleNamespace(is_authenticated=True, id=user_id, roles=[admin_role])
 
 
 def _install_chartdata_stubs(monkeypatch):
@@ -172,7 +205,7 @@ def test_new_candidates_carry_their_hash_before_joining_the_session():
     api, namespace = _route_api({dataset.id: dataset})
     session = namespace["db"].session
     snapshots = []
-    session.add = lambda item: snapshots.append(dict(vars(item)))
+    session.add = lambda item: None if isinstance(item, _MetricContractEvent) else snapshots.append(dict(vars(item)))
     api._contract_for = lambda *_: None
     assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
     assert snapshots[0]["expression_hash"] == metric_contract_hash(dataset, dataset.metrics[0])
@@ -193,10 +226,15 @@ def test_metric_contract_approve_and_revoke_lifecycle():
     api._contract_for = lambda *_: holder.get("contract")
     assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
     holder["contract"] = namespace["db"].session.added[0]
+    _as_user(namespace, 5)
     assert api.approve_metric_contract(dataset.id, 4)[0] == 200
-    assert holder["contract"].status == "approved"
+    assert holder["contract"].status == "approved" and holder["contract"].approver_id == 5
+    _use_request_body(namespace, {"reason": "Formula double counts hourly rows."})
     assert api.revoke_metric_contract(dataset.id, 4)[0] == 200
     assert holder["contract"].status == "revoked"
+    events = [item for item in namespace["db"].session.added if isinstance(item, _MetricContractEvent)]
+    assert [(event.action, event.actor_id) for event in events] == [("candidate", 3), ("approve", 5), ("revoke", 5)]
+    assert events[2].reason == "Formula double counts hourly rows." and events[0].expression == 'AVG("temperature")'
 
 
 def test_csrf_wrapper_rejects_before_the_handler():
@@ -221,10 +259,12 @@ def test_execute_denial_security_error_and_truncation_are_mapped(monkeypatch):
     assert api.execute_metric_contract(dataset.id, metric.id)[0] == 403
     api._can_access_semantic_query_dataset = lambda _: True
     _install_chartdata_stubs(monkeypatch)
-    namespace["execute_approved_chart_query"] = lambda *args: (_ for _ in ()).throw(type("AccessDenied", (Exception,), {})())
+    access_denied = type("AccessDenied", (Exception,), {})
+    namespace["execute_approved_chart_query"] = lambda *args, **kwargs: (_ for _ in ()).throw(access_denied())
     assert api.execute_metric_contract(dataset.id, metric.id)[0] == 403
     namespace["current_app"].config["SEMANTIC_QUERY_MAX_ROWS"] = 10_000
-    namespace["execute_approved_chart_query"] = lambda *args: {"colnames": ["city"], "data": [{"city": "A"}] * 1001}
+    many_rows = {"colnames": ["city"], "data": [{"city": "A"}] * 1001}
+    namespace["execute_approved_chart_query"] = lambda *args, **kwargs: many_rows
     status, payload = api.execute_metric_contract(dataset.id, metric.id)
     assert status == 200 and payload["row_count"] == 1000 and payload["truncated"] is True
 
@@ -238,7 +278,8 @@ def test_execute_returns_the_superset_sql_to_administrators_only(monkeypatch):
     api._can_access_semantic_query_dataset = lambda _: True
     _install_chartdata_stubs(monkeypatch)
     executed_sql = "SELECT city, AVG(temperature) FROM weather WHERE tenant_id = 7 GROUP BY city"
-    namespace["execute_approved_chart_query"] = lambda *args: {"colnames": ["city"], "data": [], "query": executed_sql}
+    chart_result = {"colnames": ["city"], "data": [], "query": executed_sql}
+    namespace["execute_approved_chart_query"] = lambda *args, **kwargs: chart_result
     assert api.execute_metric_contract(dataset.id, metric.id)[1]["sql"] == executed_sql
     namespace["current_user"].roles = []
     assert api.execute_metric_contract(dataset.id, metric.id)[1]["sql"] is None
@@ -400,6 +441,7 @@ def _metric_list_api(dataset, contracts):
     namespace["security_manager"] = SimpleNamespace(
         get_user_by_id=lambda user_id: SimpleNamespace(get_full_name=lambda: "Ada Admin", username="admin")
     )
+    api._active_users = lambda: [{"id": 3, "name": "Ada Admin"}]
     return api, namespace
 
 
@@ -439,6 +481,139 @@ def test_metric_list_requires_admin_and_a_database():
     assert api.list_metric_contracts()[0] == 400
     namespace["current_user"].roles = []
     assert api.list_metric_contracts()[0] == 403
+
+
+def _proposed_contract(dataset, owner_id=3):
+    contract = _MetricContract(dataset.id, 4, owner_id=owner_id)
+    contract.status, contract.expression = "candidate", dataset.metrics[0].expression
+    contract.expression_hash = metric_contract_hash(dataset, dataset.metrics[0])
+    return contract
+
+
+def test_the_proposer_cannot_approve_their_own_candidate():
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    contract = _proposed_contract(dataset, owner_id=3)
+    api._contract_for = lambda *_: contract
+    status, payload = api.approve_metric_contract(dataset.id, 4)
+    assert status == 403 and "không thể tự duyệt" in payload["message"] and contract.status == "candidate"
+    _as_user(namespace, 5)
+    _use_request_body(namespace, {"reason": "  Checked against the hourly feed.  "})
+    assert api.approve_metric_contract(dataset.id, 4)[0] == 200
+    event = namespace["db"].session.added[-1]
+    assert (event.action, event.actor_id, event.reason) == ("approve", 5, "Checked against the hourly feed.")
+
+
+def test_proposing_again_makes_the_new_proposer_the_owner_and_needs_a_definition():
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    contract = _proposed_contract(dataset, owner_id=3)
+    contract.status = "revoked"
+    api._contract_for = lambda *_: contract
+    _as_user(namespace, 5)
+    assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
+    assert contract.owner_id == 5 and contract.status == "candidate"
+    api._metric_definition = lambda *_: None
+    status, payload = api.create_metric_contract_candidate(dataset.id, 4)
+    assert status == 400 and "định nghĩa nghiệp vụ" in payload["message"]
+
+
+def test_revoking_needs_a_reason_and_a_live_contract():
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    contract = _proposed_contract(dataset)
+    api._contract_for = lambda *_: contract
+    _use_request_body(namespace, {"reason": "   "})
+    assert api.revoke_metric_contract(dataset.id, 4)[0] == 400 and contract.status == "candidate"
+    _use_request_body(namespace, {"reason": "x" * 2001})
+    assert api.revoke_metric_contract(dataset.id, 4)[0] == 400
+    _use_request_body(namespace, {"reason": "Superseded."})
+    assert api.revoke_metric_contract(dataset.id, 4)[0] == 200 and contract.status == "revoked"
+    assert api.revoke_metric_contract(dataset.id, 4)[0] == 400
+
+
+def test_metric_definition_is_validated_saved_and_logged():
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    api._metric_definition = lambda *_: None
+    known_user = SimpleNamespace(get_full_name=lambda: "Bao Steward", username="bao")
+    namespace["security_manager"] = SimpleNamespace(get_user_by_id=lambda user_id: known_user if user_id == 9 else None)
+    for body in (
+        {"business_definition": "  "},
+        {"business_definition": "x" * 4001},
+        {"business_definition": "Average.", "unit": "u" * 65},
+        {"business_definition": "Average.", "steward_id": 42},
+        {"business_definition": "Average.", "steward_id": True},
+    ):
+        _use_request_body(namespace, body)
+        assert api.save_metric_definition(dataset.id, 4)[0] == 400, body
+    _use_request_body(namespace, {"business_definition": " Average air temperature. ", "unit": " °C ", "steward_id": 9})
+    status, payload = api.save_metric_definition(dataset.id, 4)
+    assert status == 200
+    assert payload["definition"] == {
+        "business_definition": "Average air temperature.", "unit": "°C", "steward_id": 9, "steward_name": "Bao Steward",
+    }
+    assert namespace["db"].session.added[-1].action == "definition"
+    namespace["current_user"].roles = []
+    assert api.save_metric_definition(dataset.id, 4)[0] == 403
+
+
+def test_metric_events_are_listed_newest_first_with_actor_names():
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    created_at = datetime(2026, 10, 25, 9, 30, tzinfo=timezone.utc)
+    events = [
+        _MetricContractEvent(id=2, action="approve", actor_id=5, reason="Checked.", expression="AVG(t)"),
+        _MetricContractEvent(id=1, action="candidate", actor_id=3, reason=None, expression="AVG(t)"),
+    ]
+
+    class Query:
+        def __init__(self, model):
+            pass
+
+        def filter(self, *_):
+            return self
+
+        def order_by(self, *_):
+            return self
+
+        def all(self):
+            return events
+
+    for event in events:
+        event.created_at = created_at
+    namespace["db"].session.query = Query
+    names = {3: "Ada Admin", 5: "Bao Reviewer"}
+    namespace["security_manager"] = SimpleNamespace(
+        get_user_by_id=lambda user_id: SimpleNamespace(get_full_name=lambda: names[user_id], username="user")
+    )
+    status, payload = api.list_metric_contract_events(dataset.id, 4)
+    assert status == 200
+    assert [(event["action"], event["actor_name"]) for event in payload["events"]] == [
+        ("approve", "Bao Reviewer"), ("candidate", "Ada Admin"),
+    ]
+    assert payload["events"][0]["created_at"] == "2026-10-25T09:30:00+00:00"
+
+
+def test_only_administrators_may_preview_a_candidate(monkeypatch):
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    contract = _proposed_contract(dataset)
+    api._contract_for = lambda *_: contract
+    api._can_access_semantic_query_dataset = lambda _: True
+    _install_chartdata_stubs(monkeypatch)
+    grants = []
+
+    def run(*args, allow_candidate=False):
+        grants.append(allow_candidate)
+        return {"colnames": [], "data": []}
+
+    namespace["execute_approved_chart_query"] = run
+    status, payload = api.execute_metric_contract(dataset.id, 4)
+    assert status == 200 and payload["preview"] is True
+    namespace["current_user"].roles = []
+    api.execute_metric_contract(dataset.id, 4)
+    assert grants == [True, False]
 
 
 def test_route_source_has_no_sqllab_or_raw_execution_path():

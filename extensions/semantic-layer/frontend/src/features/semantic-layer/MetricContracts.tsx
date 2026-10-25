@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi } from './api';
+import { MetricDecisionDialog } from './MetricDecisionDialog';
+import type { MetricDecision } from './MetricDecisionDialog';
+import { formatTime, MetricDefinitionPanel } from './MetricDefinitionPanel';
 import { MetricTrial } from './MetricTrial';
-import type {
-  MetricContractResponse, MetricFormula, MetricReviewItem, MetricReviewList, MetricReviewState,
-} from './types';
+import type { MetricContractResponse, MetricReviewItem, MetricReviewList, MetricReviewState } from './types';
 
 const STATE_LABELS: Record<MetricReviewState, string> = {
   not_started: 'Chưa duyệt',
@@ -18,23 +19,35 @@ const STATE_LABELS: Record<MetricReviewState, string> = {
   revoked: 'Đã thu hồi',
 };
 
-const STATE_HINTS: Record<MetricReviewState, string> = {
-  not_started: 'Metric đủ điều kiện nhưng chưa được đề xuất.',
-  ineligible: 'Công thức nằm ngoài dạng được hỗ trợ nên chưa thể duyệt.',
-  candidate: 'Bản đề xuất đang chờ người duyệt xác nhận công thức.',
-  approved: 'Công thức đã được duyệt; AI Agent và người dùng có thể truy vấn metric này.',
-  outdated: 'Metric đã bị sửa sau khi đề xuất hoặc duyệt; cần đề xuất và duyệt lại.',
-  revoked: 'Bản duyệt đã bị thu hồi; tạo bản đề xuất mới để dùng lại.',
-};
-
 const STATE_ORDER: MetricReviewState[] = ['candidate', 'outdated', 'not_started', 'approved', 'revoked', 'ineligible'];
 
-type ContractAction = 'candidate' | 'approve' | 'revoke';
 type DetailTab = 'definition' | 'trial';
 
 const metricKey = (metric: MetricReviewItem) => `${metric.dataset_id}:${metric.metric_id}`;
 const metricLabel = (metric: MetricReviewItem) => metric.verbose_name || metric.metric_name;
-const formatTime = (value: string | null) => (value ? new Date(value).toLocaleString('vi-VN') : '');
+
+const formatDate = (value: string | null) => formatTime(value).split(' ').pop() ?? '';
+
+/** One line on who moved the metric into its current state, or what it needs next. */
+function reviewSummary(metric: MetricReviewItem, viewerId: number | null): string {
+  const contract = metric.contract;
+  switch (metric.state) {
+    case 'approved':
+      return `Duyệt bởi ${contract?.approver_name ?? '—'} · ${formatDate(contract?.approved_at ?? null)}`;
+    case 'candidate':
+      return contract?.owner_id === viewerId
+        ? 'Bạn đã đề xuất · cần một quản trị viên khác duyệt'
+        : `Đề xuất bởi ${contract?.owner_name ?? '—'} · chờ duyệt`;
+    case 'revoked':
+      return `Thu hồi bởi ${contract?.revoker_name ?? '—'} · ${formatDate(contract?.revoked_at ?? null)}`;
+    case 'outdated':
+      return 'Công thức đã đổi sau lần duyệt · cần đề xuất lại';
+    case 'not_started':
+      return metric.definition ? 'Chưa đề xuất' : 'Chưa có định nghĩa nghiệp vụ';
+    default:
+      return 'Chưa thể duyệt';
+  }
+}
 
 function StateBadge({ state }: { state: MetricReviewState }) {
   return <span className={`sl-metric-state is-${state}`}>{STATE_LABELS[state]}</span>;
@@ -58,31 +71,23 @@ function FilterSelect({ label, items, value, onChange }: {
   );
 }
 
-function FormulaParts({ formula }: { formula: MetricFormula }) {
-  const parts = [
-    { label: 'Phép tổng hợp', value: formula.aggregation },
-    { label: 'Giá trị đo', value: formula.measure_column ?? formula.measure_constant ?? '—' },
-    { label: 'Điều kiện lọc dòng', value: formula.condition ?? 'Không có' },
-  ];
-  return (
-    <div className="sl-metrics-formula-parts">
-      {parts.map(part => <div key={part.label}><span>{part.label}</span><code>{part.value}</code></div>)}
-    </div>
-  );
-}
-
 type MetricContractsProps = { databaseId: number | null };
 
 /** Admin workspace listing every saved metric with its review state: propose, approve, revoke and try each metric. */
 export function MetricContracts({ databaseId }: MetricContractsProps) {
-  const [reviewList, setReviewList] = useState<MetricReviewList>({ datasets: [], metrics: [] });
+  const [reviewList, setReviewList] = useState<MetricReviewList>(
+    { datasets: [], metrics: [], users: [], current_user_id: null },
+  );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<MetricReviewState | 'all'>('all');
   const [datasetFilter, setDatasetFilter] = useState('all');
   const [searchText, setSearchText] = useState('');
   const [activeTab, setActiveTab] = useState<DetailTab>('definition');
   const [loading, setLoading] = useState(true);
-  const [pendingAction, setPendingAction] = useState<ContractAction | null>(null);
+  const [openDecision, setOpenDecision] = useState<MetricDecision | null>(null);
+  const [deciding, setDeciding] = useState(false);
+  // Bumped after every change so the history tab fetches the new events.
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -132,44 +137,44 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
     ...metricDatasets.map(dataset => ({ value: String(dataset.id), label: dataset.name })),
   ];
 
-  const runAction = async (action: ContractAction) => {
+  const refreshAfterChange = async () => {
+    setSelectedKey(selectedMetricKey);
+    await load();
+    setHistoryRevision(revision => revision + 1);
+  };
+
+  const decide = async (decision: MetricDecision, reason: string) => {
     if (!selectedMetric) return;
-    const confirmMessage = `Thu hồi bản duyệt của metric "${metricLabel(selectedMetric)}"?`;
-    if (action === 'revoke' && !window.confirm(confirmMessage)) return;
     const { dataset_id: datasetId, metric_id: metricId } = selectedMetric;
-    const endpoints: Record<ContractAction, string> = {
+    const endpoints: Record<MetricDecision, string> = {
       candidate: semanticLayerApi.metricContractCandidate(datasetId, metricId),
       approve: semanticLayerApi.metricContractApprove(datasetId, metricId),
       revoke: semanticLayerApi.metricContractRevoke(datasetId, metricId),
     };
-    setPendingAction(action);
+    setDeciding(true);
     setError('');
     try {
-      await requestJson<MetricContractResponse>(endpoints[action], 'POST', {});
-      setSelectedKey(selectedMetricKey);
-      await load();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Thao tác không thành công.');
+      await requestJson<MetricContractResponse>(endpoints[decision], 'POST', { reason: reason || null });
+      setOpenDecision(null);
+      await refreshAfterChange();
+    } catch (failure) {
+      setOpenDecision(null);
+      setError(failure instanceof Error ? failure.message : 'Thao tác không thành công.');
     } finally {
-      setPendingAction(null);
+      setDeciding(false);
     }
   };
 
   if (databaseId === null) return <p className="sl-metric-muted">Chọn database để xem metric.</p>;
 
-  const contract = selectedMetric?.contract ?? null;
-  const canPropose = selectedMetric ? ['not_started', 'outdated', 'revoked'].includes(selectedMetric.state) : false;
-  const canRevoke = selectedMetric ? ['candidate', 'approved', 'outdated'].includes(selectedMetric.state) : false;
-  const canTry = selectedMetric?.state === 'approved';
+  const state = selectedMetric?.state;
+  const canPropose = state === 'not_started' || state === 'outdated' || state === 'revoked';
+  const canRevoke = state === 'candidate' || state === 'approved' || state === 'outdated';
+  const hasDefinition = Boolean(selectedMetric?.definition);
+  const proposedByViewer = state === 'candidate' && selectedMetric?.contract?.owner_id === reviewList.current_user_id;
+  const canTry = state === 'approved' || state === 'candidate';
   const visibleTab: DetailTab = canTry ? activeTab : 'definition';
-  const actionIcon = (action: ContractAction, icon: React.ReactNode) => (
-    pendingAction === action ? <LoaderCircle className="sl-spin" data-icon="inline-start" /> : icon
-  );
-  const history = contract ? [
-    { label: 'Đề xuất', person: contract.owner_name, time: null },
-    { label: 'Duyệt', person: contract.approver_name, time: contract.approved_at },
-    { label: 'Thu hồi', person: contract.revoker_name, time: contract.revoked_at },
-  ].filter(entry => entry.person) : [];
+  const summary = selectedMetric ? reviewSummary(selectedMetric, reviewList.current_user_id) : '';
 
   return (
     <div className="sl-metrics">
@@ -232,22 +237,30 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
             <header className="sl-metrics-detail-heading">
               <div className="sl-metrics-title">
                 <h3>{metricLabel(selectedMetric)} <StateBadge state={selectedMetric.state} /></h3>
-                <p><code>{selectedMetric.metric_name}</code> · {datasetById.get(selectedMetric.dataset_id)?.name}</p>
+                <p><code>{selectedMetric.metric_name}</code> · {summary}</p>
               </div>
               <div className="sl-metrics-actions">
                 {canPropose ? (
-                  <Button disabled={pendingAction !== null} onClick={() => void runAction('candidate')}>
-                    {actionIcon('candidate', <FilePlus2 data-icon="inline-start" />)} Tạo bản đề xuất
+                  <Button
+                    disabled={deciding || !hasDefinition}
+                    title={hasDefinition ? undefined : 'Nhập định nghĩa nghiệp vụ trước khi đề xuất.'}
+                    onClick={() => setOpenDecision('candidate')}
+                  >
+                    <FilePlus2 data-icon="inline-start" /> Tạo bản đề xuất
                   </Button>
                 ) : null}
-                {selectedMetric.state === 'candidate' ? (
-                  <Button disabled={pendingAction !== null} onClick={() => void runAction('approve')}>
-                    {actionIcon('approve', <Check data-icon="inline-start" />)} Duyệt
+                {state === 'candidate' ? (
+                  <Button
+                    disabled={deciding || proposedByViewer}
+                    title={proposedByViewer ? 'Người đề xuất không thể tự duyệt.' : undefined}
+                    onClick={() => setOpenDecision('approve')}
+                  >
+                    <Check data-icon="inline-start" /> Duyệt
                   </Button>
                 ) : null}
                 {canRevoke ? (
-                  <Button variant="outline" disabled={pendingAction !== null} onClick={() => void runAction('revoke')}>
-                    {actionIcon('revoke', <Ban data-icon="inline-start" />)} Thu hồi
+                  <Button variant="outline" disabled={deciding} onClick={() => setOpenDecision('revoke')}>
+                    <Ban data-icon="inline-start" /> Thu hồi
                   </Button>
                 ) : null}
               </div>
@@ -266,7 +279,7 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
                 role="tab"
                 aria-selected={visibleTab === 'trial'}
                 disabled={!canTry}
-                title={canTry ? undefined : 'Chỉ chạy thử được metric đã duyệt.'}
+                title={canTry ? undefined : 'Chỉ chạy thử được metric đang chờ duyệt hoặc đã duyệt.'}
                 onClick={() => setActiveTab('trial')}
               >
                 Chạy thử
@@ -279,43 +292,24 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
                 dataset={datasetById.get(selectedMetric.dataset_id)}
               />
             ) : (
-              <div className="sl-metrics-definition" role="tabpanel">
-                <p className="sl-metrics-hint">{STATE_HINTS[selectedMetric.state]}</p>
-                {selectedMetric.ineligibility ? (
-                  <div className="sl-metric-warning" role="note">
-                    <AlertCircle />
-                    <div><strong>Lý do chưa đủ điều kiện</strong><span>{selectedMetric.ineligibility}</span></div>
-                  </div>
-                ) : null}
-                {selectedMetric.description ? (
-                  <section className="sl-metrics-section">
-                    <h4>Mô tả</h4>
-                    <p className="sl-metrics-description">{selectedMetric.description}</p>
-                  </section>
-                ) : null}
-                <section className="sl-metrics-section">
-                  <h4>Công thức</h4>
-                  {selectedMetric.formula ? <FormulaParts formula={selectedMetric.formula} /> : null}
-                  <pre className="sl-metrics-expression">{selectedMetric.expression || '—'}</pre>
-                </section>
-                {history.length > 0 ? (
-                  <section className="sl-metrics-section">
-                    <h4>Lịch sử duyệt</h4>
-                    <ol className="sl-metrics-history">
-                      {history.map(entry => (
-                        <li key={entry.label}>
-                          <strong>{entry.label}</strong> bởi {entry.person}
-                          {entry.time ? <span> · {formatTime(entry.time)}</span> : null}
-                        </li>
-                      ))}
-                    </ol>
-                  </section>
-                ) : null}
-              </div>
+              <MetricDefinitionPanel
+                key={selectedMetricKey}
+                metric={selectedMetric}
+                users={reviewList.users}
+                historyRevision={historyRevision}
+                onDefinitionSaved={() => void refreshAfterChange()}
+              />
             )}
           </>
         )}
       </section>
+      <MetricDecisionDialog
+        decision={openDecision}
+        metricLabel={selectedMetric ? metricLabel(selectedMetric) : ''}
+        busy={deciding}
+        onConfirm={reason => { if (openDecision) void decide(openDecision, reason); }}
+        onClose={() => setOpenDecision(null)}
+      />
     </div>
   );
 }

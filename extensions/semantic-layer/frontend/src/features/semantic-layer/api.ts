@@ -29,6 +29,12 @@ export const semanticLayerApi = {
   metricContractRevoke: (datasetId: number, metricId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/contract/revoke`
   ),
+  metricContractEvents: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/contract/events`
+  ),
+  metricDefinition: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/definition`
+  ),
   metricContractExecute: (datasetId: number, metricId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/semantic-query/execute`
   ),

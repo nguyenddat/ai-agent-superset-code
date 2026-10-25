@@ -299,24 +299,43 @@
 .sl-metrics-title { min-width: 0; }
 .sl-metrics-title h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--sl-text); font-size: 17px; font-weight: 600; }
 .sl-metrics-title p { margin: 3px 0 0; color: var(--sl-muted); font-size: 12px; }
-.sl-metrics-title code, .sl-metrics-formula-parts code, .sl-metrics-expression { font-family: var(--font-mono, monospace); }
+.sl-metrics-title code, .sl-metrics-formula-summary code, .sl-metrics-expression { font-family: var(--font-mono, monospace); }
 .sl-metrics-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .sl-metrics-tabs { display: flex; gap: 4px; margin-top: 10px; padding: 0 16px; border-bottom: 1px solid var(--sl-border); }
 .sl-metrics-tabs button { margin-bottom: -1px; padding: 8px 10px; border: 0; border-bottom: 2px solid transparent; color: var(--sl-text-secondary); background: transparent; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
 .sl-metrics-tabs button[aria-selected="true"] { border-bottom-color: var(--sl-accent); color: var(--sl-text); }
 .sl-metrics-tabs button:disabled { color: var(--sl-muted); cursor: not-allowed; opacity: 0.6; }
 .sl-metrics-definition { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 18px; overflow: auto; padding: 16px; }
-.sl-metrics-hint { margin: 0; color: var(--sl-text-secondary); font-size: 13px; }
 .sl-metrics-section { display: flex; flex-direction: column; gap: 8px; }
 .sl-metrics-section h4 { margin: 0; color: var(--sl-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .sl-metrics-description { margin: 0; color: var(--sl-text); font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-.sl-metrics-formula-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
-.sl-metrics-formula-parts div { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--sl-border); border-radius: 8px; }
-.sl-metrics-formula-parts span { color: var(--sl-muted); font-size: 11px; }
-.sl-metrics-formula-parts code { color: var(--sl-text); font-size: 13px; overflow-wrap: anywhere; }
+.sl-metrics-formula-summary { margin: 0; color: var(--sl-text); font-size: 13px; line-height: 1.7; }
+.sl-metrics-formula-summary code { padding: 1px 5px; border-radius: 4px; background: var(--sl-surface-muted); font-size: 12px; }
 .sl-metrics-expression { margin: 0; padding: 10px 12px; overflow-x: auto; border-radius: 8px; color: var(--sl-text-secondary); background: var(--sl-surface-muted); font-size: 12px; white-space: pre-wrap; }
-.sl-metrics-history { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 18px; color: var(--sl-text); font-size: 13px; }
-.sl-metrics-history span { color: var(--sl-muted); }
+.sl-metrics-history { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; list-style: none; }
+.sl-metrics-history li { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 0 0 14px 20px; color: var(--sl-text); font-size: 13px; }
+.sl-metrics-history li::before { position: absolute; top: 5px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--sl-event-color, var(--sl-muted)); content: ""; }
+.sl-metrics-history li:not(:last-child)::after { position: absolute; top: 18px; bottom: 2px; left: 6px; width: 1px; background: var(--sl-border); content: ""; }
+.sl-metrics-history li.is-candidate { --sl-event-color: #d97706; }
+.sl-metrics-history li.is-approve { --sl-event-color: #16a34a; }
+.sl-metrics-history li.is-revoke { --sl-event-color: #dc2626; }
+.sl-metrics-history li.is-definition { --sl-event-color: var(--sl-accent); }
+.sl-metrics-history time { color: var(--sl-muted); font-size: 12px; }
+.sl-metrics-history blockquote { margin: 2px 0 0; padding: 6px 10px; border-left: 2px solid var(--sl-border); color: var(--sl-text-secondary); background: var(--sl-surface-muted); white-space: pre-wrap; }
+.sl-metrics-history code { align-self: flex-start; padding: 2px 6px; border-radius: 4px; color: var(--sl-text-secondary); background: var(--sl-surface-muted); font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; }
+.sl-metrics-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.sl-metrics-disclosure { display: inline-flex; align-self: flex-start; align-items: center; gap: 4px; padding: 0; border: 0; color: var(--sl-muted); background: transparent; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; }
+.sl-metrics-disclosure:hover { color: var(--sl-text); }
+.sl-metrics-disclosure svg { width: 14px; height: 14px; transition: transform 0.15s; }
+.sl-metrics-disclosure[aria-expanded="true"] svg { transform: rotate(90deg); }
+.sl-metrics-facts { display: flex; flex-wrap: wrap; gap: 6px 24px; margin: 0; font-size: 13px; }
+.sl-metrics-facts div { display: flex; gap: 6px; }
+.sl-metrics-facts dt { color: var(--sl-muted); }
+.sl-metrics-facts dd { margin: 0; color: var(--sl-text); font-weight: 500; }
+.sl-metric-empty-definition { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border: 1px dashed var(--sl-border); border-radius: 8px; color: var(--sl-text-secondary); font-size: 13px; }
+.sl-metric-definition-editor { display: flex; flex-direction: column; gap: 10px; }
+.sl-metric-definition-editor label, .sl-metric-decision-field { display: flex; flex-direction: column; gap: 5px; color: var(--sl-text-secondary); font-size: 12px; font-weight: 500; }
+.sl-metric-definition-row { display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 280px); gap: 10px; }
 .sl-metric-muted { margin: 0; color: var(--sl-muted); font-size: 12px; }
 .sl-metric-muted svg { width: 14px; height: 14px; vertical-align: middle; }
 .sl-metric-error, .sl-metric-warning { --sl-state-color: #dc2626; display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--sl-state-color) 45%, transparent); border-radius: 7px; color: var(--sl-text); background: color-mix(in srgb, var(--sl-state-color) 10%, transparent); font-size: 12px; }

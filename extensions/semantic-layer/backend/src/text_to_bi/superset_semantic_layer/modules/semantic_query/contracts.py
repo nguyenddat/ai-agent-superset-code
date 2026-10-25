@@ -285,10 +285,17 @@ def build_metric_chart_payload(dataset: Any, metric: Any, query: Any, max_rows: 
 
 
 def execute_approved_chart_query(
-    contract: Any, dataset: Any, metric: Any, query: Any, max_rows: int, runner: Any
+    contract: Any, dataset: Any, metric: Any, query: Any, max_rows: int, runner: Any, allow_candidate: bool = False
 ) -> Any:
-    """Gate the ChartData runner before it can validate or execute anything."""
-    if not contract_is_approved_current(contract, dataset, metric):
+    """Gate the ChartData runner before it can validate or execute anything.
+
+    ``allow_candidate`` lets a reviewer preview a candidate whose metric is unchanged since it was proposed; callers
+    grant it to administrators only, so nobody else can run a metric before it is approved.
+    """
+    previewable = (
+        allow_candidate and contract is not None and metric_contract_state(contract, dataset, metric) == "candidate"
+    )
+    if not previewable and not contract_is_approved_current(contract, dataset, metric):
         raise PermissionError("A current approved metric contract is required.")
     return runner(build_metric_chart_payload(dataset, metric, query, max_rows))
 

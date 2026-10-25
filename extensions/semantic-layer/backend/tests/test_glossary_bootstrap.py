@@ -138,6 +138,8 @@ def _migration_namespace():
         "BusinessCanvas",
         "LineageCanvas",
         "MetricContract",
+        "MetricContractEvent",
+        "MetricDefinition",
         "RelationshipContract",
         "GlossaryTerm",
         "GlossaryTermRevision",

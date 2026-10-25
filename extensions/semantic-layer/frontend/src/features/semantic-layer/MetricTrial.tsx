@@ -145,6 +145,17 @@ export function MetricTrial({ metric, dataset }: MetricTrialProps) {
 
   return (
     <div className="sl-metric-trial" role="tabpanel">
+      {metric.state === 'candidate' ? (
+        <div className="sl-metric-warning" role="note">
+          <AlertCircle />
+          <div>
+            <strong>Bản xem trước</strong>
+            <span>
+              Metric chưa được duyệt; chỉ quản trị viên chạy được, AI Agent và người dùng khác chưa dùng được.
+            </span>
+          </div>
+        </div>
+      ) : null}
       <div className="sl-metric-trial-config">
         <span className="sl-metric-trial-label">Chiều phân tích</span>
         <div className="sl-metric-trial-field">

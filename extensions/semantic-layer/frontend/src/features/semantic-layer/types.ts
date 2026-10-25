@@ -38,7 +38,33 @@ export type MetricContractExecution = {
   truncated: boolean;
   /** The SQL Superset ran, RLS included; only administrators receive it. */
   sql?: string | null;
+  /** True when an administrator ran a candidate that is not approved yet. */
+  preview?: boolean;
 };
+
+/** What a metric means to the business; a metric needs one before it can be proposed. */
+export type MetricDefinition = {
+  business_definition: string;
+  unit: string | null;
+  steward_id: number | null;
+  steward_name: string | null;
+};
+
+export type MetricDefinitionPayload = Pick<MetricDefinition, 'business_definition' | 'unit' | 'steward_id'>;
+
+export type MetricContractEventAction = 'candidate' | 'approve' | 'revoke' | 'definition';
+
+export type MetricContractEvent = {
+  id: number;
+  action: MetricContractEventAction;
+  actor_id: number | null;
+  actor_name: string | null;
+  reason: string | null;
+  expression: string | null;
+  created_at: string | null;
+};
+
+export type MetricUser = { id: number; name: string };
 
 /** Review state of a metric: `outdated` is a candidate or approval whose metric changed after it was recorded. */
 export type MetricReviewState = 'not_started' | 'ineligible' | 'candidate' | 'approved' | 'outdated' | 'revoked';
@@ -63,6 +89,7 @@ export type MetricReviewItem = {
   ineligibility: string | null;
   state: MetricReviewState;
   contract: (MetricContract & { owner_name: string | null; approver_name: string | null; revoker_name: string | null }) | null;
+  definition: MetricDefinition | null;
 };
 
 /** A dataset column a metric run may group by or filter on. */
@@ -77,7 +104,12 @@ export type MetricQueryColumn = {
 
 export type MetricQueryDataset = { id: number; name: string; columns: MetricQueryColumn[] };
 
-export type MetricReviewList = { datasets: MetricQueryDataset[]; metrics: MetricReviewItem[] };
+export type MetricReviewList = {
+  datasets: MetricQueryDataset[];
+  metrics: MetricReviewItem[];
+  users: MetricUser[];
+  current_user_id: number | null;
+};
 
 export type MetricFilterOperator = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'IN' | 'NOT IN';
 

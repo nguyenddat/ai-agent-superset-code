@@ -32,7 +32,7 @@ from ...models.expert_rule import ExpertRule, ExpertRuleAuditEvent, ExpertRuleLi
 from ...models.glossary_term import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
 from ...models.lineage_canvas import LineageCanvas
 from ...models.lineage_edge import LineageEdge
-from ...models.metric_contract import MetricContract
+from ...models.metric_contract import MetricContract, MetricContractEvent, MetricDefinition
 from ...models.relationship_contract import RelationshipContract
 from ..business_model.service import (
     EDGE_KINDS,
@@ -106,6 +106,9 @@ LINEAGE_EDGE_STYLES = {"orthogonal", "straight", "curved"}
 LINEAGE_MAX_ITEMS = 5_000
 LINEAGE_MAX_POINTS = 50
 SEMANTIC_QUERY_MAX_ROWS = 1_000
+METRIC_REVIEW_REASON_MAX_LENGTH = 2_000
+METRIC_DEFINITION_MAX_LENGTH = 4_000
+METRIC_UNIT_MAX_LENGTH = 64
 UTC_ZONE = timezone.utc
 _dictionary_tables_lock = threading.Lock()
 # A suggestion run for a dataset older than this is treated as abandoned, so a lost run cannot block the dataset.
@@ -474,6 +477,8 @@ def _migrate_dictionary_tables():
     BusinessCanvas.__table__.create(bind=db.engine, checkfirst=True)
     LineageCanvas.__table__.create(bind=db.engine, checkfirst=True)
     MetricContract.__table__.create(bind=db.engine, checkfirst=True)
+    MetricContractEvent.__table__.create(bind=db.engine, checkfirst=True)
+    MetricDefinition.__table__.create(bind=db.engine, checkfirst=True)
     RelationshipContract.__table__.create(bind=db.engine, checkfirst=True)
     # Glossary parent tables must exist before immutable revisions, links, and audit evidence.
     GlossaryTerm.__table__.create(bind=db.engine, checkfirst=True)
@@ -785,6 +790,75 @@ class SemanticLayerAPI(RestApi):
         return self.response(200, is_admin=True)
 
     @staticmethod
+    def _user_names() -> Any:
+        """A per-request lookup from user ID to display name: full name, else username."""
+        names: dict[int, str | None] = {}
+
+        def user_name(user_id: int | None) -> str | None:
+            if user_id is None:
+                return None
+            if user_id not in names:
+                user = security_manager.get_user_by_id(user_id)
+                names[user_id] = (user.get_full_name().strip() or user.username) if user else None
+            return names[user_id]
+
+        return user_name
+
+    @staticmethod
+    def _active_users() -> list[dict[str, Any]]:
+        """Active Superset users an administrator can name as a metric's steward."""
+        user_model = security_manager.user_model
+        users = db.session.query(user_model).filter(user_model.active.is_(True)).order_by(user_model.username).all()
+        return [{"id": user.id, "name": user.get_full_name().strip() or user.username} for user in users]
+
+    @staticmethod
+    def _metric_definition(dataset_id: int, metric_id: int) -> MetricDefinition | None:
+        return (
+            db.session.query(MetricDefinition)
+            .filter(MetricDefinition.dataset_id == dataset_id, MetricDefinition.metric_id == metric_id)
+            .one_or_none()
+        )
+
+    @staticmethod
+    def _serialize_metric_definition(definition: MetricDefinition | None, user_name: Any) -> dict[str, Any] | None:
+        if definition is None:
+            return None
+        return {
+            "business_definition": definition.business_definition,
+            "unit": definition.unit,
+            "steward_id": definition.steward_id,
+            "steward_name": user_name(definition.steward_id),
+        }
+
+    @staticmethod
+    def _review_reason() -> str | None:
+        """The optional note or reason a reviewer sends with a metric decision, trimmed; blank means none."""
+        body = request.get_json(silent=True)
+        reason = body.get("reason") if isinstance(body, dict) else None
+        if reason is None:
+            return None
+        if not isinstance(reason, str) or len(reason) > METRIC_REVIEW_REASON_MAX_LENGTH:
+            raise ValueError(f"Lý do phải là văn bản tối đa {METRIC_REVIEW_REASON_MAX_LENGTH} ký tự.")
+        return reason.strip() or None
+
+    @staticmethod
+    def _record_metric_event(
+        dataset_id: int, metric_id: int, action: str, reason: str | None = None, contract: Any = None
+    ) -> None:
+        """Append one review event. Callers hash the metric first: adding a row can autoflush the session."""
+        event = MetricContractEvent(
+            dataset_id=dataset_id,
+            metric_id=metric_id,
+            action=action,
+            actor_id=current_user.id,
+            reason=reason,
+            expression=contract.expression if contract is not None else None,
+            expression_hash=contract.expression_hash if contract is not None else None,
+            created_at=datetime.now(tz=timezone.utc),
+        )
+        db.session.add(event)
+
+    @staticmethod
     def _query_dataset(dataset: SqlaTable) -> dict[str, Any]:
         """A dataset with the columns a metric run may group or filter by: active, physical and flagged in Superset."""
         query_columns = [
@@ -823,16 +897,13 @@ class SemanticLayerAPI(RestApi):
             (contract.dataset_id, contract.metric_id): contract
             for contract in db.session.query(MetricContract).filter(MetricContract.dataset_id.in_(dataset_ids)).all()
         } if dataset_ids else {}
-        user_names: dict[int, str | None] = {}
-
-        def user_name(user_id: int | None) -> str | None:
-            if user_id is None:
-                return None
-            if user_id not in user_names:
-                user = security_manager.get_user_by_id(user_id)
-                user_names[user_id] = (user.get_full_name().strip() or user.username) if user else None
-            return user_names[user_id]
-
+        definitions = {
+            (definition.dataset_id, definition.metric_id): definition
+            for definition in db.session.query(MetricDefinition)
+            .filter(MetricDefinition.dataset_id.in_(dataset_ids))
+            .all()
+        } if dataset_ids else {}
+        user_name = self._user_names()
         metrics = []
         for dataset in datasets:
             for metric in dataset.metrics:
@@ -859,9 +930,18 @@ class SemanticLayerAPI(RestApi):
                             "approver_name": user_name(contract.approver_id),
                             "revoker_name": user_name(contract.revoker_id),
                         } if contract else None,
+                        "definition": self._serialize_metric_definition(
+                            definitions.get((dataset.id, metric.id)), user_name
+                        ),
                     }
                 )
-        return self.response(200, datasets=[self._query_dataset(dataset) for dataset in datasets], metrics=metrics)
+        return self.response(
+            200,
+            datasets=[self._query_dataset(dataset) for dataset in datasets],
+            metrics=metrics,
+            users=self._active_users(),
+            current_user_id=current_user.id,
+        )
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/candidate", methods=("POST",))
     @protect()
@@ -882,6 +962,13 @@ class SemanticLayerAPI(RestApi):
             return self.response(404, message="Metric not found in this dataset.")
         if ineligibility := metric_contract_ineligibility(dataset, metric):
             return self.response_400(message=ineligibility)
+        try:
+            note = self._review_reason()
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        # The AI Agent answers with this definition, so a metric must say what it means before anyone reviews it.
+        if self._metric_definition(dataset_id, metric_id) is None:
+            return self.response_400(message="Nhập định nghĩa nghiệp vụ trước khi đề xuất metric.")
         contract = self._contract_for(dataset_id, metric_id)
         if contract is not None and contract.status == "approved" and contract_is_approved_current(contract, dataset, metric):
             return self.response(409, message="Revoke the current approved contract before creating another candidate.")
@@ -890,6 +977,8 @@ class SemanticLayerAPI(RestApi):
         expression_hash = metric_contract_hash(dataset, metric)
         if contract is None:
             contract = MetricContract(dataset_id=dataset_id, metric_id=metric_id, owner_id=current_user.id)
+        # Whoever proposes this candidate owns it, even when an earlier proposal came from someone else.
+        contract.owner_id = current_user.id
         contract.metric_name = metric.metric_name
         contract.expression = metric.expression
         contract.expression_hash = expression_hash
@@ -899,6 +988,7 @@ class SemanticLayerAPI(RestApi):
         contract.approved_at = None
         contract.revoker_id = None
         contract.revoked_at = None
+        self._record_metric_event(dataset_id, metric_id, "candidate", note, contract)
         db.session.commit()
         return self.response(201, contract=self._serialize_metric_contract(contract, dataset, metric))
 
@@ -921,13 +1011,21 @@ class SemanticLayerAPI(RestApi):
             return self.response(404, message="Metric contract not found in this dataset.")
         if contract.status != "candidate":
             return self.response_400(message="Only a candidate metric contract can be approved.")
+        # Approval means a second person checked the formula, so the proposer can never approve it.
+        if contract.owner_id is not None and contract.owner_id == current_user.id:
+            return self.response(403, message="Người đề xuất không thể tự duyệt; cần một quản trị viên khác duyệt.")
         if ineligibility := metric_contract_ineligibility(dataset, metric):
             return self.response_400(message=ineligibility)
         if contract.expression_hash != metric_contract_hash(dataset, metric):
             return self.response_400(message="Metric changed; create a new candidate before approval.")
+        try:
+            note = self._review_reason()
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
         contract.status = "approved"
         contract.approver_id = current_user.id
         contract.approved_at = datetime.now(tz=timezone.utc)
+        self._record_metric_event(dataset_id, metric_id, "approve", note, contract)
         db.session.commit()
         return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
 
@@ -948,11 +1046,92 @@ class SemanticLayerAPI(RestApi):
         contract = self._contract_for(dataset_id, metric_id) if metric else None
         if metric is None or contract is None:
             return self.response(404, message="Metric contract not found in this dataset.")
+        if contract.status == "revoked":
+            return self.response_400(message="Metric này đã bị thu hồi.")
+        try:
+            reason = self._review_reason()
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        if reason is None:
+            return self.response_400(message="Nhập lý do thu hồi.")
         contract.status = "revoked"
         contract.revoker_id = current_user.id
         contract.revoked_at = datetime.now(tz=timezone.utc)
+        self._record_metric_event(dataset_id, metric_id, "revoke", reason, contract)
         db.session.commit()
         return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/definition", methods=("PUT",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @_csrf_protected
+    @_rollback_on_error
+    def save_metric_definition(self, dataset_id: int, metric_id: int):
+        """Save a metric's business definition, unit and steward, and log the edit in its review history."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        metric = self._dataset_metric(dataset, metric_id) if dataset else None
+        if metric is None:
+            return self.response(404, message="Metric not found in this dataset.")
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return self.response_400(message="A JSON object is required.")
+        business_definition = body.get("business_definition")
+        unit, steward_id = body.get("unit"), body.get("steward_id")
+        if not isinstance(business_definition, str) or not business_definition.strip():
+            return self.response_400(message="Định nghĩa nghiệp vụ không được để trống.")
+        if len(business_definition) > METRIC_DEFINITION_MAX_LENGTH:
+            return self.response_400(message=f"Định nghĩa nghiệp vụ tối đa {METRIC_DEFINITION_MAX_LENGTH} ký tự.")
+        if unit is not None and (not isinstance(unit, str) or len(unit) > METRIC_UNIT_MAX_LENGTH):
+            return self.response_400(message=f"Đơn vị phải là văn bản tối đa {METRIC_UNIT_MAX_LENGTH} ký tự.")
+        valid_steward_id = isinstance(steward_id, int) and not isinstance(steward_id, bool)
+        if steward_id is not None and (not valid_steward_id or security_manager.get_user_by_id(steward_id) is None):
+            return self.response_400(message="Người phụ trách không tồn tại.")
+        definition = self._metric_definition(dataset_id, metric_id)
+        if definition is None:
+            definition = MetricDefinition(dataset_id=dataset_id, metric_id=metric_id)
+        definition.business_definition = business_definition.strip()
+        definition.unit = (unit or "").strip() or None
+        definition.steward_id = steward_id
+        db.session.add(definition)
+        self._record_metric_event(dataset_id, metric_id, "definition")
+        db.session.commit()
+        return self.response(200, definition=self._serialize_metric_definition(definition, self._user_names()))
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/events", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def list_metric_contract_events(self, dataset_id: int, metric_id: int):
+        """A metric's review history, newest first."""
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        events = (
+            db.session.query(MetricContractEvent)
+            .filter(MetricContractEvent.dataset_id == dataset_id, MetricContractEvent.metric_id == metric_id)
+            .order_by(MetricContractEvent.created_at.desc(), MetricContractEvent.id.desc())
+            .all()
+        )
+        user_name = self._user_names()
+        return self.response(
+            200,
+            events=[
+                {
+                    "id": event.id,
+                    "action": event.action,
+                    "actor_id": event.actor_id,
+                    "actor_name": user_name(event.actor_id),
+                    "reason": event.reason,
+                    "expression": event.expression,
+                    "created_at": event.created_at.isoformat() if event.created_at else None,
+                }
+                for event in events
+            ],
+        )
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/semantic-query/execute", methods=("POST",))
     @protect()
@@ -961,7 +1140,7 @@ class SemanticLayerAPI(RestApi):
     @_csrf_protected
     @_rollback_on_error
     def execute_metric_contract(self, dataset_id: int, metric_id: int):
-        """Execute a current approved metric exclusively through Superset ChartData."""
+        """Run a current approved metric, or let an administrator preview a candidate, through Superset ChartData."""
         _ensure_dictionary_tables()
         dataset = db.session.get(SqlaTable, dataset_id)
         if dataset is None:
@@ -984,8 +1163,9 @@ class SemanticLayerAPI(RestApi):
                 command.validate()
                 return command.run()["queries"][0]
 
+            # Administrators may preview a candidate so a reviewer sees real numbers before approving it.
             result = execute_approved_chart_query(
-                contract, dataset, metric, body, _semantic_query_row_cap(), run_chart
+                contract, dataset, metric, body, _semantic_query_row_cap(), run_chart, allow_candidate=self._is_admin()
             )
         except PermissionError as ex:
             db.session.rollback()
@@ -1010,6 +1190,7 @@ class SemanticLayerAPI(RestApi):
             truncated=len(rows) > _semantic_query_row_cap(),
             # The SQL Superset ran, RLS predicates included, so only administrators see it.
             sql=result.get("query") if self._is_admin() else None,
+            preview=contract is not None and contract.status == "candidate",
         )
 
     @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
