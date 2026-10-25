@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Response, request, stream_with_context
 from flask_appbuilder.api import expose, permission_name, protect, safe
@@ -16,11 +16,13 @@ from ...core.chat_models import get_chat_model
 from ...models.question_log import AgentChatSession, AgentQuestion, ensure_question_tables
 from ..definitions.route import user_definitions
 from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, recent_history, run_agent
-from .semantic_source import SemanticSourceError, load_semantic_catalog
+from .semantic_source import SemanticSourceError, cached_semantic_catalog, run_metric_query
 
 logger = logging.getLogger(__name__)
 MAX_QUESTION_LENGTH = 2000
 SESSION_TITLE_LENGTH = 80
+# "Hôm nay" and "tuần này" are read in Vietnam's time, whatever the server's clock zone.
+BUSINESS_TIMEZONE = timezone(timedelta(hours=7))
 
 
 def _event(name: str, data: dict) -> str:
@@ -99,6 +101,7 @@ def _save_question(
             metrics=outcome.metrics,
             expert_rules=outcome.expert_rules,
             missing=[] if error else outcome.missing,
+            query_result=None if error else outcome.result,
             requires_expert_rule=None if error else outcome.requires_expert_rule,
             suggestions=None if error else outcome.suggestions,
             tool_calls=tool_calls,
@@ -193,8 +196,9 @@ class TextToBIAgentAPI(RestApi):
         session_id = chat_session.id
         history = _session_history(session_id, retry_of)
         user_definitions = _user_definitions(user_id, dashboard_id)
-        # The Semantic Layer is read as this user, so forward their session rather than a service account.
+        # The Semantic Layer is read and its metrics run as this user, so forward their session and CSRF token.
         cookie_header = request.headers.get("Cookie", "")
+        csrf_token = request.headers.get("X-CSRFToken", "")
 
         @stream_with_context
         def events():
@@ -204,7 +208,12 @@ class TextToBIAgentAPI(RestApi):
             error = None
             yield _event("session", session_payload)
             pipeline = run_agent(
-                question, history, get_chat_model(), lambda: load_semantic_catalog(cookie_header), user_definitions,
+                question, history, get_chat_model(), lambda: cached_semantic_catalog(user_id, cookie_header),
+                user_definitions,
+                run_metric=lambda dataset_id, metric_id, query: run_metric_query(
+                    dataset_id, metric_id, query, cookie_header, csrf_token,
+                ),
+                today=datetime.now(BUSINESS_TIMEZONE).date(),
             )
             try:
                 while True:
@@ -233,6 +242,8 @@ class TextToBIAgentAPI(RestApi):
                 "missing": [] if error else outcome.missing,
                 "clarifications": [] if error or question_id is None else outcome.clarifications,
                 "user_definitions": [] if error else outcome.user_definitions,
+                "result": None if error else outcome.result,
+                "query_error": None if error else outcome.query_error,
             })
 
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}

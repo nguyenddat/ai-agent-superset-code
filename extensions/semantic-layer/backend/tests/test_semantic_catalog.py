@@ -42,7 +42,9 @@ def test_catalog_hides_inaccessible_stale_and_sensitive_contract_details():
                 "metric_id": 19, "metric_name": "average_temperature", "verbose_name": "Average", "description": "Safe",
                 "d3format": None,
             }],
-            "dimensions": [{"name": "city", "groupby": True, "filterable": True}],
+            "dimensions": [{
+                "name": "city", "label": None, "type": "TEXT", "temporal": False, "groupby": True, "filterable": True,
+            }],
         }
     ]
     assert "expression" not in str(result)

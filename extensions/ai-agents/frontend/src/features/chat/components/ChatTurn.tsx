@@ -4,16 +4,20 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChatStreamEvent, ClarificationState, ConfirmedDefinition, DefinitionDraft, DefinitionKind, MissingKind,
-  QuestionStatus, StoredTurn, UsedDefinition,
+  QueryResult, QuestionStatus, StoredTurn, UsedDefinition,
 } from '../../../shared/api/chat';
+import { QueryResultView } from './QueryResultView';
 
 const TOOL_LABELS: Record<string, string> = {
-  rewrite_question: 'Viết lại câu hỏi',
   load_semantic_catalog: 'Tải dữ liệu quản trị nghiệp vụ',
+  understand_question: 'Hiểu câu hỏi, chọn thuật ngữ, metric, rule và lập truy vấn',
+  query_metrics: 'Truy vấn số liệu',
+  propose_missing_items: 'Đề xuất phần còn thiếu',
+  // Steps of conversations answered before the steps were merged.
+  rewrite_question: 'Viết lại câu hỏi',
   identify_glossary_terms: 'Xác định thuật ngữ',
   identify_metrics: 'Xác định metric',
   identify_expert_rules: 'Phân loại câu hỏi và xác định expert rule',
-  propose_missing_items: 'Đề xuất phần còn thiếu',
 };
 
 const MISSING_LABELS: Record<MissingKind, string> = {
@@ -52,6 +56,8 @@ export type Turn = {
   /** Set on the answer given again after a confirmation: the question it answers again. */
   retryOf: number | null;
   usedDefinitions: UsedDefinition[];
+  /** What the approved metrics answered, shown under the answer. */
+  result: QueryResult | null;
 };
 
 function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
@@ -356,6 +362,7 @@ export function TurnView(
           <p className="ai-thinking"><LoaderCircle className="ai-spin" aria-hidden="true" /> Đang xử lý…</p>
         )}
         {turn.state === 'streaming' && turn.answer && <span className="ai-caret" aria-hidden="true" />}
+        {turn.result && <QueryResultView result={turn.result} />}
         {turn.error && <p className="ai-outcome is-failed">{turn.error}</p>}
         {turn.state === 'stopped' && <p className="ai-outcome">Đã dừng.</p>}
         {turn.outcome && <OutcomeBadge turn={turn} outcome={turn.outcome} />}
@@ -386,6 +393,7 @@ export function turnFromStored(stored: StoredTurn): Turn {
     clarificationState: stored.clarification_state,
     retryOf: stored.retry_of,
     usedDefinitions: [],
+    result: stored.result ?? null,
   };
 }
 
@@ -393,7 +401,7 @@ export function turnFromStored(stored: StoredTurn): Turn {
 export function newTurn(question: string, retryOf: number | null = null): Turn {
   return {
     id: Date.now(), question, toolCalls: [], answer: '', state: 'streaming', clarifications: [],
-    clarificationState: null, retryOf, usedDefinitions: [],
+    clarificationState: null, retryOf, usedDefinitions: [], result: null,
   };
 }
 
@@ -409,12 +417,14 @@ export function applyStreamEvent(turn: Turn, event: ChatStreamEvent): Turn {
         : toolCall);
       return { ...turn, toolCalls };
     }
+    case 'result':
+      return { ...turn, result: event.data };
     case 'token':
       return { ...turn, answer: turn.answer + event.data.text };
     case 'error':
       return { ...turn, error: event.data.message };
     case 'done': {
-      const { question_id: questionId, status, missing, clarifications, user_definitions: used } = event.data;
+      const { question_id: questionId, status, missing, clarifications, user_definitions: used, result } = event.data;
       return {
         ...turn,
         state: turn.error ? 'error' : 'done',
@@ -423,6 +433,7 @@ export function applyStreamEvent(turn: Turn, event: ChatStreamEvent): Turn {
         clarifications,
         clarificationState: clarifications.length > 0 ? 'pending' : null,
         usedDefinitions: used,
+        result: result ?? turn.result,
       };
     }
     default:

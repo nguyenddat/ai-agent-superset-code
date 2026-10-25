@@ -19,6 +19,8 @@ def get_chat_model() -> ChatOpenAI:
         model=MODEL_NAME,
         temperature=0.0,
         max_tokens=4096,
+        # Each step's instructions spell out what to decide, so long hidden reasoning only adds seconds to the answer.
+        reasoning_effort="low",
         api_key=api_key,
         base_url="https://openrouter.ai/api/v1",
     )

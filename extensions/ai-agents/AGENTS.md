@@ -45,51 +45,71 @@ administrators, in the "Thiếu metric" tab.
 
 ## What the agent does
 
-The agent does not query data yet. For each question it works out which
-governed business content the question is about, answers with that, and logs
-the question so administrators can fill the gaps:
+For each question the agent works out which governed business content it is
+about, runs the approved metrics through the Semantic Layer, answers with the
+numbers, and logs the question so administrators can fill the gaps:
 
 1. The browser sends the question and its conversation; the server reads the
    conversation's last three answered turns from the log.
-2. `rewrite_question` turns a follow-up ("Còn Huế thì sao?") into a standalone
-   question.
-3. `load_semantic_catalog` reads the Semantic Layer's consumer endpoints
-   (`/semantic-catalog`, `/glossary/discovery`, `/expert-rules/discover`) over
-   HTTP inside the container, forwarding the user's session cookie, so the
-   agent only sees approved content on datasets that user may access.
-4. `identify_glossary_terms`, `identify_metrics` and `identify_expert_rules`
-   ask the model to pick from those candidates; IDs it invents are dropped.
-   Each step sees the candidates' definitions, synonyms and units, and later
-   steps see the full definitions of what earlier steps chose.
-   `identify_glossary_terms` also lists `undefined_concepts`: business
-   concepts in the question that no approved term, metric or rule defines (time,
-   place and aggregation words do not count). Only those make a glossary term
-   missing, so a question a metric already defines needs no term.
-   `identify_expert_rules` also classifies the question: `qualitative` when it
-   is worded by perception with a vague threshold (lớn, nhỏ, đông, vắng…) that
-   an expert must pin down, otherwise `quantitative`. Only a qualitative
-   question needs an expert rule.
-   The user's own definitions on the dashboard are candidates too
-   (`user_definition_ids`, `user_rule_ids`).
-5. `propose_missing_items` runs only when something is missing: the questions
-   back to the user for a missing term or rule (`clarifications`) and a metric
-   proposal for administrators (`suggestions`). A failure here is reported but
-   does not stop the answer.
-6. The final answer streams as tokens, written for a business user: what was
-   asked, and the metric and threshold it will be answered with, naming whether
-   it is the business's shared definition or the user's own.
+2. `load_semantic_catalog` reads the Semantic Layer's consumer endpoints
+   (`/semantic-catalog`, `/glossary/discovery`, `/expert-rules/discover`, then
+   `/dataset/<id>/dimension-members` for each dataset with approved metrics) in
+   parallel over HTTP inside the container, forwarding the user's session
+   cookie, so the agent only sees approved content on datasets that user may
+   access. The catalog is cached per user for 60 seconds.
+3. `understand_question` is one model call that does what used to be four
+   steps: it rewrites a follow-up into a standalone question; picks the glossary
+   terms, metrics, expert rules and the user's own definitions the question is
+   about (IDs it invents are dropped); lists `undefined_concepts` (business
+   concepts nothing defines; time, place and aggregation words do not count);
+   classifies the question as `qualitative` (worded by perception with a vague
+   threshold, so it needs an expert rule) or `quantitative`; and plans the
+   metric query. The plan names the dataset, metrics, dimensions and filters
+   tagged by source: `time` (dates computed from today in Vietnam's time),
+   `place` (key values found through the dataset's labelled values, so "Hà Nội"
+   becomes `thanh_pho_key = 1`), `user_definition` (the user's own definition
+   written as a condition) and `question` (a threshold the asker gave). The
+   model runs with `reasoning_effort="low"`.
+4. When something is missing, `propose_missing_items` drafts the questions back
+   to the user for a missing term or rule (`clarifications`) and a metric
+   proposal for administrators (`suggestions`), and no query runs. A failure here
+   is reported but does not stop the answer.
+5. Otherwise `query_metrics` checks the plan against the catalog
+   (`modules/chat/query.py`): only listed columns, filterable or groupable as
+   used, and the supported operators. An approved expert rule's filters come
+   from the rule's own conditions, never from the model's copy of them, and a
+   rule with a condition no filter can express stops the query. Each metric then
+   runs through the Semantic Layer's governed
+   `.../metrics/<id>/semantic-query/execute` endpoint as the user (cookie and
+   CSRF token forwarded), in parallel, and the answers merge into one table: a
+   row per dimension value, a column per metric, key values shown by their
+   labels. A `result` event carries it to the browser before the answer
+   streams. A plan the catalog does not allow, or a query the Semantic Layer
+   refuses, becomes `query_error` for the answer instead.
+6. The final answer streams as tokens, written for a business user from the
+   numbers in the result: the direct answer first, then the criterion and
+   whether it is the business's shared definition or the user's own, "theo dự
+   báo" for dates after today.
 
 The stream opens with a `session` event naming the conversation (new or
 existing). Each step then reaches the browser as a tool call (`tool_start`,
-`tool_end`), then `token` events, and a closing `done` event. A question is `resolved` when it
-found at least one metric, has no `undefined_concepts`, and has an approved or
-user's expert rule if it is qualitative; otherwise it is `needs_review` with
-`missing` listing what was not found. `done` also carries `clarifications` and
-the `user_definitions` used. The log stores `requires_expert_rule` (NULL on
-older questions), `suggestions`, `clarifications` with `clarification_state`
-(`pending`, `confirmed`, `dismissed`), and `retry_of` on the answer given again
-after a confirmation. A metric proposal opens on the Metrics page, because
-metrics are created in the Superset dataset editor.
+`tool_end`), then `result` when a query ran, `token` events, and a closing
+`done` event. A question is `resolved` when it found at least one metric, has no
+`undefined_concepts`, and has an approved or user's expert rule if it is
+qualitative; otherwise it is `needs_review` with `missing` listing what was not
+found. `done` also carries `clarifications`, the `user_definitions` used,
+`result` and `query_error`. The log stores `requires_expert_rule` (NULL on older
+questions), `suggestions`, `clarifications` with `clarification_state`
+(`pending`, `confirmed`, `dismissed`), `retry_of` on the answer given again after
+a confirmation, and `query_result`. A metric proposal opens on the Metrics page,
+because metrics are created in the Superset dataset editor.
+
+The page shows a result as one number per metric, a line or columns over time
+(a line per group, with a legend, for up to eight groups), ranked horizontal
+bars across groups, or a table; the chart and table views switch in place. The
+conditions used appear as chips naming their source, and "Xem truy vấn" opens
+the request sent for each metric with the SQL the Semantic Layer ran, which it
+returns to administrators only.
 
 ## Extension structure
 
@@ -102,7 +122,7 @@ extensions/ai-agents/
 │   │   ├── core/chat_models.py           # OpenRouter model, key from .env
 │   │   ├── models/question_log.py        # question log, handling, chat session and user definition tables
 │   │   └── modules/
-│   │       ├── chat/                     # pipeline, prompts, catalog reader, /chat/stream
+│   │       ├── chat/                     # pipeline, prompts, catalog reader, query planner, /chat/stream
 │   │       ├── definitions/              # users' definitions: their own, and the admin review
 │   │       ├── questions/                # /questions/review, /questions/<id>/handling
 │   │       └── sessions/                 # /sessions API and the /ai-agent/ page view
@@ -113,6 +133,7 @@ extensions/ai-agents/
     ├── src/features/chat/AgentPage.tsx            # conversations and the open conversation
     ├── src/features/chat/components/ChatTurn.tsx  # one turn: tool calls, answer, outcome, question card
     ├── src/features/chat/components/DefinitionsPanel.tsx  # "Cách hiểu của bạn"
+    ├── src/features/chat/components/QueryResultView.tsx   # number, chart or table, conditions, queries
     ├── src/shared/api/chat.ts
     └── webpack.config.js
 ```

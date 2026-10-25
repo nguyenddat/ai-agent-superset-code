@@ -151,6 +151,7 @@ def _route_api(datasets):
         "RelationshipContract": _RelationshipContract, "db": SimpleNamespace(session=_Session(datasets)),
         "request": SimpleNamespace(get_json=lambda silent=True: {"dimensions": [], "filters": []}, args=SimpleNamespace(get=lambda *_args, **_kwargs: None)),
         "current_app": SimpleNamespace(config={}), "_ensure_dictionary_tables": lambda: None,
+        "_label_dimensions": len,
         "metric_is_eligible_for_contract": metric_is_eligible_for_contract, "metric_contract_hash": metric_contract_hash,
         "metric_contract_ineligibility": metric_contract_ineligibility, "metric_contract_state": metric_contract_state,
         "parse_contract_metric": parse_contract_metric,

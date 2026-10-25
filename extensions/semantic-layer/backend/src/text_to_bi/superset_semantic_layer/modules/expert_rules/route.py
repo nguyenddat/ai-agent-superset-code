@@ -326,6 +326,11 @@ class ExpertRuleAPI(RestApi):
         column = db.session.get(ColumnDictionary, column_id)
         return (column.display_name or column.column_name) if column else f"#{column_id}"
 
+    @staticmethod
+    def _physical_column(column_id: int) -> str | None:
+        column = db.session.get(ColumnDictionary, column_id)
+        return column.column_name if column else None
+
     @expose("/expert-rules", methods=["GET"])
     @protect()
     @safe
@@ -439,6 +444,8 @@ class ExpertRuleAPI(RestApi):
                     "metric_ids": sorted(link.target_id for link in links if link.kind == "metric"),
                     "glossary_term_ids": sorted(link.target_id for link in links if link.kind == "glossary"),
                     "column_names": {str(column_id): self._column_name(column_id) for column_id in column_ids},
+                    # The physical column of each condition, so a consumer can filter a governed metric query by it.
+                    "condition_columns": {str(column_id): self._physical_column(column_id) for column_id in column_ids},
                 })
         return self.response(200, rules=rules)
 

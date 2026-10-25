@@ -76,8 +76,16 @@ def build_semantic_catalog(
         if dataset is None:
             continue
         item["metrics"].sort(key=lambda metric: (metric["metric_name"], metric["metric_id"]))
+        # The label and type let a consumer map what people say ("ngày", "tốc độ gió tối đa") onto a column.
         item["dimensions"] = [
-            {"name": column.column_name, "groupby": bool(getattr(column, "groupby", False)), "filterable": bool(getattr(column, "filterable", False))}
+            {
+                "name": column.column_name,
+                "label": getattr(column, "verbose_name", None),
+                "type": getattr(column, "type", None),
+                "temporal": bool(getattr(column, "is_dttm", False)),
+                "groupby": bool(getattr(column, "groupby", False)),
+                "filterable": bool(getattr(column, "filterable", False)),
+            }
             for column in getattr(dataset, "columns", [])
             if getattr(column, "is_active", None) is True
             and not getattr(column, "expression", None)

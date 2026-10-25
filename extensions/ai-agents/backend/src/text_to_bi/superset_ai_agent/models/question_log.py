@@ -59,6 +59,8 @@ class AgentQuestion(Model):
     clarifications = Column(JSON, nullable=True)
     clarification_state = Column(String(20), nullable=True)
     retry_of = Column(Integer, nullable=True)
+    # The table the metric query answered with: its filters, dimensions, metrics and rows.
+    query_result = Column(JSON, nullable=True)
     created_on = Column(DateTime(timezone=True), nullable=False, index=True, default=lambda: datetime.now(timezone.utc))
 
 
@@ -119,6 +121,7 @@ ADDED_COLUMNS_DDL = (
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS clarifications JSON",
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS clarification_state VARCHAR(20)",
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS retry_of INTEGER",
+    "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS query_result JSON",
 )
 
 _tables_lock = threading.Lock()

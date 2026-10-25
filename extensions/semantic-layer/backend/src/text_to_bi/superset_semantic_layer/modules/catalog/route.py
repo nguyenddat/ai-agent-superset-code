@@ -69,6 +69,7 @@ from ..semantic_query.contracts import (
     metric_contract_state,
     parse_contract_metric,
 )
+from ..semantic_query.members import build_members_payload, labelled_key_columns, members_from_rows
 from ..semantic_query.relationships import (
     RelationshipEnd,
     relationship_cardinality,
@@ -147,6 +148,20 @@ def _rollback_on_error(method):
             return self.response_500(message="Could not save the change.")
 
     return wrapper
+
+
+def _label_dimensions(catalog_datasets: list[dict[str, Any]]) -> None:
+    """A dimension without a Superset label takes its data dictionary name, so consumers can show "Ngày"."""
+    dataset_ids = [dataset["id"] for dataset in catalog_datasets]
+    if not dataset_ids:
+        return
+    names = {
+        (entry.dataset_id, entry.column_name): entry.display_name
+        for entry in db.session.query(ColumnDictionary).filter(ColumnDictionary.dataset_id.in_(dataset_ids)).all()
+    }
+    for dataset in catalog_datasets:
+        for dimension in dataset["dimensions"]:
+            dimension["label"] = dimension.get("label") or names.get((dataset["id"], dimension["name"]))
 
 
 def _semantic_query_row_cap() -> int:
@@ -1218,6 +1233,54 @@ class SemanticLayerAPI(RestApi):
             preview=contract is not None and contract.status == "candidate",
         )
 
+    @expose("/dataset/<int:dataset_id>/dimension-members", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def dimension_members(self, dataset_id: int):
+        """Key and label pairs of the dataset's labelled key columns, for filtering an approved metric by a name.
+
+        Only a dataset with an approved metric is served; the pairs are read through Superset ChartData as the caller.
+        """
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        if not self._can_access_semantic_query_dataset(dataset):
+            return self.response(403, message="Dataset and database access required.")
+        approved = db.session.query(MetricContract).filter(
+            MetricContract.dataset_id == dataset_id, MetricContract.status == "approved",
+        ).first()
+        if approved is None:
+            return self.response(403, message="A dataset with an approved metric contract is required.")
+        from superset.charts.schemas import ChartDataQueryContextSchema
+        from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+        dimensions = []
+        for key_column, label_column in labelled_key_columns(dataset):
+            try:
+                command = ChartDataCommand(
+                    ChartDataQueryContextSchema().load(build_members_payload(dataset, key_column, label_column))
+                )
+                command.validate()
+                result = command.run()["queries"][0]
+            except Exception as ex:
+                if _is_superset_access_error(ex):
+                    continue
+                logger.exception("Reading the members of %s.%s failed", dataset.table_name, label_column)
+                continue
+            if result.get("error"):
+                continue
+            label = next(
+                (column.verbose_name for column in dataset.columns if column.column_name == label_column), None,
+            )
+            dimensions.append({
+                "key_column": key_column,
+                "label_column": label_column,
+                "label": label or label_column,
+                "members": members_from_rows(result.get("data", []), key_column, label_column),
+            })
+        return self.response(200, dataset_id=dataset_id, dimensions=dimensions)
+
     @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
     @protect()
     @permission_name("read")
@@ -1423,6 +1486,7 @@ class SemanticLayerAPI(RestApi):
             _semantic_query_row_cap(),
             self._catalog_metric_details(set(datasets)),
         )
+        _label_dimensions(catalog["datasets"])
         return self.response(200, **catalog)
 
     def _catalog_metric_details(self, dataset_ids: set[int]) -> Any:

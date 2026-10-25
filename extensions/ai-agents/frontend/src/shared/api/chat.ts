@@ -38,12 +38,48 @@ export type UserDefinition = ConfirmedDefinition & {
 
 export type UsedDefinition = { id: number; kind: DefinitionKind; name: string; definition: string };
 
+export type FilterSource = 'expert_rule' | 'user_definition' | 'time' | 'place' | 'question';
+export type ResultCell = string | number | null;
+
+/** One condition of the metric query, with the label of a key value when it has one. */
+export type ResultFilter = {
+  column: string;
+  label: string;
+  operator: '==' | '!=' | '<' | '<=' | '>' | '>=' | 'IN' | 'NOT IN';
+  value: ResultCell | ResultCell[];
+  shown_value: ResultCell | ResultCell[];
+  source: FilterSource;
+};
+
+/** What the approved metrics answered: a row per dimension value, a column per metric. */
+export type QueryResult = {
+  scope: string;
+  presentation: 'number' | 'table' | 'bar' | 'line';
+  dimensions: Array<{ name: string; label: string; temporal: boolean }>;
+  metrics: Array<{ name: string; label: string; unit: string | null; format: string | null }>;
+  filters: ResultFilter[];
+  rows: Array<Record<string, ResultCell>>;
+  row_count: number;
+  truncated: boolean;
+  notes: string[];
+  /** What the agent asked the Semantic Layer for each metric; `sql` only when it shows it (to administrators). */
+  queries?: Array<{
+    metric: string;
+    dataset_id: number;
+    metric_id: number;
+    request: { dimensions: string[]; filters: Array<{ column: string; operator: string; value: unknown }> };
+    sql: string | null;
+  }>;
+};
+
 export type DoneEvent = {
   question_id: number | null;
   status: QuestionStatus;
   missing: MissingKind[];
   clarifications: DefinitionDraft[];
   user_definitions: UsedDefinition[];
+  result: QueryResult | null;
+  query_error: string | null;
 };
 
 export type SessionEvent = { id: number; title: string; dashboard_id: number };
@@ -52,6 +88,7 @@ export type ChatStreamEvent =
   | { name: 'session'; data: SessionEvent }
   | { name: 'tool_start'; data: ToolStartEvent }
   | { name: 'tool_end'; data: ToolEndEvent }
+  | { name: 'result'; data: QueryResult }
   | { name: 'token'; data: { text: string } }
   | { name: 'error'; data: { message: string } }
   | { name: 'done'; data: DoneEvent };
@@ -80,6 +117,7 @@ export type StoredTurn = {
   clarifications: DefinitionDraft[];
   clarification_state: ClarificationState | null;
   retry_of: number | null;
+  result: QueryResult | null;
   asked_on: string;
 };
 

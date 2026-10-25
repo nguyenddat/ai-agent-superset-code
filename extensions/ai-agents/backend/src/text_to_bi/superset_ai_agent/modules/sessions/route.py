@@ -52,6 +52,7 @@ def _serialize_turn(question: AgentQuestion) -> dict:
         "clarifications": question.clarifications or [],
         "clarification_state": question.clarification_state,
         "retry_of": question.retry_of,
+        "result": question.query_result,
         "asked_on": _isoformat(question.created_on),
     }
 
