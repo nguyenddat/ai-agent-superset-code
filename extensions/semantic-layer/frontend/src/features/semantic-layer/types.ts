@@ -36,6 +36,8 @@ export type MetricContractExecution = {
   rows: Array<Record<string, unknown>>;
   row_count: number;
   truncated: boolean;
+  /** The SQL Superset ran, RLS included; only administrators receive it. */
+  sql?: string | null;
 };
 
 /** Review state of a metric: `outdated` is a candidate or approval whose metric changed after it was recorded. */

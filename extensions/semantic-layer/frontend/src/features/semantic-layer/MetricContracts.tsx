@@ -5,7 +5,9 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi } from './api';
 import { MetricTrial } from './MetricTrial';
-import type { MetricContractResponse, MetricReviewItem, MetricReviewList, MetricReviewState } from './types';
+import type {
+  MetricContractResponse, MetricFormula, MetricReviewItem, MetricReviewList, MetricReviewState,
+} from './types';
 
 const STATE_LABELS: Record<MetricReviewState, string> = {
   not_started: 'Chưa duyệt',
@@ -17,17 +19,18 @@ const STATE_LABELS: Record<MetricReviewState, string> = {
 };
 
 const STATE_HINTS: Record<MetricReviewState, string> = {
-  not_started: 'Metric đủ điều kiện nhưng chưa có ai đề xuất. Tạo bản đề xuất để bắt đầu duyệt.',
-  ineligible: 'Công thức metric nằm ngoài dạng được hỗ trợ nên chưa thể đưa vào quy trình duyệt.',
-  candidate: 'Đã có bản đề xuất, đang chờ người duyệt xác nhận công thức.',
-  approved: 'Công thức đã được duyệt. AI Agent và người dùng có thể truy vấn metric này một cách an toàn.',
-  outdated: 'Metric đã bị sửa sau khi đề xuất hoặc duyệt. Cần tạo bản đề xuất mới và duyệt lại.',
-  revoked: 'Bản duyệt đã bị thu hồi. Tạo bản đề xuất mới nếu muốn dùng lại metric này.',
+  not_started: 'Metric đủ điều kiện nhưng chưa được đề xuất.',
+  ineligible: 'Công thức nằm ngoài dạng được hỗ trợ nên chưa thể duyệt.',
+  candidate: 'Bản đề xuất đang chờ người duyệt xác nhận công thức.',
+  approved: 'Công thức đã được duyệt; AI Agent và người dùng có thể truy vấn metric này.',
+  outdated: 'Metric đã bị sửa sau khi đề xuất hoặc duyệt; cần đề xuất và duyệt lại.',
+  revoked: 'Bản duyệt đã bị thu hồi; tạo bản đề xuất mới để dùng lại.',
 };
 
 const STATE_ORDER: MetricReviewState[] = ['candidate', 'outdated', 'not_started', 'approved', 'revoked', 'ineligible'];
 
 type ContractAction = 'candidate' | 'approve' | 'revoke';
+type DetailTab = 'definition' | 'trial';
 
 const metricKey = (metric: MetricReviewItem) => `${metric.dataset_id}:${metric.metric_id}`;
 const metricLabel = (metric: MetricReviewItem) => metric.verbose_name || metric.metric_name;
@@ -35,6 +38,37 @@ const formatTime = (value: string | null) => (value ? new Date(value).toLocaleSt
 
 function StateBadge({ state }: { state: MetricReviewState }) {
   return <span className={`sl-metric-state is-${state}`}>{STATE_LABELS[state]}</span>;
+}
+
+function FilterSelect({ label, items, value, onChange }: {
+  label: string;
+  items: Array<{ value: string; label: string }>;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Select items={items} value={value} onValueChange={selected => onChange(String(selected))}>
+      <SelectTrigger aria-label={label} className="sl-metrics-filter-select"><SelectValue /></SelectTrigger>
+      <SelectContent alignItemWithTrigger={false}>
+        <SelectGroup>
+          {items.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function FormulaParts({ formula }: { formula: MetricFormula }) {
+  const parts = [
+    { label: 'Phép tổng hợp', value: formula.aggregation },
+    { label: 'Giá trị đo', value: formula.measure_column ?? formula.measure_constant ?? '—' },
+    { label: 'Điều kiện lọc dòng', value: formula.condition ?? 'Không có' },
+  ];
+  return (
+    <div className="sl-metrics-formula-parts">
+      {parts.map(part => <div key={part.label}><span>{part.label}</span><code>{part.value}</code></div>)}
+    </div>
+  );
 }
 
 type MetricContractsProps = { databaseId: number | null };
@@ -46,6 +80,7 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
   const [stateFilter, setStateFilter] = useState<MetricReviewState | 'all'>('all');
   const [datasetFilter, setDatasetFilter] = useState('all');
   const [searchText, setSearchText] = useState('');
+  const [activeTab, setActiveTab] = useState<DetailTab>('definition');
   const [loading, setLoading] = useState(true);
   const [pendingAction, setPendingAction] = useState<ContractAction | null>(null);
   const [error, setError] = useState('');
@@ -85,9 +120,16 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
   const selectedMetric = reviewList.metrics.find(metric => metricKey(metric) === selectedKey)
     ?? visibleMetrics[0] ?? null;
   const selectedMetricKey = selectedMetric ? metricKey(selectedMetric) : null;
+  const stateItems = [
+    { value: 'all', label: `Mọi trạng thái (${reviewList.metrics.length})` },
+    ...STATE_ORDER.map(state => ({ value: state, label: `${STATE_LABELS[state]} (${stateCounts.get(state) ?? 0})` })),
+  ];
+  const metricDatasets = reviewList.datasets.filter(dataset => (
+    reviewList.metrics.some(metric => metric.dataset_id === dataset.id)
+  ));
   const datasetItems = [
-    { value: 'all', label: 'Tất cả dataset' },
-    ...reviewList.datasets.map(dataset => ({ value: String(dataset.id), label: dataset.name })),
+    { value: 'all', label: 'Mọi dataset' },
+    ...metricDatasets.map(dataset => ({ value: String(dataset.id), label: dataset.name })),
   ];
 
   const runAction = async (action: ContractAction) => {
@@ -116,74 +158,58 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
   if (databaseId === null) return <p className="sl-metric-muted">Chọn database để xem metric.</p>;
 
   const contract = selectedMetric?.contract ?? null;
-  const formula = selectedMetric?.formula ?? null;
   const canPropose = selectedMetric ? ['not_started', 'outdated', 'revoked'].includes(selectedMetric.state) : false;
   const canRevoke = selectedMetric ? ['candidate', 'approved', 'outdated'].includes(selectedMetric.state) : false;
+  const canTry = selectedMetric?.state === 'approved';
+  const visibleTab: DetailTab = canTry ? activeTab : 'definition';
   const actionIcon = (action: ContractAction, icon: React.ReactNode) => (
     pendingAction === action ? <LoaderCircle className="sl-spin" data-icon="inline-start" /> : icon
   );
+  const history = contract ? [
+    { label: 'Đề xuất', person: contract.owner_name, time: null },
+    { label: 'Duyệt', person: contract.approver_name, time: contract.approved_at },
+    { label: 'Thu hồi', person: contract.revoker_name, time: contract.revoked_at },
+  ].filter(entry => entry.person) : [];
 
   return (
     <div className="sl-metrics">
-      <header className="sl-metrics-toolbar">
-        <div className="sl-metrics-heading">
-          <h3>Metrics</h3>
-          <p>Duyệt công thức metric trước khi AI Agent và người dùng truy vấn chúng.</p>
-        </div>
-        <Button variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>
-          <RotateCcw data-icon="inline-start" /> Tải lại
-        </Button>
-      </header>
-      <div className="sl-metrics-filters">
-        <div className="sl-metrics-chips" role="group" aria-label="Lọc theo trạng thái">
-          <button
-            type="button"
-            className={`sl-metrics-chip${stateFilter === 'all' ? ' is-active' : ''}`}
-            onClick={() => setStateFilter('all')}
-          >
-            Tất cả <span>{reviewList.metrics.length}</span>
-          </button>
-          {STATE_ORDER.map(state => (
-            <button
-              key={state}
-              type="button"
-              className={`sl-metrics-chip is-${state}${stateFilter === state ? ' is-active' : ''}`}
-              onClick={() => setStateFilter(current => current === state ? 'all' : state)}
-            >
-              {STATE_LABELS[state]} <span>{stateCounts.get(state) ?? 0}</span>
-            </button>
-          ))}
-        </div>
-        <div className="sl-metrics-search">
-          <Search />
-          <Input
-            aria-label="Tìm metric"
-            placeholder="Tìm metric"
-            value={searchText}
-            onChange={event => setSearchText(event.target.value)}
+      <aside className="sl-metrics-browser" aria-label="Danh sách metric">
+        <div className="sl-metrics-browser-filters">
+          <div className="sl-metrics-search">
+            <Search />
+            <Input
+              aria-label="Tìm metric"
+              placeholder="Tìm metric"
+              value={searchText}
+              onChange={event => setSearchText(event.target.value)}
+            />
+            <Button variant="ghost" size="icon" aria-label="Tải lại" disabled={loading} onClick={() => void load()}>
+              {loading ? <LoaderCircle className="sl-spin" /> : <RotateCcw />}
+            </Button>
+          </div>
+          <FilterSelect
+            label="Lọc theo trạng thái"
+            items={stateItems}
+            value={stateFilter}
+            onChange={value => setStateFilter(value as MetricReviewState | 'all')}
           />
+          {metricDatasets.length > 1 ? (
+            <FilterSelect
+              label="Lọc theo dataset"
+              items={datasetItems}
+              value={datasetFilter}
+              onChange={setDatasetFilter}
+            />
+          ) : null}
         </div>
-        <Select items={datasetItems} value={datasetFilter} onValueChange={value => setDatasetFilter(String(value))}>
-          <SelectTrigger aria-label="Lọc theo dataset" className="sl-metrics-dataset-filter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent alignItemWithTrigger={false}>
-            <SelectGroup>
-              {datasetItems.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </div>
-      {error ? <div className="sl-metric-error" role="alert"><AlertCircle /> {error}</div> : null}
-      <div className="sl-metrics-layout">
-        <section className="sl-metrics-list" aria-label="Danh sách metric">
+        <div className="sl-metrics-list">
           {loading && reviewList.metrics.length === 0 ? (
             <p className="sl-metric-muted"><LoaderCircle className="sl-spin" /> Đang tải metric…</p>
           ) : metricGroups.length === 0 ? (
             <p className="sl-metric-muted">Không có metric nào khớp bộ lọc.</p>
           ) : metricGroups.map(({ dataset, metrics }) => (
             <div key={dataset.id} className="sl-metrics-group">
-              <h4>{dataset.name}</h4>
+              <h4 title={dataset.name}>{dataset.name}</h4>
               {metrics.map(metric => (
                 <button
                   key={metricKey(metric)}
@@ -191,69 +217,23 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
                   className={`sl-metrics-item${selectedMetricKey === metricKey(metric) ? ' is-selected' : ''}`}
                   onClick={() => setSelectedKey(metricKey(metric))}
                 >
-                  <span className="sl-metrics-item-name">
-                    <strong>{metricLabel(metric)}</strong>
-                    {metric.verbose_name ? <small>{metric.metric_name}</small> : null}
-                  </span>
-                  <StateBadge state={metric.state} />
+                  <span className={`sl-metrics-dot is-${metric.state}`} title={STATE_LABELS[metric.state]} />
+                  <span className="sl-metrics-item-name">{metricLabel(metric)}</span>
                 </button>
               ))}
             </div>
           ))}
-        </section>
-        <section className="sl-metrics-detail" aria-label="Chi tiết metric">
-          {!selectedMetric ? <p className="sl-metric-muted">Chọn một metric để xem chi tiết.</p> : (
-            <>
-              <header className="sl-metrics-detail-heading">
-                <div>
-                  <h3>{metricLabel(selectedMetric)}</h3>
-                  <p>
-                    <code>{selectedMetric.metric_name}</code> · {datasetById.get(selectedMetric.dataset_id)?.name}
-                  </p>
-                </div>
-                <StateBadge state={selectedMetric.state} />
-              </header>
-              <p className="sl-metrics-hint">{STATE_HINTS[selectedMetric.state]}</p>
-              {selectedMetric.description ? (
-                <p className="sl-metrics-description">{selectedMetric.description}</p>
-              ) : null}
-              {selectedMetric.ineligibility ? (
-                <div className="sl-metric-warning" role="note">
-                  <AlertCircle />
-                  <div><strong>Lý do chưa đủ điều kiện</strong><span>{selectedMetric.ineligibility}</span></div>
-                </div>
-              ) : null}
-              <section className="sl-metrics-formula" aria-label="Công thức">
-                <h4>Công thức</h4>
-                {formula ? (
-                  <dl>
-                    <div><dt>Phép tổng hợp</dt><dd>{formula.aggregation}</dd></div>
-                    <div>
-                      <dt>Giá trị đo</dt><dd><code>{formula.measure_column ?? formula.measure_constant}</code></dd>
-                    </div>
-                    <div>
-                      <dt>Điều kiện lọc dòng</dt>
-                      <dd>{formula.condition ? <code>{formula.condition}</code> : 'Không có'}</dd>
-                    </div>
-                  </dl>
-                ) : null}
-                <pre className="sl-metrics-expression">{selectedMetric.expression || '—'}</pre>
-              </section>
-              {contract ? (
-                <dl className="sl-metrics-people">
-                  <div><dt>Người đề xuất</dt><dd>{contract.owner_name ?? '—'}</dd></div>
-                  {contract.approver_name ? (
-                    <div>
-                      <dt>Người duyệt</dt><dd>{contract.approver_name} · {formatTime(contract.approved_at)}</dd>
-                    </div>
-                  ) : null}
-                  {contract.revoker_name ? (
-                    <div>
-                      <dt>Người thu hồi</dt><dd>{contract.revoker_name} · {formatTime(contract.revoked_at)}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-              ) : null}
+        </div>
+      </aside>
+      <section className="sl-metrics-detail" aria-label="Chi tiết metric">
+        {error ? <div className="sl-metric-error" role="alert"><AlertCircle /> {error}</div> : null}
+        {!selectedMetric ? <p className="sl-metric-muted">Chọn một metric để xem chi tiết.</p> : (
+          <>
+            <header className="sl-metrics-detail-heading">
+              <div className="sl-metrics-title">
+                <h3>{metricLabel(selectedMetric)} <StateBadge state={selectedMetric.state} /></h3>
+                <p><code>{selectedMetric.metric_name}</code> · {datasetById.get(selectedMetric.dataset_id)?.name}</p>
+              </div>
               <div className="sl-metrics-actions">
                 {canPropose ? (
                   <Button disabled={pendingAction !== null} onClick={() => void runAction('candidate')}>
@@ -271,17 +251,71 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
                   </Button>
                 ) : null}
               </div>
-              {selectedMetric.state === 'approved' ? (
-                <MetricTrial
-                  key={selectedMetricKey}
-                  metric={selectedMetric}
-                  dataset={datasetById.get(selectedMetric.dataset_id)}
-                />
-              ) : null}
-            </>
-          )}
-        </section>
-      </div>
+            </header>
+            <div className="sl-metrics-tabs" role="tablist" aria-label="Nội dung metric">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={visibleTab === 'definition'}
+                onClick={() => setActiveTab('definition')}
+              >
+                Định nghĩa
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={visibleTab === 'trial'}
+                disabled={!canTry}
+                title={canTry ? undefined : 'Chỉ chạy thử được metric đã duyệt.'}
+                onClick={() => setActiveTab('trial')}
+              >
+                Chạy thử
+              </button>
+            </div>
+            {visibleTab === 'trial' ? (
+              <MetricTrial
+                key={selectedMetricKey}
+                metric={selectedMetric}
+                dataset={datasetById.get(selectedMetric.dataset_id)}
+              />
+            ) : (
+              <div className="sl-metrics-definition" role="tabpanel">
+                <p className="sl-metrics-hint">{STATE_HINTS[selectedMetric.state]}</p>
+                {selectedMetric.ineligibility ? (
+                  <div className="sl-metric-warning" role="note">
+                    <AlertCircle />
+                    <div><strong>Lý do chưa đủ điều kiện</strong><span>{selectedMetric.ineligibility}</span></div>
+                  </div>
+                ) : null}
+                {selectedMetric.description ? (
+                  <section className="sl-metrics-section">
+                    <h4>Mô tả</h4>
+                    <p className="sl-metrics-description">{selectedMetric.description}</p>
+                  </section>
+                ) : null}
+                <section className="sl-metrics-section">
+                  <h4>Công thức</h4>
+                  {selectedMetric.formula ? <FormulaParts formula={selectedMetric.formula} /> : null}
+                  <pre className="sl-metrics-expression">{selectedMetric.expression || '—'}</pre>
+                </section>
+                {history.length > 0 ? (
+                  <section className="sl-metrics-section">
+                    <h4>Lịch sử duyệt</h4>
+                    <ol className="sl-metrics-history">
+                      {history.map(entry => (
+                        <li key={entry.label}>
+                          <strong>{entry.label}</strong> bởi {entry.person}
+                          {entry.time ? <span> · {formatTime(entry.time)}</span> : null}
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                ) : null}
+              </div>
+            )}
+          </>
+        )}
+      </section>
     </div>
   );
 }

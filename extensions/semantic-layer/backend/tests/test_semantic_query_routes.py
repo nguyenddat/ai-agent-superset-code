@@ -229,6 +229,21 @@ def test_execute_denial_security_error_and_truncation_are_mapped(monkeypatch):
     assert status == 200 and payload["row_count"] == 1000 and payload["truncated"] is True
 
 
+def test_execute_returns_the_superset_sql_to_administrators_only(monkeypatch):
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    metric, contract = dataset.metrics[0], _MetricContract(dataset.id, 4)
+    contract.status, contract.expression_hash = "approved", metric_contract_hash(dataset, metric)
+    api._contract_for = lambda *_: contract
+    api._can_access_semantic_query_dataset = lambda _: True
+    _install_chartdata_stubs(monkeypatch)
+    executed_sql = "SELECT city, AVG(temperature) FROM weather WHERE tenant_id = 7 GROUP BY city"
+    namespace["execute_approved_chart_query"] = lambda *args: {"colnames": ["city"], "data": [], "query": executed_sql}
+    assert api.execute_metric_contract(dataset.id, metric.id)[1]["sql"] == executed_sql
+    namespace["current_user"].roles = []
+    assert api.execute_metric_contract(dataset.id, metric.id)[1]["sql"] is None
+
+
 def test_preview_compiler_and_execute_payload_reject_joins():
     with pytest.raises(SemanticQueryError, match="joins are unsupported"):
         compile_semantic_query(

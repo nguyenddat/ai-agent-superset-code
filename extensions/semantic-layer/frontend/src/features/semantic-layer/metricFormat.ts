@@ -21,7 +21,18 @@ export function formatMetricValue(value: unknown, d3Format: string | null): stri
   return Number.isInteger(number) ? integerFormat(number) : decimalFormat(number);
 }
 
-const NUMERIC_TYPE = /INT|FLOAT|DOUBLE|NUMERIC|DECIMAL|REAL|SERIAL|NUMBER/i;
+/** Shows a time column value as a Vietnamese date, adding the time only when it is not midnight UTC. */
+export function formatDateValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  const date = new Date(typeof value === 'number' ? value : String(value));
+  if (Number.isNaN(date.getTime())) return String(value);
+  const isMidnight = date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0;
+  return isMidnight
+    ? date.toLocaleDateString('vi-VN', { timeZone: 'UTC' })
+    : date.toLocaleString('vi-VN', { timeZone: 'UTC' });
+}
+
+const NUMERIC_TYPE =/INT|FLOAT|DOUBLE|NUMERIC|DECIMAL|REAL|SERIAL|NUMBER/i;
 
 export function isNumericColumnType(columnType: string | null): boolean {
   return NUMERIC_TYPE.test(columnType ?? '');

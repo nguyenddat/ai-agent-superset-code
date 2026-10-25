@@ -258,18 +258,20 @@ function SemanticLayerPage() {
                 placeholder="Chọn database"
               />
             </div>
-            <div className="sl-header-select sl-dataset-select">
-              <HeaderPicker
-                ariaLabel="Dataset"
-                icon={Table2}
-                caption={`Datasets (${datasets.length})`}
-                items={groupDatasetsByLayer(datasets, layers, id => dictionaryByDataset[id]?.layer_id).flatMap(group => group.datasets.map(dataset => ({ value: dataset.id, label: getDatasetName(dataset), group: group.label })))}
-                value={selectedDataset}
-                onChange={selectDataset}
-                disabled={loading || datasets.length === 0}
-                placeholder="Chọn dataset"
-              />
-            </div>
+            {activeModule !== 'metrics' ? (
+              <div className="sl-header-select sl-dataset-select">
+                <HeaderPicker
+                  ariaLabel="Dataset"
+                  icon={Table2}
+                  caption={`Datasets (${datasets.length})`}
+                  items={groupDatasetsByLayer(datasets, layers, id => dictionaryByDataset[id]?.layer_id).flatMap(group => group.datasets.map(dataset => ({ value: dataset.id, label: getDatasetName(dataset), group: group.label })))}
+                  value={selectedDataset}
+                  onChange={selectDataset}
+                  disabled={loading || datasets.length === 0}
+                  placeholder="Chọn dataset"
+                />
+              </div>
+            ) : null}
           </header>
 
           {loading ? (

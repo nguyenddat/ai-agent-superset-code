@@ -1008,6 +1008,8 @@ class SemanticLayerAPI(RestApi):
             rows=rows[:_semantic_query_row_cap()],
             row_count=min(len(rows), _semantic_query_row_cap()),
             truncated=len(rows) > _semantic_query_row_cap(),
+            # The SQL Superset ran, RLS predicates included, so only administrators see it.
+            sql=result.get("query") if self._is_admin() else None,
         )
 
     @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
