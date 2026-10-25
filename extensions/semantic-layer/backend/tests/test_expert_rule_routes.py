@@ -212,6 +212,8 @@ def test_discovery_keeps_rule_when_only_unrelated_glossary_link_is_denied_and_om
     assert status == 200
     assert [item["name"] for item in body["rules"]] == ["Final only"]
     assert body["rules"][0]["lifecycle_version"] == 3
+    # Discovery names what the rule links to, so a consumer can join it to catalog metrics and glossary terms.
+    assert (body["rules"][0]["dataset_id"], body["rules"][0]["glossary_term_ids"], body["rules"][0]["metric_ids"]) == (7, [3], [])
 
 
 def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):

@@ -1,13 +1,50 @@
 # Superset Semantic Layer extension
 
-This extension adds an admin-only Semantic Layer dropdown to Superset's top
-navigation bar. Its Data Dictionary and Semantic Layer entries open
-`/semantic-layer/?module=dictionary` and `/semantic-layer/?module=semantic`.
-The page header lets the administrator pick a Superset database and a dataset,
-and displays the columns, descriptions,
-and metrics of that database's datasets. The backend serves the route with
-Superset's SPA template, and the frontend renders the page below the navbar. The UI and API are a first increment toward
-visualizing semantic models and metric dependencies.
+This extension adds two admin-only menus to Superset's top navigation bar. Both open the same page,
+`/semantic-layer/?module=<module>`, rendered below the navbar with Superset's SPA template:
+
+| Menu | Module | `module=` |
+| --- | --- | --- |
+| Mô hình dữ liệu | Data Dictionary: dataset and column metadata | `dictionary` |
+| Mô hình dữ liệu | Semantic Model: business domains and data lineage | `semantic` |
+| Quản trị nghiệp vụ | Metrics: business definitions, review and trial runs | `metrics` |
+| Quản trị nghiệp vụ | Business Glossary: governed business terms | `glossary` |
+| Quản trị nghiệp vụ | Expert Rules: governed business rules | `rules` |
+
+Metrics, glossary terms and expert rules move from draft to approved to revoked, and every step is logged with
+its actor and reason. By default an administrator may approve their own work; set
+`TEXT_TO_BI_REQUIRE_SECOND_REVIEWER = True` in `superset_config.py` to require a second administrator.
+
+## Consumer API
+
+Approved content reaches any consumer, such as a Text to BI agent, through read-only endpoints. Each returns only
+approved, current content on datasets the caller may access in Superset, and never returns SQL expressions.
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /extensions/text-to-bi/superset-semantic-layer/semantic-layer/semantic-catalog` | Approved metrics per dataset, groupable and filterable dimensions, approved relationships, row and filter limits |
+| `GET /extensions/text-to-bi/superset-semantic-layer/semantic-layer/glossary/discovery` | Approved terms with definitions, synonyms and their fresh links to datasets, columns and metrics |
+| `GET /extensions/text-to-bi/superset-semantic-layer/expert-rules/expert-rules/discover` | Approved rules: conditions, exceptions, example questions, and the dataset, metrics and terms they link to |
+| `POST /extensions/text-to-bi/superset-semantic-layer/semantic-layer/dataset/<id>/metrics/<id>/semantic-query/execute` | Runs an approved metric through Superset's chart data API, with RLS |
+
+Each catalog metric carries:
+
+```json
+{
+  "metric_id": 41,
+  "metric_name": "nhiet_do_cao_nhat",
+  "verbose_name": "Nhiệt độ cao nhất",
+  "description": "Mô tả trong Superset",
+  "d3format": ",.1f",
+  "business_definition": "Nhiệt độ cao nhất ghi nhận trong phạm vi lọc.",
+  "unit": "°C",
+  "steward_name": "Bao Reviewer",
+  "glossary_terms": [{ "term_id": 3, "name": "Nắng nóng", "synonyms": ["nóng nhất"] }]
+}
+```
+
+`business_definition`, `unit` and `steward_name` are `null` until an administrator writes the metric's business
+definition. A consumer joins expert rules to metrics through the rule's `metric_ids`.
 
 ## Structure
 

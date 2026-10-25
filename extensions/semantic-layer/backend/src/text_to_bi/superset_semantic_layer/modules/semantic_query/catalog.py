@@ -15,8 +15,13 @@ def build_semantic_catalog(
     relationships: Iterable[tuple[Any, RelationshipEnd, RelationshipEnd]],
     can_access: Callable[[Any], bool],
     max_rows: int,
+    metric_details: Callable[[int, int], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Return approved current metadata only for datasets accessible to the caller."""
+    """Return approved current metadata only for datasets accessible to the caller.
+
+    ``metric_details(dataset_id, metric_id)`` adds governed business context, such as the business definition and the
+    glossary terms naming the metric, to each visible metric. It never receives a metric the caller may not see.
+    """
     access: dict[int, bool] = {}
 
     def allowed(dataset: Any) -> bool:
@@ -41,6 +46,8 @@ def build_semantic_catalog(
                 "metric_name": metric.metric_name,
                 "verbose_name": getattr(metric, "verbose_name", None),
                 "description": getattr(metric, "description", None),
+                "d3format": getattr(metric, "d3format", None),
+                **(metric_details(dataset.id, metric.id) if metric_details else {}),
             }
         )
 

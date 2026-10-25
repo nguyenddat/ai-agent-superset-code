@@ -38,7 +38,10 @@ def test_catalog_hides_inaccessible_stale_and_sensitive_contract_details():
         {
             "id": 7,
             "name": "weather",
-            "metrics": [{"metric_id": 19, "metric_name": "average_temperature", "verbose_name": "Average", "description": "Safe"}],
+            "metrics": [{
+                "metric_id": 19, "metric_name": "average_temperature", "verbose_name": "Average", "description": "Safe",
+                "d3format": None,
+            }],
             "dimensions": [{"name": "city", "groupby": True, "filterable": True}],
         }
     ]
@@ -72,3 +75,33 @@ def test_catalog_returns_only_current_relationships_accessible_on_both_ends():
     ]
     assert hidden["relationships"] == []
     assert hidden["datasets"] == []
+
+
+def test_catalog_adds_business_context_only_to_visible_metrics():
+    metric = SimpleNamespace(
+        id=19, metric_name="max_temperature", expression="MAX(temperature)", verbose_name="Max", description=None,
+        d3format=",.1f",
+    )
+    temperature = SimpleNamespace(
+        column_name="temperature", is_active=True, expression=None, groupby=False, filterable=True, type="FLOAT"
+    )
+    allowed = _dataset(7, "weather", [temperature], [metric])
+    denied = _dataset(8, "private", [temperature], [metric])
+    contracts = [
+        SimpleNamespace(dataset_id=dataset.id, metric_id=19, status="approved", expression_hash=metric_contract_hash(dataset, metric))
+        for dataset in (allowed, denied)
+    ]
+    asked = []
+
+    def metric_details(dataset_id, metric_id):
+        asked.append((dataset_id, metric_id))
+        return {"business_definition": "Highest daily temperature.", "unit": "°C", "glossary_terms": []}
+
+    result = build_semantic_catalog({7: allowed, 8: denied}, contracts, [], lambda d: d.id == 7, 1000, metric_details)
+
+    assert asked == [(7, 19)]
+    assert result["datasets"][0]["metrics"] == [{
+        "metric_id": 19, "metric_name": "max_temperature", "verbose_name": "Max", "description": None, "d3format": ",.1f",
+        "business_definition": "Highest daily temperature.", "unit": "°C", "glossary_terms": [],
+    }]
+    assert "MAX(" not in str(result)

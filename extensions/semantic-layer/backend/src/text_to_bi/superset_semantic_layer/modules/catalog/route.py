@@ -1401,9 +1401,42 @@ class SemanticLayerAPI(RestApi):
             if ends is not None:
                 relationships.append((contract, *ends))
         catalog = build_semantic_catalog(
-            datasets, metric_contracts, relationships, self._can_access_semantic_query_dataset, _semantic_query_row_cap()
+            datasets,
+            metric_contracts,
+            relationships,
+            self._can_access_semantic_query_dataset,
+            _semantic_query_row_cap(),
+            self._catalog_metric_details(set(datasets)),
         )
         return self.response(200, **catalog)
+
+    def _catalog_metric_details(self, dataset_ids: set[int]) -> Any:
+        """Business definition, unit, steward and discoverable glossary terms for each catalog metric."""
+        definitions = {
+            (definition.dataset_id, definition.metric_id): definition
+            for definition in db.session.query(MetricDefinition)
+            .filter(MetricDefinition.dataset_id.in_(dataset_ids))
+            .all()
+        } if dataset_ids else {}
+        terms_by_metric: dict[int, list[dict[str, Any]]] = {}
+        for term in self._discoverable_glossary_terms():
+            for link in term["links"]:
+                if link["kind"] == "metric" and link["metric_id"] is not None:
+                    terms_by_metric.setdefault(link["metric_id"], []).append(
+                        {"term_id": term["term_id"], "name": term["canonical_name"], "synonyms": term["synonyms"]}
+                    )
+        user_name = self._user_names()
+
+        def details(dataset_id: int, metric_id: int) -> dict[str, Any]:
+            definition = definitions.get((dataset_id, metric_id))
+            return {
+                "business_definition": definition.business_definition if definition else None,
+                "unit": definition.unit if definition else None,
+                "steward_name": user_name(definition.steward_id) if definition else None,
+                "glossary_terms": sorted(terms_by_metric.get(metric_id, []), key=lambda term: term["term_id"]),
+            }
+
+        return details
 
     @expose("/datasets/reference-options", methods=("GET",))
     @protect()
@@ -2461,6 +2494,10 @@ class SemanticLayerAPI(RestApi):
     def glossary_discovery(self):
         """Return only approved, current, fresh links to caller-authorized datasets."""
         _ensure_dictionary_tables()
+        return self.response(200, terms=self._discoverable_glossary_terms())
+
+    def _discoverable_glossary_terms(self) -> list[dict[str, Any]]:
+        """Approved current terms with only their fresh links to datasets the caller may access."""
         rows = db.session.query(GlossaryTermRevision).filter_by(status="approved", is_current=True).all()
         terms = []
         for revision in rows:
@@ -2488,4 +2525,4 @@ class SemanticLayerAPI(RestApi):
                     "links": visible_links,
                 }
             )
-        return self.response(200, terms=terms)
+        return terms

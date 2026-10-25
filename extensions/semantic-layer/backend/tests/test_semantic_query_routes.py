@@ -417,6 +417,7 @@ def test_semantic_catalog_hides_denied_dataset():
         "text_to_bi.superset_semantic_layer.modules.semantic_query.catalog", fromlist=["build_semantic_catalog"]
     ).build_semantic_catalog
     api._can_access_semantic_query_dataset = lambda _: False
+    api._catalog_metric_details = lambda _dataset_ids: None
     status, payload = api.semantic_catalog()
     assert status == 200 and payload["datasets"] == [] and payload["relationships"] == []
 

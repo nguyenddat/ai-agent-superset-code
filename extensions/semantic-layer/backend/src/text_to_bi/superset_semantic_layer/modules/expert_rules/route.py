@@ -388,8 +388,16 @@ class ExpertRuleAPI(RestApi):
             links = db.session.query(ExpertRuleLink).filter_by(revision_id=revision.id).all()
             if not all(self._linked_target_authorized(link) for link in links):
                 continue
-            if rule_is_discoverable(revision, links, lambda link: self._fingerprint(link.kind, link.target_id, link.dataset_id)):
-                rules.append(self._serialize(revision, redact=False))
+            if rule_is_discoverable(revision, links, self._live_fingerprint):
+                column_ids = {condition["field_ref"]["column_dictionary_id"] for condition in revision.conditions}
+                rules.append({
+                    **self._serialize(revision, redact=False),
+                    # Let a consumer join a rule to catalog metrics and terms and read its conditions by column name.
+                    "dataset_id": rule.dataset_id,
+                    "metric_ids": sorted(link.target_id for link in links if link.kind == "metric"),
+                    "glossary_term_ids": sorted(link.target_id for link in links if link.kind == "glossary"),
+                    "column_names": {str(column_id): self._column_name(column_id) for column_id in column_ids},
+                })
         return self.response(200, rules=rules)
 
     def _linked_target_authorized(self, link: ExpertRuleLink) -> bool:
