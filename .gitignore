@@ -35,3 +35,11 @@ node_modules/
 # Airflow runtime logs
 /airflow/logs/*
 !/airflow/logs/.gitkeep
+
+# Dot-prefixed files and directories (local tool state such as .team/ or .uv-cache/),
+# except the dotfiles the repository keeps
+.*
+!.gitignore
+!.gitkeep
+!.npmrc
+!.env.example
