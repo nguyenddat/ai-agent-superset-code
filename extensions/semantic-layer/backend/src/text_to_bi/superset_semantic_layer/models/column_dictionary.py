@@ -1,7 +1,6 @@
 from flask_appbuilder import Model
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
-
 from superset.models.helpers import AuditMixinNullable
 
 

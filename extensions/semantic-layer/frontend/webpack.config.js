@@ -13,13 +13,15 @@ module.exports = {
     path: path.resolve(__dirname, 'dist'),
     publicPath: `/api/v1/extensions/${extensionConfig.publisher}/${extensionConfig.name}/`,
   },
-  resolve: { extensions: ['.ts', '.tsx', '.js', '.jsx'] },
+  resolve: { extensions: ['.ts', '.tsx', '.js', '.jsx'], alias: { '@': path.resolve(__dirname, 'src') } },
   externalsType: 'window',
   externals: { '@apache-superset/core': 'superset' },
   module: {
     rules: [
+      // Base UI ships ESM (.mjs) that imports react/jsx-runtime without an extension; React 17 has no exports map.
+      { test: /\.m?js$/, resolve: { fullySpecified: false } },
       { test: /\.tsx?$/, use: { loader: 'ts-loader', options: { transpileOnly: true } }, exclude: /node_modules/ },
-      { test: /\.css$/, use: ['style-loader', 'css-loader'] },
+      { test: /\.css$/, use: ['style-loader', 'css-loader', 'postcss-loader'] },
     ],
   },
   plugins: [

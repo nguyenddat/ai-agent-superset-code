@@ -8,8 +8,6 @@ ModelType = TypeVar("ModelType", bound=Model)
 
 
 class BaseRepository(Generic[ModelType]):
-    """Provide common synchronous SQLAlchemy operations for extension models."""
-
     def __init__(self, session: Session, model: type[ModelType]) -> None:
         self.session = session
         self.model = model

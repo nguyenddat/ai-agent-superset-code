@@ -9,6 +9,16 @@ export const semanticLayerApi = {
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/dictionary/suggest`
   ),
   referenceOptions: `${SEMANTIC_LAYER_API}/datasets/reference-options`,
+  businessModel: (databaseId: number) => `${SEMANTIC_LAYER_API}/business-model?database_id=${encodeURIComponent(databaseId)}`,
+  businessCanvas: (databaseId: number) => `${SEMANTIC_LAYER_API}/business-canvas?database_id=${encodeURIComponent(databaseId)}`,
+  lineageCanvas: (databaseId: number) => `${SEMANTIC_LAYER_API}/lineage-canvas?database_id=${encodeURIComponent(databaseId)}`,
+  businessDomains: `${SEMANTIC_LAYER_API}/business-domains`,
+  businessDomain: (domainId: number) => `${SEMANTIC_LAYER_API}/business-domains/${encodeURIComponent(domainId)}`,
+  lineageEdges: `${SEMANTIC_LAYER_API}/lineage-edges`,
+  lineageEdgeColor: `${SEMANTIC_LAYER_API}/lineage-edges/color`,
+  dataLayers: `${SEMANTIC_LAYER_API}/data-layers`,
+  dataLayer: (layerId: number) => `${SEMANTIC_LAYER_API}/data-layers/${encodeURIComponent(layerId)}`,
+  dataLayersOrder: `${SEMANTIC_LAYER_API}/data-layers/order`,
 } as const;
 
 export const supersetApi = {
@@ -19,3 +29,30 @@ export const supersetApi = {
     `(filters:!((col:database,opr:rel_o_m,value:${databaseId})),page:${page},page_size:100)`,
   )}`,
 } as const;
+
+async function errorMessage(response: Response, fallback: string): Promise<string> {
+  const payload = await response.json().catch(() => ({}));
+  return payload?.message || payload?.error || fallback;
+}
+
+/** Sends a JSON request to the extension API with Superset's CSRF token and returns the parsed body. */
+export async function requestJson<T>(url: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (method !== 'GET') {
+    const csrfResponse = await fetch(supersetApi.csrfToken, { credentials: 'same-origin', headers });
+    if (!csrfResponse.ok) throw new Error(`Không lấy được CSRF token (${csrfResponse.status}).`);
+    const csrfPayload = await csrfResponse.json();
+    const csrfToken = csrfPayload?.result || csrfPayload?.csrf_token;
+    if (!csrfToken || typeof csrfToken !== 'string') throw new Error('Khong nhan duoc CSRF token.');
+    headers['X-CSRFToken'] = csrfToken;
+  }
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const response = await fetch(url, {
+    method,
+    credentials: 'same-origin',
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(await errorMessage(response, `Yêu cầu thất bại (${response.status}).`));
+  return await response.json() as T;
+}

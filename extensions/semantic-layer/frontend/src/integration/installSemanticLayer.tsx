@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { Boxes, Braces, CalendarClock, Check, ChevronDown, Database, Layers3, LoaderCircle, Table2 } from 'lucide-react';
+import { Database, Layers3, LoaderCircle, Table2 } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
+import '@/styles/globals.css';
+import { PortalContainerContext } from '@/lib/portal-container';
 import { DataDictionary } from '../features/semantic-layer/DataDictionary';
-import { SemanticCanvas } from '../features/semantic-layer/SemanticCanvas';
-import { semanticLayerApi, supersetApi } from '../features/semantic-layer/api';
+import { BusinessCanvas } from '../features/semantic-layer/BusinessCanvas';
+import { requestJson, semanticLayerApi, supersetApi } from '../features/semantic-layer/api';
 import {
   SEMANTIC_LAYER_PAGE,
   semanticLayerEvents,
@@ -14,8 +16,10 @@ import {
   semanticLayerSelectors,
 } from '../features/semantic-layer/constants';
 import type { SemanticLayerModule } from '../features/semantic-layer/constants';
-import { getDatasetName, getDatasetSourceTable } from '../features/semantic-layer/datasets';
-import type { DashboardDataset, DatasetDictionary, SemanticField, SupersetDatabase, ThemeMode } from '../features/semantic-layer/types';
+import { getDatasetName, groupDatasetsByLayer } from '../features/semantic-layer/datasets';
+import { HeaderPicker } from '../features/semantic-layer/HeaderPicker';
+import { LayersDialog } from '../features/semantic-layer/LayersDialog';
+import type { DashboardDataset, DataLayer, DatasetDictionary, SupersetDatabase, ThemeMode } from '../features/semantic-layer/types';
 
 function activeSupersetTheme(): ThemeMode {
   const luminance = (color: string) => {
@@ -36,18 +40,36 @@ function activeSupersetTheme(): ThemeMode {
 function SemanticLayerPage() {
   const [databases, setDatabases] = useState<SupersetDatabase[]>([]);
   const [selectedDatabase, setSelectedDatabase] = useState<number | null>(null);
+  const [pageElement, setPageElement] = useState<HTMLDivElement | null>(null);
   const [datasets, setDatasets] = useState<DashboardDataset[]>([]);
   const [dictionaryByDataset, setDictionaryByDataset] = useState<Record<number, DatasetDictionary>>({});
-  const [dictionariesReady, setDictionariesReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedDataset, setSelectedDataset] = useState<number | null>(null);
   const [themeMode, setThemeMode] = useState(activeSupersetTheme);
-  const [columnsExpanded, setColumnsExpanded] = useState(true);
-  const [metricsExpanded, setMetricsExpanded] = useState(true);
-  const [canvasFieldIds, setCanvasFieldIds] = useState<string[]>([]);
   const [activeModule, setActiveModule] = useState<SemanticLayerModule>(semanticLayerModuleFromLocation);
   const [dictionaryDirty, setDictionaryDirty] = useState(false);
+  const [layers, setLayers] = useState<DataLayer[]>([]);
+  const [layersDialogOpen, setLayersDialogOpen] = useState(false);
+  // Bumped when layers or dictionaries change so the canvas reloads its classification-dependent model.
+  const [modelRevision, setModelRevision] = useState(0);
+
+  const loadLayers = useCallback(async () => {
+    try {
+      const payload = await requestJson<{ layers: DataLayer[] }>(semanticLayerApi.dataLayers, 'GET');
+      setLayers(payload.layers);
+    } catch {
+      setLayers([]);
+    }
+    setModelRevision(value => value + 1);
+  }, []);
+
+  useEffect(() => { void loadLayers(); }, [loadLayers]);
+
+  const onDictionarySaved = useCallback((dictionary: DatasetDictionary) => {
+    setDictionaryByDataset(current => ({ ...current, [dictionary.dataset_id]: dictionary }));
+    setModelRevision(value => value + 1);
+  }, []);
 
   const canLeaveDictionary = () => (
     !dictionaryDirty || window.confirm('Bạn có thay đổi chưa lưu trong Data Dictionary. Tiếp tục và bỏ các thay đổi này?')
@@ -89,13 +111,22 @@ function SemanticLayerPage() {
     const observer = new MutationObserver(syncTheme);
     observer.observe(document.body, { attributes: true, childList: true, subtree: true });
     observer.observe(document.head, { childList: true });
-    const syncCanvasFields = (event: Event) => {
-      setCanvasFieldIds((event as CustomEvent<string[]>).detail ?? []);
+    // The page fills the viewport and only its inner panes scroll. If focus or scrollIntoView moves the window or a
+    // frame container, the header and Save button leave the screen with no way to scroll back, so undo it.
+    const frameSelector = '#app, .sl-page, .sl-panel, .sl-panel-workspace, .sl-content, .sl-dictionary-main, .sl-dictionary, .sl-details';
+    const resetFrameScroll = (event: Event) => {
+      const target = event.target;
+      if (target === document || target === document.documentElement || target === document.body) {
+        if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+      } else if (target instanceof HTMLElement && target.matches(frameSelector) && (target.scrollTop || target.scrollLeft)) {
+        target.scrollTop = 0;
+        target.scrollLeft = 0;
+      }
     };
-    window.addEventListener(semanticLayerEvents.fieldsChange, syncCanvasFields);
+    document.addEventListener('scroll', resetFrameScroll, true);
     return () => {
       observer.disconnect();
-      window.removeEventListener(semanticLayerEvents.fieldsChange, syncCanvasFields);
+      document.removeEventListener('scroll', resetFrameScroll, true);
       document.body.style.overflow = previousOverflow;
     };
   }, []);
@@ -178,16 +209,13 @@ function SemanticLayerPage() {
 
   const currentDataset = datasets.find(dataset => dataset.id === selectedDataset);
   const currentModule = semanticLayerModules.find(module => module.id === activeModule) ?? semanticLayerModules[0];
-  const sourceTable = getDatasetSourceTable(currentDataset);
 
   useEffect(() => {
     let active = true;
     if (datasets.length === 0) {
       setDictionaryByDataset({});
-      setDictionariesReady(true);
       return () => { active = false; };
     }
-    setDictionariesReady(false);
     Promise.all(datasets.map(async dataset => {
       try {
         const response = await fetch(semanticLayerApi.datasetDictionary(dataset.id), {
@@ -202,53 +230,13 @@ function SemanticLayerPage() {
     })).then(dictionaries => {
       if (!active) return;
       setDictionaryByDataset(Object.fromEntries(dictionaries.filter((item): item is DatasetDictionary => item !== null).map(item => [item.dataset_id, item])));
-      setDictionariesReady(true);
     });
     return () => { active = false; };
   }, [datasets]);
-  const startDrag = (event: React.PointerEvent<HTMLElement>, item: SemanticField) => {
-    if (event.button !== 0) return;
-    const { clientX: startX, clientY: startY, pointerId } = event;
-    let dragging = false;
-    let activeCanvas: Element | null = null;
-    const clearDragState = () => {
-      activeCanvas?.classList.remove('is-drop-target');
-      document.body.classList.remove('sl-dragging-field');
-    };
-    const onPointerMove = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId !== pointerId) return;
-      if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 6) return;
-      dragging = true;
-      moveEvent.preventDefault();
-      const targetCanvas = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest('.sl-flow-canvas') ?? null;
-      if (targetCanvas !== activeCanvas) {
-        activeCanvas?.classList.remove('is-drop-target');
-        activeCanvas = targetCanvas;
-        activeCanvas?.classList.add('is-drop-target');
-      }
-      document.body.classList.add('sl-dragging-field');
-    };
-    const finishDrag = (upEvent: PointerEvent) => {
-      if (upEvent.pointerId !== pointerId) return;
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', finishDrag);
-      window.removeEventListener('pointercancel', finishDrag);
-      clearDragState();
-      if (!dragging) return;
-      const targetCanvas = document.elementFromPoint(upEvent.clientX, upEvent.clientY)?.closest('.sl-flow-canvas');
-      if (targetCanvas) {
-        window.dispatchEvent(new CustomEvent(semanticLayerEvents.pointerDrop, {
-          detail: { item, clientX: upEvent.clientX, clientY: upEvent.clientY },
-        }));
-      }
-    };
-    window.addEventListener('pointermove', onPointerMove, { passive: false });
-    window.addEventListener('pointerup', finishDrag);
-    window.addEventListener('pointercancel', finishDrag);
-  };
 
   return (
-    <div className="sl-page" data-theme-mode={themeMode}>
+    <PortalContainerContext.Provider value={pageElement}>
+    <div className="sl-page" data-theme-mode={themeMode} ref={setPageElement}>
       <section className="sl-panel" aria-label="Semantic Layer Explorer">
         <div className="sl-panel-workspace">
           <header className="sl-header">
@@ -257,19 +245,29 @@ function SemanticLayerPage() {
               <h2>{currentModule.label}</h2>
               <p>{currentModule.description}</p>
             </div>
-            <label className="sl-header-select" title="Database">
-              <Database />
-              <select aria-label="Database" value={selectedDatabase ?? ''} disabled={databases.length === 0} onChange={event => selectDatabase(Number(event.target.value))}>
-                {databases.map(database => <option key={database.id} value={database.id}>{database.database_name}</option>)}
-              </select>
-            </label>
-            <label className="sl-header-select sl-dataset-select" title="Dataset">
-              <Table2 />
-              <span className="sl-select-caption">Datasets ({datasets.length})</span>
-              <select aria-label="Dataset" value={selectedDataset ?? ''} disabled={loading || datasets.length === 0} onChange={event => selectDataset(Number(event.target.value))}>
-                {datasets.map(dataset => <option key={dataset.id} value={dataset.id}>{getDatasetName(dataset)}</option>)}
-              </select>
-            </label>
+            <div className="sl-header-select">
+              <HeaderPicker
+                ariaLabel="Database"
+                icon={Database}
+                items={databases.map(database => ({ value: database.id, label: database.database_name }))}
+                value={selectedDatabase}
+                onChange={selectDatabase}
+                disabled={databases.length === 0}
+                placeholder="Chọn database"
+              />
+            </div>
+            <div className="sl-header-select sl-dataset-select">
+              <HeaderPicker
+                ariaLabel="Dataset"
+                icon={Table2}
+                caption={`Datasets (${datasets.length})`}
+                items={groupDatasetsByLayer(datasets, layers, id => dictionaryByDataset[id]?.layer_id).flatMap(group => group.datasets.map(dataset => ({ value: dataset.id, label: getDatasetName(dataset), group: group.label })))}
+                value={selectedDataset}
+                onChange={selectDataset}
+                disabled={loading || datasets.length === 0}
+                placeholder="Chọn dataset"
+              />
+            </div>
           </header>
 
           {loading ? (
@@ -281,66 +279,18 @@ function SemanticLayerPage() {
               {currentDataset ? (
                 activeModule === 'dictionary' ? (
                   <main className="sl-dictionary-main">
-                    <DataDictionary key={currentDataset.id} dataset={currentDataset} onDirtyChange={setDictionaryDirty} />
+                    <DataDictionary key={currentDataset.id} dataset={currentDataset} layers={layers} onDirtyChange={setDictionaryDirty} onSaved={onDictionarySaved} onManageLayers={() => setLayersDialogOpen(true)} />
                   </main>
                 ) : (
                 <main className="sl-details">
-                  <div className="sl-workspace">
-                    <aside className="sl-field-palette" aria-label="Trường dữ liệu có thể kéo">
-                      <div className="sl-section-heading"><span><Boxes /> Trường dữ liệu</span><span className="sl-count">{(currentDataset.columns?.length ?? 0) + (currentDataset.metrics?.length ?? 0)}</span></div>
-                      <p className="sl-palette-hint">Kéo column hoặc metric vào canvas để bắt đầu xây dựng.</p>
-                      <section className="sl-palette-group">
-                        <button className="sl-palette-label sl-palette-toggle" type="button" aria-expanded={columnsExpanded} aria-controls="sl-columns-list" onClick={() => setColumnsExpanded(value => !value)}>
-                          <span>COLUMNS</span><ChevronDown className={columnsExpanded ? '' : 'is-collapsed'} />
-                        </button>
-                        <div id="sl-columns-list" className={`sl-palette-items${columnsExpanded ? ' is-expanded' : ''}`}>
-                          <div className="sl-palette-items-inner">
-                            {(currentDataset.columns ?? []).map(column => {
-                              const dictionaryColumn = dictionaryByDataset[currentDataset.id]?.columns.find(item => item.column_name === column.column_name);
-                              const item: SemanticField = { id: `column-${currentDataset.id}-${column.column_name}`, name: dictionaryColumn?.display_name || column.verbose_name || column.column_name, kind: 'column', type: column.is_dttm ? 'TIME' : column.type, sourceTable, sourceDatasetId: currentDataset.id, datasetType: dictionaryByDataset[currentDataset.id]?.dataset_type ?? null, referencedDatasetId: dictionaryColumn?.referenced_dataset_id, referencedColumnName: dictionaryColumn?.referenced_column_name };
-                              const inCanvas = canvasFieldIds.includes(item.id);
-                              return (
-                                <article className={`sl-field-card${inCanvas ? ' is-in-canvas' : ''}`} key={item.id} onPointerDown={event => startDrag(event, item)}>
-                                  <div className="sl-item-icon">{column.is_dttm ? <CalendarClock /> : <Braces />}</div>
-                                  <div className="sl-item-copy"><strong>{item.name}</strong>{column.verbose_name ? <code>{column.column_name}</code> : null}</div>
-                                  <div className="sl-field-card-trailing">
-                                    {inCanvas ? <span className="sl-field-status" title="Đã có trên canvas"><Check /> Đã thêm</span> : null}
-                                    <span className="sl-type">{item.type || 'COLUMN'}</span>
-                                  </div>
-                                </article>
-                              );
-                            })}
-                            {(currentDataset.columns ?? []).length === 0 ? <p className="sl-empty">Chưa có cột.</p> : null}
-                          </div>
-                        </div>
-                      </section>
-                      <section className="sl-palette-group">
-                        <button className="sl-palette-label sl-palette-toggle" type="button" aria-expanded={metricsExpanded} aria-controls="sl-metrics-list" onClick={() => setMetricsExpanded(value => !value)}>
-                          <span>METRICS</span><ChevronDown className={metricsExpanded ? '' : 'is-collapsed'} />
-                        </button>
-                        <div id="sl-metrics-list" className={`sl-palette-items${metricsExpanded ? ' is-expanded' : ''}`}>
-                          <div className="sl-palette-items-inner">
-                            {(currentDataset.metrics ?? []).map(metric => {
-                              const item = { id: `metric-${currentDataset.id}-${metric.metric_name}`, name: metric.verbose_name || metric.metric_name, kind: 'metric' as const, expression: metric.expression };
-                              const inCanvas = canvasFieldIds.includes(item.id);
-                              return (
-                                <article className={`sl-field-card${inCanvas ? ' is-in-canvas' : ''}`} key={item.id} onPointerDown={event => startDrag(event, item)}>
-                                  <div className="sl-item-icon"><Layers3 /></div>
-                                  <div className="sl-item-copy"><strong>{item.name}</strong>{metric.expression ? <code>{metric.expression}</code> : null}</div>
-                                  {inCanvas ? <div className="sl-field-card-trailing"><span className="sl-field-status" title="Đã có trên canvas"><Check /> Đã thêm</span></div> : null}
-                                </article>
-                              );
-                            })}
-                            {(currentDataset.metrics ?? []).length === 0 ? <p className="sl-empty">Dataset chưa có metric.</p> : null}
-                          </div>
-                        </div>
-                      </section>
-                    </aside>
-
-                    <section className="sl-canvas" aria-label="Canvas semantic layer">
-                      <SemanticCanvas themeMode={themeMode} datasets={datasets} dictionaries={dictionaryByDataset} dictionariesReady={dictionariesReady} />
-                    </section>
-                  </div>
+                  <BusinessCanvas
+                    themeMode={themeMode}
+                    databaseId={selectedDatabase as number}
+                    datasets={datasets}
+                    dictionaries={dictionaryByDataset}
+                    focusDatasetId={selectedDataset}
+                    revision={modelRevision}
+                  />
                 </main>
                 )
               ) : (
@@ -354,7 +304,9 @@ function SemanticLayerPage() {
           )}
         </div>
       </section>
+      <LayersDialog open={layersDialogOpen} layers={layers} onOpenChange={setLayersDialogOpen} onSaved={() => void loadLayers()} />
     </div>
+    </PortalContainerContext.Provider>
   );
 }
 

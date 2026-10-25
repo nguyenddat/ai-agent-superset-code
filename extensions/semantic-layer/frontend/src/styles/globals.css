@@ -1,0 +1,90 @@
+/* Tailwind runs inside Superset's page, so preflight and global base rules are left out on purpose:
+   only theme tokens and the utilities used by shadcn components are emitted. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@source "../";
+
+@custom-variant dark (&:where([data-theme-mode='dark'], [data-theme-mode='dark'] *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+/* The preflight rules shadcn components depend on, scoped to the extension roots instead of the whole Superset page:
+   border-box sizing (h-8 means 32px including padding and border) and form controls using the page font. */
+@layer base {
+  /* border-color matches shadcn's base layer: a bare `border` utility draws in the theme border colour
+     instead of currentColor (which turns white in dark mode). */
+  :where(.sl-page, .sl-nav-dropdown) *,
+  :where(.sl-page, .sl-nav-dropdown) ::before,
+  :where(.sl-page, .sl-nav-dropdown) ::after {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  /* Without these, controls keep the browser's own look (e.g. the grey "buttonface" fill that shows behind ghost
+     buttons in dark mode); component classes and the extension's own CSS still set what they need. */
+  :where(.sl-page, .sl-nav-dropdown) :where(button, input, select, textarea) {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    border-width: 0;
+    border-style: solid;
+    border-radius: 0;
+    background-color: transparent;
+  }
+
+  :where(.sl-page, .sl-nav-dropdown) :where(button) {
+    padding: 0;
+  }
+}
+
+/* shadcn tokens follow the Superset theme through the extension's --sl-* variables, so they are scoped to the
+   extension roots (popups are portaled inside .sl-page) instead of :root. */
+.sl-page,
+.sl-nav-dropdown {
+  --radius: 6px;
+  --background: var(--sl-surface);
+  --foreground: var(--sl-text);
+  --card: var(--sl-surface-raised);
+  --card-foreground: var(--sl-text);
+  --popover: var(--sl-surface-raised);
+  --popover-foreground: var(--sl-text);
+  --primary: var(--sl-accent);
+  --primary-foreground: #fff;
+  --secondary: var(--sl-surface-muted);
+  --secondary-foreground: var(--sl-text);
+  --muted: var(--sl-surface-muted);
+  --muted-foreground: var(--sl-muted);
+  --accent: color-mix(in srgb, var(--sl-accent) 10%, var(--sl-surface-raised));
+  --accent-foreground: var(--sl-text);
+  --destructive: #cf1322;
+  --border: var(--sl-border);
+  --input: var(--sl-border);
+  --ring: var(--sl-accent);
+}

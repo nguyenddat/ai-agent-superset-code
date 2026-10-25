@@ -31,12 +31,14 @@
   --sl-accent: #4db6cc;
 }
 
+/* Frame containers use `overflow: clip`, not `hidden`: hidden boxes can still be scrolled by focus or
+   scrollIntoView, which shifted the whole page with no way for the user to scroll it back. */
 .sl-panel {
   display: flex;
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  overflow: hidden;
+  overflow: clip;
   background: var(--sl-surface);
 }
 
@@ -129,27 +131,9 @@
   flex-direction: column;
 }
 
-.sl-header-select {
-  display: flex;
-  min-height: 34px;
-  flex: 0 1 240px;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  padding: 0 10px;
-  border: 1px solid var(--sl-border);
-  border-radius: 6px;
-  color: var(--sl-accent);
-  background: var(--sl-surface-raised);
-}
-
-.sl-header-select:focus-within { border-color: var(--sl-accent); }
-.sl-header-select svg { width: 16px; height: 16px; flex: 0 0 auto; }
-.sl-header-select select { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--sl-text); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
-.sl-header-select select:disabled { cursor: not-allowed; opacity: .6; }
-.sl-header-select option { color: var(--sl-text); background: var(--sl-surface-raised); }
+/* Header pickers are shadcn Combobox triggers; the wrapper only sizes them inside the header row. */
+.sl-header-select { display: flex; min-width: 0; flex: 0 1 240px; }
 .sl-dataset-select { flex-basis: 360px; }
-.sl-select-caption { flex: 0 0 auto; padding-right: 7px; border-right: 1px solid var(--sl-border); color: var(--sl-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
 
 /* Module dropdown under the Semantic Layer item in Superset's navbar; it lives on <body>, outside .sl-page. */
 .sl-nav-trigger { display: inline-flex; align-items: center; gap: 4px; }
@@ -197,7 +181,7 @@
   min-width: 0;
   min-height: 0;
   flex: 1;
-  overflow: hidden;
+  overflow: clip;
   background: var(--sl-surface-muted);
 }
 
@@ -208,7 +192,7 @@
   flex: 1;
   flex-direction: column;
   margin: 14px;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--sl-border);
   border-radius: 7px;
   background: var(--sl-surface-raised);
@@ -225,37 +209,30 @@
   border-bottom: 1px solid var(--sl-border);
 }
 
-.sl-dictionary-toolbar h3 { margin: 0; color: var(--sl-text); font-size: 14px; font-weight: 600; }
-.sl-dictionary-toolbar p { margin: 3px 0 0; color: var(--sl-muted); font-size: 11px; }
+.sl-dictionary-toolbar h3 { margin: 0; color: var(--sl-text); font-size: 15px; font-weight: 600; }
+.sl-dictionary-toolbar p { margin: 3px 0 0; color: var(--sl-muted); font-size: 12px; }
 .sl-dictionary-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
-.sl-dictionary-actions button,
 .sl-dictionary-state button {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 32px;
   align-items: center;
   justify-content: center;
   gap: 6px;
   padding: 0 11px;
   border: 1px solid var(--sl-border);
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--sl-text-secondary);
   background: var(--sl-surface-raised);
   font: inherit;
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
 }
-
-.sl-dictionary-actions button:hover:not(:disabled),
 .sl-dictionary-state button:hover { border-color: var(--sl-accent); color: var(--sl-accent); }
-.sl-dictionary-actions button:focus-visible,
 .sl-dictionary-state button:focus-visible { outline: 2px solid var(--sl-accent); outline-offset: 1px; }
-.sl-dictionary-actions button:disabled { cursor: not-allowed; opacity: .48; }
-.sl-dictionary-actions button.is-primary { border-color: var(--sl-accent); color: #fff; background: var(--sl-accent); }
-.sl-dictionary-actions svg,
 .sl-dictionary-state button svg { width: 14px; height: 14px; }
 .sl-read-only,
 .sl-save-success,
-.sl-dirty-status { display: inline-flex; align-items: center; gap: 5px; color: var(--sl-muted); font-size: 11px; }
+.sl-dirty-status { display: inline-flex; align-items: center; gap: 5px; color: var(--sl-muted); font-size: 12px; }
 .sl-save-success { color: #389e0d; }
 .sl-dirty-status { color: #d46b08; }
 .sl-read-only svg,
@@ -266,185 +243,91 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 7px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   border-bottom: 1px solid color-mix(in srgb, #cf1322 24%, var(--sl-border));
   color: #cf1322;
   background: color-mix(in srgb, #cf1322 6%, var(--sl-surface));
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sl-dictionary-save-error svg { width: 14px; height: 14px; }
 .sl-dictionary-suggestion-status {
   flex: 0 0 auto;
-  padding: 7px 14px;
+  padding: 8px 16px;
   border-bottom: 1px solid color-mix(in srgb, #389e0d 24%, var(--sl-border));
   color: #237804;
   background: color-mix(in srgb, #389e0d 6%, var(--sl-surface));
-  font-size: 11px;
+  font-size: 12px;
 }
+
+/* Dataset-level fields: four short fields on the first row, Description and Grain split the second.
+   Controls are shadcn components, so only layout lives here. */
 .sl-dataset-dictionary-fields {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 12px;
-  padding: 12px 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px 16px;
+  padding: 14px 16px 16px;
   border-bottom: 1px solid var(--sl-border);
   background: var(--sl-surface-raised);
 }
-.sl-dataset-dictionary-fields label { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--sl-muted); font-size: 10px; font-weight: 600; }
-.sl-dataset-dictionary-fields input,
-.sl-dataset-dictionary-fields select,
-.sl-dataset-dictionary-fields textarea {
-  box-sizing: border-box;
-  width: 100%;
-  height: 40px;
-  min-height: 40px;
-  padding: 6px 8px;
-  border: 1px solid var(--sl-border);
-  border-radius: 4px;
-  outline: none;
-  color: var(--sl-text);
-  background: var(--sl-surface);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 400;
-}
-/* Short fields share the first row; Description and Grain get a wide second row and grow with their text. */
-.sl-dataset-dictionary-fields label { grid-column: span 2; }
-.sl-dataset-dictionary-fields label.is-description { grid-column: span 4; }
-.sl-dataset-dictionary-fields textarea { height: auto; min-height: 60px; max-height: 140px; overflow-y: auto; line-height: 1.45; resize: vertical; }
-.sl-dataset-dictionary-fields input:focus,
-.sl-dataset-dictionary-fields select:focus,
-.sl-dataset-dictionary-fields textarea:focus { border-color: var(--sl-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 13%, transparent); }
-.sl-dataset-dictionary-fields input:disabled,
-.sl-dataset-dictionary-fields select:disabled,
-.sl-dataset-dictionary-fields textarea:disabled { cursor: not-allowed; opacity: .62; background: var(--sl-surface-muted); }
+.sl-dataset-dictionary-fields .sl-field-wide { grid-column: span 2; }
+
 /* The toolbar stays fixed; banners, dataset fields and the table scroll together here.
-   Banners and fields keep the visible width and stay pinned left while the wide table scrolls sideways. */
+   Banners and fields keep the visible width and stay pinned left while a narrow viewport scrolls the table sideways. */
 .sl-dictionary-body { min-width: 0; min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; }
 .sl-dictionary-body > :not(table) { position: sticky; left: 0; }
-.sl-dictionary-table { width: 100%; min-width: 1900px; border-collapse: separate; border-spacing: 0; table-layout: fixed; color: var(--sl-text-secondary); font-size: 11px; }
+
+/* Core metadata fits the panel width; rarely used fields live in each column's expandable detail row.
+   Cells align to the top so a Business term that grows does not shift the other controls in its row. */
+.sl-dictionary-table { width: 100%; min-width: 820px; border-collapse: separate; border-spacing: 0; table-layout: fixed; color: var(--sl-text-secondary); font-size: 13px; }
 .sl-dictionary-table th,
-.sl-dictionary-table td { box-sizing: border-box; height: 53px; padding: 7px 8px; border-right: 1px solid var(--sl-border); border-bottom: 1px solid var(--sl-border); vertical-align: middle; }
-.sl-dictionary-table thead th { position: sticky; z-index: 2; top: 0; height: 38px; color: var(--sl-muted); background: var(--sl-surface-muted); font-size: 10px; font-weight: 600; letter-spacing: .02em; text-align: left; white-space: nowrap; }
-.sl-dictionary-table tbody tr:hover td,
-.sl-dictionary-table tbody tr:hover th { background: color-mix(in srgb, var(--sl-accent) 4%, var(--sl-surface)); }
-.sl-dictionary-table th:first-child { position: sticky; z-index: 1; left: 0; width: 170px; background: var(--sl-surface-raised); }
-.sl-dictionary-table thead th:first-child { z-index: 3; background: var(--sl-surface-muted); }
-.sl-dictionary-table th:nth-child(2) { width: 180px; }
-.sl-dictionary-table th:nth-child(3) { width: 125px; }
-.sl-dictionary-table th:nth-child(4),
-.sl-dictionary-table th:nth-child(6),
-.sl-dictionary-table th:nth-child(7),
-.sl-dictionary-table th:nth-child(9) { width: 74px; text-align: center; }
-.sl-dictionary-table th:nth-child(5) { width: 130px; }
-.sl-dictionary-table th:nth-child(8) { width: 310px; }
-.sl-dictionary-table th:nth-child(10),
-.sl-dictionary-table th:nth-child(11) { width: 120px; }
-.sl-dictionary-table th:nth-child(12) { width: 230px; }
-.sl-dictionary-table code { display: block; overflow: hidden; color: var(--sl-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.sl-dictionary-table input:not([type='checkbox']),
-.sl-dictionary-table select,
-.sl-dictionary-table textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 30px;
-  padding: 5px 7px;
-  border: 1px solid var(--sl-border);
-  border-radius: 4px;
-  outline: none;
-  color: var(--sl-text);
-  background: var(--sl-surface);
-  font: inherit;
-  font-size: 11px;
-}
-.sl-dictionary-table .sl-reference-trigger {
-  display: flex;
-  width: 100%;
-  height: 30px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  overflow: hidden;
-  padding: 4px 7px;
-  border: 1px solid var(--sl-border);
-  border-radius: 4px;
-  color: var(--sl-text-secondary);
-  background: var(--sl-surface);
-  font: inherit;
+.sl-dictionary-table td { box-sizing: border-box; padding: 10px 12px; border-bottom: 1px solid var(--sl-border); vertical-align: top; }
+.sl-dictionary-table thead th { position: sticky; z-index: 2; top: 0; height: 38px; padding-block: 0; color: var(--sl-muted); background: var(--sl-surface-muted); font-size: 12px; font-weight: 600; text-align: left; vertical-align: middle; white-space: nowrap; }
+.sl-dictionary-table tbody tr:not(.sl-column-details-row):hover > * { background: color-mix(in srgb, var(--sl-accent) 4%, var(--sl-surface-raised)); }
+.sl-dictionary-table thead th:nth-child(1) { width: 44px; }
+.sl-dictionary-table thead th:nth-child(2) { width: 22%; }
+.sl-dictionary-table thead th:nth-child(3) { width: 24%; }
+.sl-dictionary-table thead th:nth-child(5) { width: 200px; }
+.sl-dictionary-table tbody th { text-align: left; font-weight: 400; }
+.sl-dictionary-table code { display: block; overflow: hidden; color: var(--sl-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.sl-type-badge { display: inline-block; max-width: 100%; margin-top: 2px; overflow: hidden; padding: 1px 6px; border-radius: 4px; color: var(--sl-muted); background: var(--sl-surface-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
+.sl-expand-cell { padding-right: 0 !important; }
+.sl-expand-cell button { display: inline-flex; width: 28px; height: 32px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 6px; color: var(--sl-muted); background: transparent; cursor: pointer; }
+.sl-expand-cell button:hover { color: var(--sl-accent); background: var(--sl-surface-muted); }
+.sl-expand-cell button:focus-visible { outline: 2px solid var(--sl-accent); }
+.sl-expand-cell svg { width: 16px; height: 16px; }
+.sl-dictionary-table tr.is-expanded > * { border-bottom-color: transparent; }
+.sl-key-toggles { display: flex; height: 32px; align-items: center; gap: 4px; }
+.sl-key-toggles label { display: inline-flex; height: 26px; align-items: center; padding: 0 9px; border: 1px solid var(--sl-border); border-radius: 13px; color: var(--sl-muted); font-size: 11px; font-weight: 600; cursor: pointer; user-select: none; }
+.sl-key-toggles label:hover { border-color: var(--sl-accent); }
+.sl-key-toggles label.is-on { border-color: var(--sl-accent); color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 12%, var(--sl-surface)); }
+.sl-key-toggles label:has(input:focus-visible) { outline: 2px solid var(--sl-accent); outline-offset: 1px; }
+.sl-key-toggles label:has(input:disabled) { cursor: not-allowed; opacity: .62; }
+.sl-key-toggles input[type='checkbox'] { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.sl-key-reference { display: block; margin-top: 4px; overflow: hidden; color: var(--sl-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.sl-column-details-row > td { padding-top: 0; background: color-mix(in srgb, var(--sl-accent) 3%, var(--sl-surface-raised)); }
+.sl-column-details { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(170px, 1.3fr) repeat(3, minmax(100px, 1fr)) auto; align-items: end; gap: 12px; padding: 4px 0 8px; }
+.sl-column-detail { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--sl-text-secondary); font-size: 12px; font-weight: 500; }
+.sl-column-detail.is-check { flex-direction: row; align-items: center; gap: 8px; height: 32px; font-size: 13px; }
+.sl-column-detail.is-check input[type='checkbox'] { width: 16px; height: 16px; margin: 0; accent-color: var(--sl-accent); }
+.sl-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Reference table / column selects: name first, then key badge, hints and type pushed to the right. */
+.sl-reference-item { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; }
+.sl-reference-item-name { min-width: 0; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.sl-reference-item-meta { flex: 0 0 auto; color: var(--sl-muted); font-size: 11px; }
+.sl-reference-item-meta.is-type { margin-left: auto; padding-left: 12px; }
+.sl-reference-badge {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--sl-accent);
+  background: color-mix(in srgb, var(--sl-accent) 12%, var(--sl-surface-raised));
   font-size: 10px;
-  text-align: left;
-  cursor: pointer;
+  font-weight: 700;
+  line-height: 18px;
 }
-.sl-dictionary-table .sl-reference-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sl-dictionary-table .sl-reference-trigger svg { width: 13px; height: 13px; flex: 0 0 auto; }
-.sl-dictionary-table .sl-reference-trigger:disabled { cursor: not-allowed; opacity: .62; background: var(--sl-surface-muted); }
-.sl-dictionary-table .sl-reference-trigger:focus-visible { border-color: var(--sl-accent); outline: 2px solid color-mix(in srgb, var(--sl-accent) 20%, transparent); }
-.sl-reference-cascade {
-  position: fixed;
-  z-index: 1500;
-  display: flex;
-  width: 472px;
-  max-width: calc(100vw - 16px);
-  overflow: hidden;
-  border: 1px solid var(--sl-border);
-  border-radius: 8px;
-  color: var(--sl-text);
-  background: var(--sl-surface-raised);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 24%);
-}
-.sl-reference-menu { width: 236px; min-width: 0; background: var(--sl-surface-raised); }
-.sl-reference-menu + .sl-reference-menu { border-left: 1px solid var(--sl-border); }
-.sl-reference-menu-heading {
-  overflow: hidden;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--sl-border);
-  color: var(--sl-muted);
-  font-size: 10px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sl-reference-options { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
-.sl-reference-menu-item {
-  display: flex;
-  width: 100%;
-  min-height: 36px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 7px 11px;
-  border: 0;
-  color: var(--sl-text-secondary);
-  background: transparent;
-  font: inherit;
-  font-size: 11px;
-  text-align: left;
-  cursor: pointer;
-}
-.sl-reference-menu-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sl-reference-menu-item svg { width: 14px; height: 14px; flex: 0 0 auto; }
-.sl-reference-menu-item:hover,
-.sl-reference-menu-item.is-active { color: var(--sl-text); background: var(--sl-surface-muted); }
-.sl-reference-menu-item.is-selected { color: var(--sl-accent); font-weight: 600; }
-.sl-dictionary-table textarea {
-  display: block;
-  height: 38px;
-  min-height: 38px;
-  max-height: 38px;
-  overflow-y: auto;
-  resize: none;
-}
-.sl-dictionary-table input:not([type='checkbox']):focus,
-.sl-dictionary-table select:focus,
-.sl-dictionary-table textarea:focus { border-color: var(--sl-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 13%, transparent); }
-.sl-dictionary-table input:disabled,
-.sl-dictionary-table select:disabled,
-.sl-dictionary-table textarea:disabled { cursor: not-allowed; opacity: .62; background: var(--sl-surface-muted); }
-.sl-dictionary-table input:read-only { cursor: default; background: var(--sl-surface-muted); }
-.sl-dictionary-table input[type='checkbox'] { display: block; width: 16px; height: 16px; margin: auto; accent-color: var(--sl-accent); }
-/* Pagination sits in the toolbar between AutoFill and Save so the body below only holds dictionary content. */
-.sl-dictionary-actions .sl-dictionary-pagination { display: inline-flex; align-items: center; gap: 6px; color: var(--sl-muted); font-size: 11px; white-space: nowrap; }
-.sl-dictionary-actions .sl-dictionary-pagination button { width: 30px; min-height: 30px; flex: 0 0 auto; padding: 0; }
 
 .sl-dictionary-state {
   display: flex;
@@ -473,511 +356,722 @@
   padding: 12px 18px 18px;
 }
 
-.sl-dataset-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.sl-eyebrow {
-  color: var(--sl-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .07em;
-}
-
-.sl-dataset-heading h3 {
-  margin: 5px 0 3px;
-  color: var(--sl-text);
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.sl-dataset-heading p {
-  margin: 0;
-  color: var(--sl-muted);
-  font-size: 12px;
-}
-
-.sl-id,
-.sl-type {
-  flex: 0 0 auto;
-  padding: 3px 7px;
-  border-radius: 4px;
-  color: var(--sl-text-secondary);
-  background: var(--sl-surface-muted);
-  font-size: 10px;
-}
-
-.sl-description {
-  margin: 14px 0 0;
-  color: var(--sl-text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.sl-workspace {
+/* Business/lineage canvas: a domain panel on the left and a React Flow canvas on the right. */
+.sl-model-workspace {
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
   gap: 16px;
-  margin-top: 0;
 }
+.sl-model-workspace.is-panel-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
 
-.sl-field-palette,
+.sl-model-panel,
 .sl-canvas {
   min-width: 0;
   border: 1px solid var(--sl-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--sl-surface-raised);
 }
 
-.sl-field-palette {
-  overflow-y: auto;
-  padding: 14px;
+.sl-model-panel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 0 14px 14px;
 }
 
-.sl-field-palette > .sl-section-heading {
-  box-sizing: border-box;
-  min-height: 55px;
-  margin: -14px -14px 0;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--sl-border);
-  font-size: 14px;
-}
-
-.sl-field-palette > .sl-section-heading > span:first-child {
+.sl-model-panel-heading {
+  display: flex;
+  min-height: 54px;
   align-items: center;
-  gap: 9px;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 -14px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--sl-border);
 }
+.sl-model-panel-actions { display: flex; align-items: center; gap: 4px; }
+.sl-model-workspace.is-panel-collapsed .sl-model-panel { align-items: center; padding: 0 6px; }
+.sl-model-workspace.is-panel-collapsed .sl-model-panel-heading { justify-content: center; margin-inline: -6px; padding-inline: 0; }
+
+.sl-model-panel-heading > span { display: flex; align-items: center; gap: 8px; color: var(--sl-text); font-size: 14px; font-weight: 600; }
+.sl-model-panel-heading > span > svg { width: 16px; height: 16px; color: var(--sl-accent); }
 
 .sl-palette-hint {
-  margin: 12px 0 18px;
+  margin: 12px 0;
   color: var(--sl-text-secondary);
   font-size: 12px;
   line-height: 1.5;
 }
 
-.sl-palette-group + .sl-palette-group {
-  margin-top: 12px;
-}
-
-.sl-palette-label {
-  color: var(--sl-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .06em;
-}
-
-.sl-palette-toggle {
+.sl-model-domain-list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 2px; overflow-y: auto; }
+.sl-model-domain {
   display: flex;
-  width: 100%;
-  min-height: 34px;
+  min-height: 36px;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 5px 4px;
+  padding: 0 4px 0 8px;
+  border-radius: 6px;
+}
+.sl-model-domain:hover { background: var(--sl-surface-muted); }
+.sl-model-domain.is-selected { background: color-mix(in srgb, var(--sl-accent) 10%, var(--sl-surface-raised)); }
+.sl-model-domain-dot { display: inline-block; width: 10px; height: 10px; flex: 0 0 auto; border-radius: 3px; }
+.sl-model-domain-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
   border: 0;
-  border-radius: 4px;
+  color: var(--sl-text);
   background: transparent;
+  font: inherit;
+  font-size: 13px;
   text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
-
-.sl-palette-toggle:hover {
-  color: var(--sl-text);
-  background: var(--sl-surface-muted);
-}
-
-.sl-palette-toggle svg {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 auto;
-  transition: transform 180ms ease;
-}
-
-.sl-palette-toggle svg.is-collapsed {
-  transform: rotate(-90deg);
-}
-
-.sl-palette-items {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transition: grid-template-rows 220ms ease, opacity 180ms ease;
-}
-
-.sl-palette-items.is-expanded {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-
-.sl-palette-items-inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.sl-field-card {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  padding: 8px;
-  border: 1px solid var(--sl-border);
-  border-radius: 4px;
-  background: var(--sl-surface);
-  cursor: grab;
-  user-select: none;
-}
-
-.sl-field-card:active { cursor: grabbing; }
-.sl-field-card:hover { border-color: var(--sl-accent); }
-.sl-field-card.is-in-canvas {
-  border-color: color-mix(in srgb, var(--sl-accent) 55%, var(--sl-border));
-  background: color-mix(in srgb, var(--sl-accent) 7%, var(--sl-surface));
-}
-.sl-field-card .sl-item-icon { width: 24px; height: 24px; }
-.sl-field-card .sl-item-copy strong { font-size: 13px; }
-.sl-field-card .sl-item-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sl-field-card .sl-type { margin-left: auto; }
-.sl-field-card-trailing { display: flex; flex: 0 0 auto; align-items: flex-end; flex-direction: column; gap: 4px; margin-left: auto; }
-.sl-field-card-trailing .sl-type { margin-left: 0; }
-.sl-field-status { display: flex; align-items: center; gap: 3px; color: var(--sl-accent); font-size: 10px; font-weight: 600; white-space: nowrap; }
-.sl-field-status svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.sl-model-domain-count { color: var(--sl-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sl-model-unassigned { margin: 10px 0 0; color: var(--sl-muted); font-size: 12px; }
+.sl-model-panel-footer { margin-top: 12px; }
 
 .sl-canvas {
   display: flex;
+  position: relative;
   min-height: 320px;
   flex-direction: column;
-  overflow: hidden;
-  --sl-grid-dot: color-mix(in srgb, var(--sl-text-secondary) 38%, transparent);
+  overflow: clip;
+  --sl-grid-line: color-mix(in srgb, var(--sl-text-secondary) 14%, transparent);
 }
 
-.sl-flow-canvas {
-  position: relative;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-}
-
-.sl-flow-canvas.is-drop-target::after {
-  position: absolute;
-  z-index: 4;
-  border: 2px solid var(--sl-accent);
-  border-radius: 4px;
-  content: '';
-  inset: 3px;
-  pointer-events: none;
-}
-
-body.sl-dragging-field,
-body.sl-dragging-field * {
-  cursor: grabbing !important;
-  user-select: none !important;
-}
-
-.sl-flow-canvas .react-flow {
+.sl-model-canvas .react-flow {
   width: 100%;
   height: 100%;
-  background: color-mix(in srgb, var(--sl-accent) 3%, var(--sl-surface));
-  --xy-background-color: color-mix(in srgb, var(--sl-accent) 3%, var(--sl-surface));
-  --xy-node-background-color-default: var(--sl-surface-raised);
-  --xy-node-color-default: var(--sl-text);
-  --xy-node-border-default: 1px solid var(--sl-border);
-  --xy-node-border-radius-default: 7px;
-  --xy-node-boxshadow-default: 0 3px 12px rgb(0 0 0 / 9%);
-  --xy-handle-background-color-default: var(--sl-surface-raised);
-  --xy-handle-border-color-default: var(--sl-accent);
-  --xy-edge-stroke: var(--sl-accent);
+  background: color-mix(in srgb, var(--sl-accent) 2%, var(--sl-surface));
+  --xy-background-color: color-mix(in srgb, var(--sl-accent) 2%, var(--sl-surface));
+  --xy-node-background-color-default: transparent;
+  --xy-node-border-default: 0;
+  --xy-node-boxshadow-default: none;
+  --xy-edge-label-background-color: var(--sl-surface-raised);
+  --xy-edge-label-color: var(--sl-text-secondary);
   --xy-controls-button-background-color: var(--sl-surface-raised);
   --xy-controls-button-color: var(--sl-text-secondary);
   --xy-controls-button-border-color: var(--sl-border);
 }
 
-.sl-flow-canvas .react-flow__node-semanticField {
-  width: 290px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
+.sl-model-canvas .react-flow__node-domainGroup,
+.sl-model-canvas .react-flow__node-modelTable,
+.sl-model-canvas .react-flow__node-tableTile,
+.sl-model-canvas .react-flow__node-lane,
+.sl-model-canvas .react-flow__node-level { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.sl-model-canvas .react-flow__node-lane,
+.sl-model-canvas .react-flow__node-level { pointer-events: none; }
+.sl-model-canvas .react-flow__edge-path { stroke-linecap: round; stroke-linejoin: round; }
+/* Selection keeps the edge's own colour (it may be user-chosen) and stands out by width and a soft halo. */
+.sl-model-canvas .react-flow__edge.selected .react-flow__edge-path { stroke-width: 3.5px !important; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--sl-text) 35%, transparent)); }
+.sl-model-canvas .react-flow__edge-textbg { fill: var(--sl-surface-raised); }
+.sl-model-canvas .react-flow__edge-text { fill: var(--sl-text-secondary); font-size: 11px; font-weight: 600; }
+.sl-model-canvas .react-flow__controls { overflow: hidden; border: 1px solid var(--sl-border); border-radius: 6px; box-shadow: 0 2px 8px rgb(0 0 0 / 8%); }
+.sl-model-canvas .react-flow__controls-button { width: 32px; height: 32px; border-bottom-color: var(--sl-border); }
+.sl-model-canvas .react-flow__controls-button svg { max-width: 15px; max-height: 15px; fill: currentColor; }
 
-.sl-flow-node {
-  display: flex;
-  min-height: 82px;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--sl-border);
-  border-radius: 7px;
-  background: var(--sl-surface-raised);
-  box-shadow: 0 3px 12px rgb(0 0 0 / 9%);
-}
-
-.sl-flow-node.is-metric { border-inline-start: 3px solid var(--sl-accent); }
-.sl-flow-node .sl-item-icon { width: 30px; height: 30px; }
-.sl-flow-node .sl-item-copy strong { font-size: 14px; }
-.sl-flow-node .sl-item-copy span { display: block; margin-top: 4px; overflow: hidden; color: var(--sl-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.sl-flow-node .sl-item-copy .sl-flow-node-table { color: var(--sl-muted); font-size: 11px; }
-.sl-flow-node > button { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 4px; color: var(--sl-muted); background: transparent; cursor: pointer; }
-.sl-flow-node > button:hover { color: #cf1322; background: var(--sl-surface-muted); }
-.sl-flow-node > button svg { width: 15px; height: 15px; }
-
-.sl-flow-node.sl-table-node {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-  padding: 0;
-  overflow: visible;
-  border-color: #b8c2ca;
-  background: #e7ebee;
-}
-.sl-table-node .sl-table-node-header {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid #cbd3d9;
-  border-radius: 6px 6px 0 0;
-  color: #253746;
-  background: #d8dfe4;
-}
-.sl-table-node-header .sl-item-icon { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: 6px; color: #168eb1; background: #eef6f8; }
-.sl-table-node-header .sl-item-icon svg { width: 16px; height: 16px; }
-.sl-table-node-header > strong { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.sl-table-node-header > span { flex: 0 0 auto; color: #61717d; font-size: 11px; }
-.sl-table-node.is-base { border-color: #2c8bb2; background: #eaf5fa; }
-.sl-table-node.is-base .sl-table-node-header { border-bottom-color: #b7dceb; color: #134e68; background: #d4edf7; }
-.sl-table-node.is-base .sl-table-node-header .sl-item-icon { color: #087da8; background: #effaff; }
-.sl-table-node.is-aggregate { border-color: #8660c8; background: #f3effa; }
-.sl-table-node.is-aggregate .sl-table-node-header { border-bottom-color: #d3c3ec; color: #4f347c; background: #e8ddf7; }
-.sl-table-node.is-aggregate .sl-table-node-header .sl-item-icon { color: #7044b2; background: #f6f1ff; }
-.sl-table-node-fields { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 16px; }
-.sl-table-node-field { position: relative; display: flex; min-width: 0; min-height: 40px; align-items: center; gap: 9px; margin-inline: 8px; padding: 8px 10px; border: 1px solid #d3dbe0; border-radius: 6px; color: #304455; background: #fff; }
-.sl-table-node-field .react-flow__handle-left { left: -8px; }
-.sl-table-node-field .react-flow__handle-right { right: -8px; }
-.sl-table-node-field > svg { width: 14px; height: 14px; flex: 0 0 auto; color: #168eb1; }
-.sl-table-node-field > span { min-width: 0; flex: 1; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.sl-table-node-field > small { flex: 0 0 auto; color: #75838c; font-size: 10px; }
-.sl-table-node-field > button { display: grid; width: 24px; height: 24px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 4px; color: #75838c; background: transparent; cursor: pointer; }
-.sl-table-node-field > button:hover { color: #cf1322; background: #f4e8e8; }
-.sl-table-node-field > button svg { width: 13px; height: 13px; }
-
-.sl-flow-canvas .react-flow__handle {
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  border-width: 2px;
-}
-
-.sl-flow-canvas .sl-table-node-field .react-flow__handle-left {
-  left: -42px;
-}
-
-.sl-flow-canvas .sl-table-node-field .react-flow__handle-right {
-  right: -42px;
-}
-
-.sl-flow-canvas .react-flow__edge-path {
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.sl-flow-canvas .react-flow__edge:hover .react-flow__edge-path,
-.sl-flow-canvas .react-flow__edge.selected .react-flow__edge-path {
-  stroke-width: 4.5px;
-}
-
-.sl-flow-canvas .react-flow__controls {
-  overflow: hidden;
-  border: 1px solid var(--sl-border);
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
-}
-
-.sl-flow-canvas .react-flow__controls-button {
-  width: 32px;
-  height: 32px;
-  border-bottom-color: var(--sl-border);
-}
-
-.sl-flow-canvas .react-flow__controls-button svg {
-  max-width: 15px;
-  max-height: 15px;
-  fill: currentColor;
-}
-
-.sl-empty-canvas {
-  display: flex;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 3;
-  width: min(440px, calc(100% - 48px));
-  min-height: 200px;
-  box-sizing: border-box;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 10px;
-  padding: 28px;
-  border: 1px solid var(--sl-border);
-  border-radius: 8px;
-  background: var(--sl-surface-raised);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
-  color: var(--sl-text-secondary);
-  text-align: center;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.sl-empty-canvas svg { width: 28px; height: 28px; color: var(--sl-accent); }
-.sl-empty-canvas strong { color: var(--sl-text); font-size: 15px; }
-.sl-empty-canvas span { max-width: 360px; color: var(--sl-text-secondary); font-size: 14px; line-height: 1.55; }
-
-.sl-canvas-count {
+/* Lineage edge label, shown while the edge is hovered or selected: the cardinality, then the column pairs. */
+.sl-edge-label {
   position: absolute;
   z-index: 5;
-  top: 12px;
-  right: 16px;
-  color: var(--sl-muted);
-  font-size: 12px;
-  pointer-events: none;
-}
-
-.sl-workspace-card {
   display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-  padding: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8px;
   border: 1px solid var(--sl-border);
-  border-radius: 5px;
+  border-radius: 6px;
   background: var(--sl-surface-raised);
-  box-shadow: 0 2px 5px rgb(0 0 0 / 6%);
-  animation: sl-card-in 180ms ease-out both;
-}
-
-.sl-workspace-card.is-metric { border-inline-start: 3px solid var(--sl-accent); }
-.sl-workspace-card .sl-item-icon { width: 26px; height: 26px; }
-.sl-workspace-card .sl-item-copy strong { font-size: 13px; }
-.sl-workspace-card .sl-item-copy span { display: block; margin-top: 4px; overflow: hidden; color: var(--sl-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.sl-workspace-card > button { display: grid; width: 26px; height: 26px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 4px; color: var(--sl-muted); background: transparent; cursor: pointer; }
-.sl-workspace-card > button:hover { color: #cf1322; background: var(--sl-surface-muted); }
-.sl-workspace-card > button svg { width: 14px; height: 14px; }
-
-@keyframes sl-card-in {
-  from { opacity: 0; transform: translateY(5px) scale(.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.sl-metadata-section {
-  margin-top: 22px;
-}
-
-.sl-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--sl-border);
-  color: var(--sl-text);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.sl-section-heading > span:first-child {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.sl-section-heading svg,
-.sl-item-icon {
-  color: var(--sl-accent);
-}
-
-.sl-count {
-  color: var(--sl-muted);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+  color: var(--sl-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  font-weight: 400;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: move;
+  pointer-events: all;
 }
+.sl-edge-label.is-selected { border-color: var(--sl-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 25%, transparent); }
+.sl-edge-label > span { overflow: hidden; text-overflow: ellipsis; }
+.sl-edge-label > span:first-child { color: var(--sl-text); font-weight: 700; }
+.sl-edge-label.is-muted { opacity: 0.6; }
+/* Holds the edge-end markers; it takes no room. */
+.sl-edge-markers { position: absolute; width: 0; height: 0; overflow: hidden; }
 
-.sl-item-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  gap: 8px;
-  padding-top: 10px;
-}
-
-.sl-item-card {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--sl-border);
-  border-radius: 4px;
+/* Handles of the selected edge, drawn as in draw.io: bars on orthogonal segments, dots on waypoints and faint dots
+   where a waypoint can be added. */
+.sl-edge-handle {
+  position: absolute;
+  z-index: 10;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--sl-accent);
+  border-radius: 50%;
   background: var(--sl-surface-raised);
+  pointer-events: all;
 }
+.sl-edge-handle.is-vertical { width: 8px; height: 22px; border-radius: 4px; cursor: ew-resize; }
+.sl-edge-handle.is-horizontal { width: 22px; height: 8px; border-radius: 4px; cursor: ns-resize; }
+.sl-edge-handle.is-point { cursor: move; }
+.sl-edge-handle.is-add { width: 10px; height: 10px; opacity: .55; cursor: copy; }
+.sl-edge-handle.is-add:hover { opacity: 1; }
 
-.sl-item-icon {
+/* Business view: each domain is a set of grid cells, tinted and outlined in the domain colour along its outer sides.
+   The node itself takes no pointer events so the gaps of a non-rectangular domain stay part of the canvas. */
+.sl-model-canvas .react-flow__node-domainGroup { pointer-events: none; }
+.sl-domain-group { position: relative; width: 100%; height: 100%; }
+.sl-domain-cell {
+  --edge: 1.5px dashed color-mix(in srgb, var(--domain-color) 55%, transparent);
+  position: absolute;
+  box-sizing: border-box;
+  width: 120px;
+  height: 120px;
+  background: color-mix(in srgb, var(--domain-color) 7%, transparent);
+  cursor: cell;
+  pointer-events: auto;
+}
+.sl-domain-group.is-selected .sl-domain-cell {
+  --edge: 2px solid var(--domain-color);
+  background: color-mix(in srgb, var(--domain-color) 11%, transparent);
+}
+.sl-domain-cell:not(.is-header):hover { background: color-mix(in srgb, var(--domain-color) 14%, transparent); }
+.sl-domain-cell.edge-t { border-top: var(--edge); }
+.sl-domain-cell.edge-r { border-right: var(--edge); }
+.sl-domain-cell.edge-b { border-bottom: var(--edge); }
+.sl-domain-cell.edge-l { border-left: var(--edge); }
+.sl-domain-cell.round-tl { border-top-left-radius: 14px; }
+.sl-domain-cell.round-tr { border-top-right-radius: 14px; }
+.sl-domain-cell.round-br { border-bottom-right-radius: 14px; }
+.sl-domain-cell.round-bl { border-bottom-left-radius: 14px; }
+.sl-domain-cell.is-header { cursor: grab; }
+/* Outer edges are grips that grow the domain by one cell, or shrink it when dragged inwards. */
+.sl-domain-grip { position: absolute; z-index: 1; }
+.sl-domain-grip.is-t, .sl-domain-grip.is-b { right: 14px; left: 14px; height: 12px; cursor: ns-resize; }
+.sl-domain-grip.is-l, .sl-domain-grip.is-r { top: 14px; bottom: 14px; width: 12px; cursor: ew-resize; }
+.sl-domain-grip.is-t { top: -7px; }
+.sl-domain-grip.is-b { bottom: -7px; }
+.sl-domain-grip.is-l { left: -7px; }
+.sl-domain-grip.is-r { right: -7px; }
+.sl-domain-grip::after {
+  position: absolute;
+  inset: 4px;
+  border-radius: 999px;
+  background: var(--domain-color);
+  content: '';
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.sl-domain-grip:hover::after { opacity: 0.7; }
+.sl-domain-group-header {
+  display: flex;
+  box-sizing: border-box;
+  height: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px;
+}
+.sl-domain-group-footer { display: flex; width: 100%; align-items: center; }
+.sl-domain-group-label {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: var(--domain-color);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  cursor: pointer;
+}
+.sl-domain-group.is-unassigned .sl-domain-group-label { cursor: default; }
+.sl-domain-group-count { color: var(--sl-muted); font-size: 11px; }
+.sl-domain-group-edit {
   display: grid;
   width: 26px;
   height: 26px;
-  flex: 0 0 auto;
+  margin-left: auto;
   place-items: center;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--sl-accent) 10%, var(--sl-surface));
+  border: 0;
+  border-radius: 6px;
+  color: var(--sl-muted);
+  background: transparent;
+  cursor: pointer;
 }
+.sl-domain-group-edit:hover { color: var(--sl-text); background: var(--sl-surface-muted); }
+.sl-domain-group-edit svg { width: 14px; height: 14px; }
 
-.sl-item-copy {
+/* Lineage table card. Every part has the fixed height lineageCard.ts lays the card out with, so edges meet the row of
+   the column they join: a 48px header, 26px column rows and the 22px and 28px lines under them. The icon colour
+   encodes the warehouse layer. */
+.sl-lineage-card {
+  --layer-color: #8c8c8c;
+  display: flex;
+  box-sizing: border-box;
+  width: 264px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--sl-border);
+  border-top: 3px solid var(--layer-color);
+  border-radius: 8px;
+  color: var(--sl-text);
+  background: var(--sl-surface-raised);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 2px 8px rgb(0 0 0 / 4%);
+  transition: opacity 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+}
+.sl-lineage-card:hover { box-shadow: 0 2px 4px rgb(0 0 0 / 8%), 0 6px 18px rgb(0 0 0 / 8%); }
+.sl-lineage-card.is-inactive { opacity: .5; }
+/* The top border is 2px thicker than the 1px the layout counts; the header gives those 2px back. */
+.sl-lineage-card-header {
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  height: 46px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+}
+.sl-lineage-column {
+  position: relative;
+  display: flex;
+  box-sizing: border-box;
+  height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-top: 1px solid color-mix(in srgb, var(--sl-border) 70%, transparent);
+  font-size: 11px;
+}
+.sl-lineage-column:hover { background: color-mix(in srgb, var(--sl-accent) 6%, var(--sl-surface-raised)); }
+.sl-lineage-column-keys { display: flex; width: 40px; flex: 0 0 auto; gap: 2px; }
+.sl-lineage-column code {
   min-width: 0;
   flex: 1;
-}
-
-.sl-item-copy strong {
-  display: block;
   overflow: hidden;
-  color: var(--sl-text);
-  font-size: 12px;
-  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-
-.sl-item-copy code {
-  display: block;
-  margin-top: 3px;
+.sl-lineage-column-type {
+  max-width: 76px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  color: var(--sl-muted);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.sl-lineage-more {
+  box-sizing: border-box;
+  height: 22px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border-top: 1px dashed var(--sl-border);
   color: var(--sl-muted);
   font-size: 10px;
+  line-height: 21px;
 }
-
-.sl-item-copy p {
-  margin: 6px 0 0;
-  color: var(--sl-text-secondary);
+/* The metrics row shows or hides the metrics beside the card; the arrows to them leave from its right end. */
+.sl-lineage-metrics-row { position: relative; display: flex; height: 28px; flex: 0 0 auto; }
+.sl-lineage-metrics {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-top: 1px solid var(--sl-border);
+  color: #7c3aed;
+  background: color-mix(in srgb, #8b5cf6 6%, var(--sl-surface-raised));
+  font: inherit;
   font-size: 11px;
-  line-height: 1.45;
+  font-weight: 600;
+  cursor: pointer;
 }
-
-.sl-item-copy pre {
-  max-height: 94px;
-  margin: 8px 0 0;
-  padding: 8px;
-  overflow: auto;
-  border-radius: 4px;
+.sl-lineage-metrics:hover { background: color-mix(in srgb, #8b5cf6 12%, var(--sl-surface-raised)); }
+.sl-lineage-metrics:focus-visible { outline: 2px solid #8b5cf6; outline-offset: -2px; }
+.sl-lineage-metrics svg { width: 13px; height: 13px; flex: 0 0 auto; transition: transform 120ms ease; }
+.sl-lineage-metrics span { flex: 1; text-align: left; }
+.sl-lineage-metrics.is-open svg:last-child { transform: rotate(180deg); }
+/* A metric beside its card, one fixed-height pill per metric (see lineageCard METRIC_HEIGHT). */
+.sl-model-canvas .react-flow__node-lineageMetric { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.sl-lineage-metric-node {
+  display: flex;
+  box-sizing: border-box;
+  width: 224px;
+  height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, #8b5cf6 40%, var(--sl-border));
+  border-radius: 999px;
+  color: var(--sl-text);
+  background: color-mix(in srgb, #8b5cf6 7%, var(--sl-surface-raised));
+  font-size: 12px;
+  cursor: help;
+  transition: opacity 150ms ease, box-shadow 120ms ease;
+}
+.sl-lineage-metric-node:hover { box-shadow: 0 0 0 3px color-mix(in srgb, #8b5cf6 22%, transparent); }
+.sl-lineage-metric-node.is-dimmed { opacity: .22; }
+.sl-lineage-metric-node > svg { width: 13px; height: 13px; flex: 0 0 auto; color: #8b5cf6; }
+.sl-lineage-metric-node > strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+/* The formula of a hovered metric, or of the metric whose arrow is hovered, beside the metric. */
+.sl-lineage-formula {
+  display: flex;
+  max-width: 380px;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #8b5cf6 35%, var(--sl-border));
+  border-radius: 8px;
   color: var(--sl-text-secondary);
-  background: var(--sl-surface-muted);
+  background: var(--sl-surface-raised);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 14%);
+  font-size: 11px;
+  pointer-events: none;
+}
+.sl-lineage-formula > span { color: var(--sl-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sl-lineage-formula > code { color: var(--sl-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; line-height: 16px; white-space: pre-wrap; word-break: break-word; }
+.sl-lineage-formula > small { color: var(--sl-muted); font-size: 11px; }
+/* Far out, the small print goes and the table name grows so the diagram still reads. */
+.sl-model-canvas.is-zoomed-out .sl-lineage-card-header .sl-model-table-copy code,
+.sl-model-canvas.is-zoomed-out .sl-lineage-column-type,
+.sl-model-canvas.is-zoomed-out .sl-lineage-more { visibility: hidden; }
+.sl-model-canvas.is-zoomed-out .sl-lineage-card-header .sl-model-table-copy strong { font-size: 16px; }
+/* Tracing a card: its upstream and downstream stay, the rest fades. */
+.sl-model-canvas .react-flow__node.is-dimmed { opacity: .22; }
+.sl-model-canvas .react-flow__node.is-traced .sl-lineage-card { border-color: color-mix(in srgb, var(--sl-accent) 55%, var(--sl-border)); border-top-color: var(--layer-color); }
+.sl-model-canvas .react-flow__edge.is-dimmed { opacity: .12; }
+.sl-model-canvas .react-flow__edge.is-traced .react-flow__edge-path { stroke-width: 2.5px !important; }
+.sl-model-key {
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+}
+.sl-model-key.is-pk { color: #b45309; background: color-mix(in srgb, #d97706 16%, var(--sl-surface-raised)); }
+.sl-model-key.is-fk { color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 14%, var(--sl-surface-raised)); }
+.sl-model-key.is-metric { color: #7c3aed; background: color-mix(in srgb, #8b5cf6 14%, var(--sl-surface-raised)); }
+/* Columns of the metric being looked at: the values it aggregates strongly, the columns picking its rows faintly. */
+.sl-lineage-column.is-measure { background: color-mix(in srgb, #8b5cf6 18%, var(--sl-surface-raised)); box-shadow: inset 3px 0 0 #8b5cf6; }
+.sl-lineage-column.is-filter { background: color-mix(in srgb, #8b5cf6 7%, var(--sl-surface-raised)); box-shadow: inset 3px 0 0 color-mix(in srgb, #8b5cf6 45%, transparent); }
+.sl-lineage-metric-node.is-focused { border-color: #8b5cf6; box-shadow: 0 0 0 3px color-mix(in srgb, #8b5cf6 22%, transparent); }
+.sl-model-table-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--layer-color);
+  background: color-mix(in srgb, var(--layer-color) 12%, var(--sl-surface-raised));
+}
+.sl-model-table-icon svg { width: 16px; height: 16px; }
+.sl-model-table-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.sl-model-table-copy strong,
+.sl-model-table-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-model-table-copy strong { font-size: 12px; font-weight: 600; }
+.sl-model-table-copy code { color: var(--sl-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.sl-model-shared {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--sl-accent);
+  background: color-mix(in srgb, var(--sl-accent) 12%, var(--sl-surface-raised));
   font-size: 10px;
-  white-space: pre-wrap;
+  font-weight: 700;
+}
+.sl-model-tile {
+  --layer-color: #8c8c8c;
+  display: flex;
+  box-sizing: border-box;
+  width: 108px;
+  height: 108px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid var(--sl-border);
+  border-radius: 10px;
+  color: var(--sl-text);
+  background: var(--sl-surface-raised);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 6%);
+  cursor: grab;
+}
+.sl-model-canvas .react-flow__node.dragging .sl-model-tile { cursor: grabbing; box-shadow: 0 6px 16px rgb(0 0 0 / 14%); }
+.sl-model-tile-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.sl-model-tile .sl-model-table-icon { width: 26px; height: 26px; border-radius: 6px; }
+.sl-model-tile .sl-model-table-icon svg { width: 14px; height: 14px; }
+.sl-model-tile strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 14px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.sl-model-tile code {
+  margin-top: auto;
+  overflow: hidden;
+  color: var(--sl-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sl-model-canvas .react-flow__node.is-focused .sl-model-tile,
+.sl-model-canvas .react-flow__node.is-focused .sl-lineage-card { border-color: var(--sl-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--sl-accent) 30%, transparent); }
+
+.sl-model-handle.react-flow__handle {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--sl-accent);
+  background: var(--sl-surface-raised);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.sl-lineage-card:hover .sl-model-handle.connectable,
+.react-flow__node.selected .sl-model-handle.connectable { opacity: 1; }
+/* Column handles only anchor edges on their row; they are never drawn or grabbed. */
+.sl-column-handle.react-flow__handle { width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; background: transparent; opacity: 0; pointer-events: none; }
+
+/* Lineage lanes: one faint column per data layer, headed by its name over a rule in the layer colour. */
+.sl-model-lane {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lane-color, var(--sl-muted)) 4%, transparent);
+  box-shadow: inset 0 3px 0 color-mix(in srgb, var(--lane-color, var(--sl-muted)) 70%, transparent);
 }
 
-.sl-metric-card {
-  border-inline-start: 3px solid var(--sl-accent);
+/* A band stretched over another by a dragged card: the drop would be refused and the card returns. */
+.sl-model-canvas .react-flow__node-lane.is-clashing .sl-model-lane {
+  outline: 2px dashed #dc2626;
+  outline-offset: -2px;
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+}
+
+/* Top-right column: the detail levels stacked over the re-layout button, then a selected edge's panel. */
+.sl-lineage-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.sl-lineage-tools { display: flex; width: 168px; flex-direction: column; gap: 6px; }
+.sl-lineage-tools > button { justify-content: flex-start; background: var(--sl-surface-raised); }
+.sl-lineage-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  background: var(--sl-surface-raised);
+}
+.sl-lineage-detail > button { justify-content: flex-start; }
+/* Layer names and descriptions are admin-defined, so the label column truncates instead of growing. */
+/* The band header drags the band; the rest of the band lets clicks and drags through to the canvas. */
+.sl-model-lane-label {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  height: 48px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 12px 0;
+  border-radius: 10px 10px 0 0;
+  cursor: grab;
+  pointer-events: auto;
+}
+.sl-model-lane-label:hover { background: color-mix(in srgb, var(--lane-color, var(--sl-muted)) 8%, transparent); }
+.react-flow__node.dragging .sl-model-lane-label { cursor: grabbing; }
+.sl-model-lane-grip { width: 14px; height: 14px; margin-left: auto; color: var(--sl-muted); opacity: 0; transition: opacity 120ms ease; }
+.sl-model-lane-label:hover .sl-model-lane-grip { opacity: 1; }
+.sl-model-lane-label strong,
+.sl-model-lane-label small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-model-lane-label strong { display: flex; align-items: center; gap: 7px; color: var(--sl-text); font-size: 13px; font-weight: 600; }
+.sl-model-lane-label strong::before { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 999px; background: var(--lane-color, var(--sl-muted)); content: ''; }
+.sl-model-lane-label small { padding-left: 15px; color: var(--sl-muted); font-size: 11px; }
+
+/* Data layers dialog: one row per level in flow order, the level's layers side by side in it. Gaps between levels
+   take a dragged layer as a new level, or a dragged level as its new place. */
+.sl-level-list { display: flex; max-height: min(60vh, 560px); flex-direction: column; overflow-y: auto; padding: 2px; }
+.sl-level {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--sl-border);
+  border-radius: 10px;
+  background: var(--sl-surface-muted);
+  transition: border-color 120ms ease, background 120ms ease, opacity 120ms ease;
+}
+.sl-level.is-target { border-color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 7%, var(--sl-surface-muted)); }
+.sl-level.is-dragged { opacity: .45; }
+.sl-level-head { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--sl-text); font-size: 13px; }
+.sl-level-head strong { flex: 0 0 auto; font-weight: 600; }
+.sl-level-hint { min-width: 0; overflow: hidden; color: var(--sl-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sl-level-actions { display: flex; margin-left: auto; gap: 2px; }
+.sl-level-grip { display: grid; flex: 0 0 auto; place-items: center; width: 20px; height: 24px; border-radius: 4px; color: var(--sl-muted); cursor: grab; }
+.sl-level-grip:hover { color: var(--sl-text); background: color-mix(in srgb, var(--sl-text) 8%, transparent); }
+.sl-level-grip:active { cursor: grabbing; }
+.sl-level-grip svg { width: 14px; height: 14px; }
+.sl-level-layers { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.sl-level-layer {
+  --layer-color: #8c8c8c;
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--sl-border);
+  border-left: 3px solid var(--layer-color);
+  border-radius: 8px;
+  background: var(--sl-surface-raised);
+  transition: opacity 120ms ease;
+}
+.sl-level-layer.is-dragged { opacity: .4; }
+/* A layer dropped here lands before this card. */
+.sl-level-layer.is-drop-before::before { position: absolute; top: 4px; bottom: 4px; left: -7px; width: 3px; border-radius: 2px; background: var(--sl-accent); content: ''; }
+.sl-level-layer-top,
+.sl-level-layer-bottom { display: flex; min-width: 0; align-items: center; gap: 4px; }
+.sl-level-layer-top > [data-slot='input'],
+.sl-level-layer-bottom > [data-slot='input'] { min-width: 0; flex: 1; }
+.sl-level-add {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed var(--sl-border);
+  border-radius: 8px;
+  color: var(--sl-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sl-level-add:hover { border-color: var(--sl-accent); color: var(--sl-accent); }
+.sl-level-add:focus-visible { outline: 2px solid var(--sl-accent); outline-offset: 1px; }
+.sl-level-add svg { width: 14px; height: 14px; }
+.sl-level-gap { display: flex; height: 10px; align-items: center; justify-content: center; border-radius: 8px; transition: height 120ms ease, background 120ms ease; }
+.sl-level-gap.is-dragging { height: 34px; border: 1px dashed transparent; color: var(--sl-muted); font-size: 12px; }
+.sl-level-gap.is-dragging span { opacity: 0; transition: opacity 120ms ease; }
+.sl-level-gap.is-dragging:hover span,
+.sl-level-gap.is-active span { opacity: 1; }
+.sl-level-gap.is-active { border-color: var(--sl-accent); color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 8%, transparent); }
+
+/* Lineage level header over the column of lanes that share the level. */
+.sl-lineage-level {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  border-bottom: 2px solid color-mix(in srgb, var(--sl-text) 22%, transparent);
+  color: var(--sl-text);
+  font-size: 13px;
+}
+.sl-lineage-level strong { font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+.sl-lineage-level span { color: var(--sl-muted); font-size: 11px; }
+.sl-color-dot { display: inline-block; width: 14px; height: 14px; flex: 0 0 auto; border-radius: 999px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 15%); }
+
+.sl-model-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  background: var(--sl-surface-raised);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 8%);
+}
+.sl-model-selection { padding: 6px 6px 6px 14px; color: var(--sl-text); font-size: 13px; }
+
+/* Shown when a lineage edge is clicked: colour swatches, reset and delete. */
+.sl-edge-panel {
+  display: flex;
+  width: 260px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
+  background: var(--sl-surface-raised);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 8%);
+}
+.sl-edge-panel-title { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.sl-edge-panel-title span { color: var(--sl-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.sl-edge-panel-title strong { overflow: hidden; color: var(--sl-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.sl-edge-panel-styles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.sl-edge-panel-hint { margin: 0; color: var(--sl-muted); font-size: 11px; line-height: 15px; }
+.sl-edge-panel-colors { display: flex; flex-wrap: wrap; gap: 6px; }
+.sl-edge-panel-actions { display: flex; justify-content: space-between; gap: 8px; }
+
+.sl-model-overlay,
+.sl-model-error {
+  display: flex;
+  position: absolute;
+  z-index: 6;
+  align-items: center;
+  gap: 8px;
+}
+.sl-model-overlay { inset: 0; justify-content: center; color: var(--sl-text-secondary); font-size: 13px; background: color-mix(in srgb, var(--sl-surface) 70%, transparent); }
+.sl-model-overlay svg { width: 16px; height: 16px; }
+.sl-model-error {
+  top: 64px;
+  left: 50%;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid color-mix(in srgb, #cf1322 30%, var(--sl-border));
+  border-radius: 8px;
+  color: #cf1322;
+  background: var(--sl-surface-raised);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.sl-color-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.sl-color-swatch[aria-pressed='true'] { box-shadow: 0 0 0 2px var(--sl-surface-raised), 0 0 0 4px var(--sl-text); }
+.sl-domain-dataset-list {
+  display: flex;
+  max-height: 260px;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--sl-border);
+  border-radius: 8px;
 }
 
 .sl-empty {
@@ -990,20 +1084,21 @@ body.sl-dragging-field * {
 
 @media (max-width: 700px) {
   .sl-dataset-dictionary-fields { grid-template-columns: 1fr; }
-  .sl-dataset-dictionary-fields label,
-  .sl-dataset-dictionary-fields label.is-description { grid-column: auto; }
+  .sl-dataset-dictionary-fields .sl-field-wide { grid-column: auto; }
   .sl-header { gap: 7px; padding-inline: 10px; }
   .sl-header p { display: none; }
   .sl-header-select { flex-basis: 0; flex-grow: 1; }
-  .sl-select-caption { display: none; }
-  .sl-workspace { grid-template-columns: 1fr; }
-  .sl-field-palette { max-height: 260px; }
-  .sl-drop-grid { grid-template-columns: 1fr; }
+  .sl-model-workspace { grid-template-columns: 1fr; }
+  .sl-model-workspace.is-panel-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
+  .sl-model-panel { max-height: 240px; }
   .sl-details { padding: 14px 12px 20px; }
-  .sl-item-grid { grid-template-columns: 1fr; }
-  .sl-dictionary { margin: 8px; overflow: hidden; }
+  .sl-dictionary { margin: 8px; overflow: clip; }
   .sl-dictionary-toolbar { align-items: flex-start; flex-direction: column; background: var(--sl-surface-raised); }
   .sl-dictionary-actions { width: 100%; flex-wrap: wrap; }
-  .sl-dictionary-actions button { flex: 1; }
-  .sl-dictionary-table { min-width: 1900px; }
+  .sl-dictionary-actions > button { flex: 1; }
 }
+
+/* Confirmation of the tables a canvas move puts into or takes out of domains. */
+.sl-member-changes { display: flex; flex-direction: column; gap: 6px; max-height: 240px; margin: 0; padding: 0; overflow: auto; list-style: none; font-size: 13px; }
+.sl-member-changes li { padding: 6px 10px; border-left: 3px solid var(--sl-accent); border-radius: 6px; background: var(--sl-surface-muted, rgb(127 127 127 / 8%)); }
+.sl-member-changes li.is-remove { border-left-color: #dc2626; }

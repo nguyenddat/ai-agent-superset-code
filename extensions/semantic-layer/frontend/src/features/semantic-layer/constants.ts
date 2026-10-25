@@ -6,7 +6,7 @@ export type SemanticLayerModule = 'dictionary' | 'semantic';
 
 export const semanticLayerModules: Array<{ id: SemanticLayerModule; label: string; description: string }> = [
   { id: 'dictionary', label: 'Data Dictionary', description: 'Chỉnh metadata datasets và columns' },
-  { id: 'semantic', label: 'Semantic Layer', description: 'Xây dựng quan hệ trên canvas' },
+  { id: 'semantic', label: 'Semantic Layer', description: 'Nghiệp vụ và data lineage' },
 ];
 
 export function semanticLayerModuleHref(module: SemanticLayerModule): string {
@@ -14,12 +14,11 @@ export function semanticLayerModuleHref(module: SemanticLayerModule): string {
 }
 
 export function semanticLayerModuleFromLocation(): SemanticLayerModule {
-  return new URLSearchParams(window.location.search).get('module') === 'semantic' ? 'semantic' : 'dictionary';
+  const module = new URLSearchParams(window.location.search).get('module');
+  return module === 'semantic' ? module : 'dictionary';
 }
 
 export const semanticLayerEvents = {
-  fieldsChange: 'semantic-fields-change',
-  pointerDrop: 'semantic-field-pointer-drop',
   moduleRequest: 'semantic-layer-module-request',
 } as const;
 

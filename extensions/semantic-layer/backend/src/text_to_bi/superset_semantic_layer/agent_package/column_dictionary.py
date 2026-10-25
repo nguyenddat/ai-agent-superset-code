@@ -1,6 +1,6 @@
 import json
-from functools import lru_cache
 from collections.abc import Iterator
+from functools import lru_cache
 from typing import Any
 
 from langchain.agents import create_agent
@@ -120,7 +120,7 @@ def suggest_column_dictionary_batches(
     """Generate suggestions in small independent batches for incremental streaming."""
     columns = dataset.get("columns")
     if not isinstance(columns, list):
-        raise ValueError("Dataset context must contain a columns list.")
+        raise ValueError("Dataset context must contain a columns list.")  # noqa: TRY004
     if batch_size < 1:
         raise ValueError("batch_size must be positive.")
 

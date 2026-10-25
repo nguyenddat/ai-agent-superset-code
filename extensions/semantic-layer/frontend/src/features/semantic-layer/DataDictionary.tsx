@@ -1,23 +1,41 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   Check,
-  ChevronLeft,
+  ChevronDown,
   ChevronRight,
   LoaderCircle,
   LockKeyhole,
   RotateCcw,
   Save,
+  Settings2,
   Sparkles,
 } from 'lucide-react';
-import { semanticLayerApi, supersetApi } from './api';
-import { ReferenceColumnPicker } from './ReferenceColumnPicker';
-import type { ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DatasetDictionary, ReferenceDataset } from './types';
+import { Button } from '@/components/ui/button';
+import { Field, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { requestJson, semanticLayerApi, supersetApi } from './api';
+import { layerLevels } from './datasets';
+import { ReferenceFields } from './ReferenceFields';
+import type {
+  ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DataLayer, DatasetDictionary, ReferenceDataset,
+} from './types';
 
 type DataDictionaryProps = {
   dataset: DashboardDataset;
+  layers: DataLayer[];
   onDirtyChange: (dirty: boolean) => void;
+  onSaved: (dictionary: DatasetDictionary) => void;
+  onManageLayers: () => void;
 };
+
+const datasetTypeItems: Array<{ label: string; value: DatasetDictionary['dataset_type'] }> = [
+  { label: 'Chưa phân loại', value: null },
+  { label: 'Base dataset', value: 'base' },
+  { label: 'Aggregate dataset', value: 'aggregate' },
+];
 
 const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> = [
   'display_name',
@@ -32,19 +50,6 @@ const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> 
   'format',
   'business_term',
 ];
-const PAGE_SIZE = 7;
-
-// Grows with its content up to the CSS max-height, then scrolls, so long dataset text stays readable.
-function AutoGrowTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    element.style.height = 'auto';
-    element.style.height = `${element.scrollHeight + element.offsetHeight - element.clientHeight}px`;
-  }, [props.value]);
-  return <textarea ref={ref} {...props} />;
-}
 
 function normalizeNullableText(value: string | null): string | null {
   return value === '' ? null : value;
@@ -62,7 +67,7 @@ async function responseMessage(response: Response, fallback: string): Promise<st
   return payload?.message || payload?.error || fallback;
 }
 
-export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) {
+export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onManageLayers }: DataDictionaryProps) {
   const [dictionary, setDictionary] = useState<DatasetDictionary | null>(null);
   const [baseline, setBaseline] = useState<ColumnDictionary[]>([]);
   const [datasetBaseline, setDatasetBaseline] = useState({
@@ -71,6 +76,7 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
     grain: null as string | null,
     create_column: null as string | null,
     dataset_type: null as DatasetDictionary['dataset_type'],
+    layer_id: null as number | null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -83,17 +89,18 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
   const [suggestProgress, setSuggestProgress] = useState('');
   const [referenceDatasets, setReferenceDatasets] = useState<ReferenceDataset[]>([]);
   const [referenceOptionsError, setReferenceOptionsError] = useState('');
-  const [page, setPage] = useState(0);
+  // Bumped after a save so the reference picker sees newly declared key columns.
+  const [referenceRevision, setReferenceRevision] = useState(0);
+  const [expandedColumns, setExpandedColumns] = useState<Set<string>>(() => new Set());
 
   const columns = dictionary?.columns ?? [];
-  const pageCount = Math.max(1, Math.ceil(columns.length / PAGE_SIZE));
-  const pageColumns = columns.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const datasetDirty = dictionary !== null && (
     dictionary.display_name !== datasetBaseline.display_name
     || dictionary.description !== datasetBaseline.description
     || dictionary.grain !== datasetBaseline.grain
     || dictionary.create_column !== datasetBaseline.create_column
     || dictionary.dataset_type !== datasetBaseline.dataset_type
+    || dictionary.layer_id !== datasetBaseline.layer_id
   );
   const dirty = useMemo(
     () => datasetDirty || comparableColumns(columns) !== comparableColumns(baseline),
@@ -137,6 +144,7 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
         grain: payload.grain,
         create_column: payload.create_column,
         dataset_type: payload.dataset_type,
+        layer_id: payload.layer_id ?? null,
       });
     } catch (reason) {
       if ((reason as Error).name !== 'AbortError') {
@@ -149,7 +157,7 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
 
   useEffect(() => {
     const controller = new AbortController();
-    setPage(0);
+    setExpandedColumns(new Set());
     void loadDictionary(controller.signal);
     return () => controller.abort();
   }, [dataset.id]);
@@ -175,7 +183,7 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
     };
     void loadReferenceOptions();
     return () => controller.abort();
-  }, []);
+  }, [referenceRevision]);
 
   const updateColumn = <K extends keyof ColumnDictionary>(columnName: string, field: K, value: ColumnDictionary[K]) => {
     setSaved(false);
@@ -188,7 +196,16 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
     } : current);
   };
 
-  const updateDataset = <K extends 'display_name' | 'description' | 'grain' | 'create_column' | 'dataset_type'>(
+  const toggleExpanded = (columnName: string) => {
+    setExpandedColumns(current => {
+      const next = new Set(current);
+      if (next.has(columnName)) next.delete(columnName);
+      else next.add(columnName);
+      return next;
+    });
+  };
+
+  const updateDataset = <K extends 'display_name' | 'description' | 'grain' | 'create_column' | 'dataset_type' | 'layer_id'>(
     field: K,
     value: DatasetDictionary[K],
   ) => {
@@ -355,6 +372,7 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
             grain: normalizeNullableText(dictionary.grain?.trim() ?? ''),
             create_column: dictionary.create_column || null,
             dataset_type: dictionary.dataset_type,
+            layer_id: dictionary.layer_id ?? null,
           },
           columns: columns.map(({ column_name, ...column }) => ({
             column_name,
@@ -376,8 +394,11 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
         grain: payload.grain,
         create_column: payload.create_column,
         dataset_type: payload.dataset_type,
+        layer_id: payload.layer_id ?? null,
       });
       setSaved(true);
+      onSaved(payload);
+      setReferenceRevision(value => value + 1);
     } catch (reason) {
       setSaveError(reason instanceof Error ? reason.message : 'Không lưu được data dictionary.');
     } finally {
@@ -411,6 +432,14 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
   }
 
   const readOnly = dictionary.read_only === true;
+  const layerItems: Array<{ label: string; value: number | null }> = [
+    { label: 'Chưa phân tầng', value: null },
+    ...layerLevels(layers).flatMap((level, index) => level.map(layer => ({ label: `${layer.name} · Cấp ${index + 1}`, value: layer.id }))),
+  ];
+  const createColumnItems: Array<{ label: string; value: string | null }> = [
+    { label: 'Chưa chọn', value: null },
+    ...columns.map(column => ({ label: column.column_name, value: column.column_name })),
+  ];
   return (
     <section className="sl-dictionary" aria-label={`Data dictionary của ${dictionary.dataset_name}`}>
       <header className="sl-dictionary-toolbar">
@@ -422,19 +451,16 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
           {readOnly ? <span className="sl-read-only"><LockKeyhole /> Chỉ đọc</span> : null}
           {dirty && !readOnly ? <span className="sl-dirty-status" role="status">Chưa lưu</span> : null}
           {saved ? <span className="sl-save-success" role="status"><Check /> Đã lưu</span> : null}
-          {!readOnly ? <button type="button" disabled={saving || suggesting} onClick={() => void suggestDictionary()} title="Điền metadata còn trống; classification do người dùng chọn">
-            {suggesting ? <LoaderCircle className="sl-spin" /> : <Sparkles />}
-            {suggesting ? 'Đang điền…' : 'AutoFill'}
-          </button> : null}
-          <nav className="sl-dictionary-pagination" aria-label="Phân trang columns">
-            <button type="button" aria-label="Trang trước" disabled={page === 0} onClick={() => setPage(current => Math.max(0, current - 1))}><ChevronLeft /></button>
-            <span title={`Trang ${page + 1} / ${pageCount}`}>{columns.length === 0 ? '0 columns' : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, columns.length)} / ${columns.length}`} · Trang {page + 1}/{pageCount}</span>
-            <button type="button" aria-label="Trang sau" disabled={page + 1 >= pageCount} onClick={() => setPage(current => Math.min(pageCount - 1, current + 1))}><ChevronRight /></button>
-          </nav>
-          <button className="is-primary" type="button" disabled={!dirty || saving || suggesting || readOnly} onClick={() => void saveChanges()}>
-            {saving ? <LoaderCircle className="sl-spin" /> : <Save />}
+          {!readOnly ? (
+            <Button variant="outline" disabled={saving || suggesting} onClick={() => void suggestDictionary()} title="Điền metadata còn trống; classification do người dùng chọn">
+              {suggesting ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
+              {suggesting ? 'Đang điền…' : 'AutoFill'}
+            </Button>
+          ) : null}
+          <Button disabled={!dirty || saving || suggesting || readOnly} onClick={() => void saveChanges()}>
+            {saving ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
             {saving ? 'Đang lưu…' : 'Lưu thay đổi'}
-          </button>
+          </Button>
         </div>
       </header>
       <div className="sl-dictionary-body">
@@ -443,74 +469,136 @@ export function DataDictionary({ dataset, onDirtyChange }: DataDictionaryProps) 
         {suggestError ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {suggestError}</div> : null}
         {suggestProgress ? <div className="sl-dictionary-suggestion-status" role="status">{suggestProgress}{suggested && !suggesting ? ' Chỉnh sửa thêm thì bấm Lưu thay đổi.' : ''}</div> : null}
         <div className="sl-dataset-dictionary-fields">
-          <label>Dataset name<input aria-label="Dataset display name" disabled={readOnly || saving} value={dictionary.display_name} onChange={event => updateDataset('display_name', event.target.value)} /></label>
-          <label>Classification<select aria-label="Dataset classification" disabled={readOnly || saving} value={dictionary.dataset_type ?? ''} onChange={event => updateDataset('dataset_type', (event.target.value || null) as DatasetDictionary['dataset_type'])}>
-            <option value="">Chưa phân loại</option>
-            <option value="base">Base dataset</option>
-            <option value="aggregate">Aggregate dataset</option>
-          </select></label>
-          <label>Create column<select aria-label="Dataset create column" disabled={readOnly || saving} value={dictionary.create_column ?? ''} onChange={event => updateDataset('create_column', event.target.value || null)}>
-            <option value="">Chưa chọn</option>
-            {columns.map(column => <option key={column.column_name} value={column.column_name}>{column.column_name}</option>)}
-          </select></label>
-          <label className="is-description">Description<AutoGrowTextarea aria-label="Dataset description" disabled={readOnly || saving} rows={3} value={dictionary.description ?? ''} onChange={event => updateDataset('description', normalizeNullableText(event.target.value))} /></label>
-          <label>Grain<AutoGrowTextarea aria-label="Dataset grain" disabled={readOnly || saving} rows={3} value={dictionary.grain ?? ''} onChange={event => updateDataset('grain', normalizeNullableText(event.target.value))} /></label>
+          <Field>
+            <FieldLabel htmlFor="sl-dataset-display-name">Dataset name</FieldLabel>
+            <Input id="sl-dataset-display-name" disabled={readOnly || saving} value={dictionary.display_name} onChange={event => updateDataset('display_name', event.target.value)} />
+          </Field>
+          <Field>
+            <FieldLabel>Tầng dữ liệu</FieldLabel>
+            <div className="flex gap-1.5">
+              <Select items={layerItems} value={dictionary.layer_id ?? null} disabled={readOnly || saving} onValueChange={value => updateDataset('layer_id', value)}>
+                <SelectTrigger aria-label="Tầng dữ liệu" className="min-w-0 flex-1"><SelectValue /></SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  <SelectGroup>
+                    {layerItems.map(item => <SelectItem key={item.value ?? 'none'} value={item.value}>{item.label}</SelectItem>)}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="icon" aria-label="Quản lý tầng dữ liệu" title="Quản lý tầng dữ liệu" onClick={onManageLayers}><Settings2 /></Button>
+            </div>
+          </Field>
+          <Field>
+            <FieldLabel>Classification</FieldLabel>
+            <Select items={datasetTypeItems} value={dictionary.dataset_type} disabled={readOnly || saving} onValueChange={value => updateDataset('dataset_type', value)}>
+              <SelectTrigger aria-label="Dataset classification" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {datasetTypeItems.map(item => <SelectItem key={item.value ?? 'none'} value={item.value}>{item.label}</SelectItem>)}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel title="Cột ghi nhận thời điểm tạo bản ghi, dùng để lọc theo thời gian">Cột thời gian tạo</FieldLabel>
+            <Select items={createColumnItems} value={dictionary.create_column} disabled={readOnly || saving} onValueChange={value => updateDataset('create_column', value)}>
+              <SelectTrigger aria-label="Dataset create column" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectGroup>
+                  {createColumnItems.map(item => <SelectItem key={item.value ?? 'none'} value={item.value}>{item.label}</SelectItem>)}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field className="sl-field-wide">
+            <FieldLabel htmlFor="sl-dataset-description">Description</FieldLabel>
+            <Textarea id="sl-dataset-description" className="max-h-36" disabled={readOnly || saving} value={dictionary.description ?? ''} onChange={event => updateDataset('description', normalizeNullableText(event.target.value))} />
+          </Field>
+          <Field className="sl-field-wide">
+            <FieldLabel htmlFor="sl-dataset-grain">Grain</FieldLabel>
+            <Textarea id="sl-dataset-grain" className="max-h-36" disabled={readOnly || saving} value={dictionary.grain ?? ''} onChange={event => updateDataset('grain', normalizeNullableText(event.target.value))} />
+          </Field>
         </div>
         <table className="sl-dictionary-table">
           <thead>
             <tr>
+              <th scope="col"><span className="sl-visually-hidden">Chi tiết</span></th>
               <th scope="col">Column</th>
               <th scope="col">Display name</th>
-              <th scope="col">Data type</th>
-              <th scope="col">Nullable</th>
-              <th scope="col">Default</th>
-              <th scope="col">PK</th>
-              <th scope="col">FK</th>
-              <th scope="col">Referenced column</th>
-              <th scope="col">Unique</th>
-              <th scope="col">Unit</th>
-              <th scope="col">Format</th>
               <th scope="col">Business term</th>
+              <th scope="col">Khóa</th>
             </tr>
           </thead>
           <tbody>
-            {pageColumns.map(column => (
-              <tr key={column.column_name}>
-                <th scope="row" data-label="Column"><code title={column.column_name}>{column.column_name}</code></th>
-                <td data-label="Display name"><input aria-label={`Display name của ${column.column_name}`} disabled={readOnly || saving} value={column.display_name} onChange={event => updateColumn(column.column_name, 'display_name', event.target.value)} /></td>
-                <td data-label="Data type"><input aria-label={`Data type của ${column.column_name}`} readOnly value={column.data_type} /></td>
-                <td data-label="Nullable"><input aria-label={`${column.column_name} nullable`} disabled={readOnly || saving} type="checkbox" checked={column.nullable} onChange={event => updateColumn(column.column_name, 'nullable', event.target.checked)} /></td>
-                <td data-label="Default"><input aria-label={`Default value của ${column.column_name}`} disabled={readOnly || saving} value={column.default_value ?? ''} onChange={event => updateColumn(column.column_name, 'default_value', normalizeNullableText(event.target.value))} /></td>
-                <td data-label="Primary key"><input aria-label={`${column.column_name} là primary key`} disabled={readOnly || saving} type="checkbox" checked={column.is_pk} onChange={event => updateColumn(column.column_name, 'is_pk', event.target.checked)} /></td>
-                <td data-label="Foreign key"><input aria-label={`${column.column_name} là foreign key`} disabled={readOnly || saving} type="checkbox" checked={column.is_fk} onChange={event => {
-                  const checked = event.target.checked;
-                  updateColumn(column.column_name, 'is_fk', checked);
-                  if (!checked) {
-                    updateColumn(column.column_name, 'referenced_dataset_id', null);
-                    updateColumn(column.column_name, 'referenced_column_name', null);
-                  }
-                }} /></td>
-                <td data-label="Referenced column">
-                  <ReferenceColumnPicker
-                    datasets={referenceDatasets}
-                    datasetId={column.referenced_dataset_id}
-                    columnName={column.referenced_column_name}
-                    disabled={readOnly || saving}
-                    onChange={(referencedDatasetId, referencedColumnName) => {
-                      if (referencedDatasetId && referencedColumnName) {
-                        updateColumn(column.column_name, 'is_fk', true);
-                      }
-                      updateColumn(column.column_name, 'referenced_dataset_id', referencedDatasetId);
-                      updateColumn(column.column_name, 'referenced_column_name', referencedColumnName);
-                    }}
-                  />
-                </td>
-                <td data-label="Unique"><input aria-label={`${column.column_name} là unique`} disabled={readOnly || saving} type="checkbox" checked={column.is_unique} onChange={event => updateColumn(column.column_name, 'is_unique', event.target.checked)} /></td>
-                <td data-label="Unit"><input aria-label={`Unit của ${column.column_name}`} disabled={readOnly || saving} value={column.unit ?? ''} onChange={event => updateColumn(column.column_name, 'unit', normalizeNullableText(event.target.value))} /></td>
-                <td data-label="Format"><input aria-label={`Format của ${column.column_name}`} disabled={readOnly || saving} value={column.format ?? ''} onChange={event => updateColumn(column.column_name, 'format', normalizeNullableText(event.target.value))} /></td>
-                <td data-label="Business term"><textarea aria-label={`Business term của ${column.column_name}`} disabled={readOnly || saving} rows={2} value={column.business_term ?? ''} onChange={event => updateColumn(column.column_name, 'business_term', normalizeNullableText(event.target.value))} /></td>
-              </tr>
-            ))}
+            {columns.map(column => {
+              const expanded = expandedColumns.has(column.column_name);
+              const disabled = readOnly || saving;
+              const detailsId = `sl-column-details-${column.id}`;
+              const reference = column.referenced_column_name
+                ? `${referenceDatasets.find(item => item.id === column.referenced_dataset_id)?.dataset_name ?? column.referenced_dataset_label ?? ''}.${column.referenced_column_name}`
+                : null;
+              return (
+                <React.Fragment key={column.column_name}>
+                  <tr className={expanded ? 'is-expanded' : undefined}>
+                    <td className="sl-expand-cell">
+                      <button type="button" aria-expanded={expanded} aria-controls={detailsId} aria-label={`Chi tiết của ${column.column_name}`} onClick={() => toggleExpanded(column.column_name)}>
+                        {expanded ? <ChevronDown /> : <ChevronRight />}
+                      </button>
+                    </td>
+                    <th scope="row">
+                      <code title={column.column_name}>{column.column_name}</code>
+                      <span className="sl-type-badge" title={column.data_type}>{column.data_type}</span>
+                    </th>
+                    <td><Input aria-label={`Display name của ${column.column_name}`} disabled={disabled} value={column.display_name} onChange={event => updateColumn(column.column_name, 'display_name', event.target.value)} /></td>
+                    <td><Textarea aria-label={`Business term của ${column.column_name}`} className="min-h-8 max-h-24 resize-none py-1" disabled={disabled} value={column.business_term ?? ''} onChange={event => updateColumn(column.column_name, 'business_term', normalizeNullableText(event.target.value))} /></td>
+                    <td>
+                      <div className="sl-key-toggles">
+                        <label className={column.is_pk ? 'is-on' : undefined} title="Primary key"><input aria-label={`${column.column_name} là primary key`} type="checkbox" disabled={disabled} checked={column.is_pk} onChange={event => updateColumn(column.column_name, 'is_pk', event.target.checked)} />PK</label>
+                        <label className={column.is_fk ? 'is-on' : undefined} title="Foreign key"><input aria-label={`${column.column_name} là foreign key`} type="checkbox" disabled={disabled} checked={column.is_fk} onChange={event => {
+                          const checked = event.target.checked;
+                          updateColumn(column.column_name, 'is_fk', checked);
+                          if (!checked) {
+                            updateColumn(column.column_name, 'referenced_dataset_id', null);
+                            updateColumn(column.column_name, 'referenced_column_name', null);
+                          } else if (!expanded) {
+                            toggleExpanded(column.column_name);
+                          }
+                        }} />FK</label>
+                        <label className={column.is_unique ? 'is-on' : undefined} title="Unique"><input aria-label={`${column.column_name} là unique`} type="checkbox" disabled={disabled} checked={column.is_unique} onChange={event => updateColumn(column.column_name, 'is_unique', event.target.checked)} />UQ</label>
+                      </div>
+                      {reference ? <span className="sl-key-reference" title={reference}>→ {reference}</span> : null}
+                    </td>
+                  </tr>
+                  {expanded ? (
+                    <tr className="sl-column-details-row" id={detailsId}>
+                      <td />
+                      <td colSpan={4}>
+                        <div className="sl-column-details">
+                          <ReferenceFields
+                            datasets={referenceDatasets}
+                            datasetId={column.referenced_dataset_id}
+                            columnName={column.referenced_column_name}
+                            sourceColumnName={column.column_name}
+                            sourceDatasetId={dataset.id}
+                            disabled={disabled}
+                            onChange={(referencedDatasetId, referencedColumnName) => {
+                              if (referencedDatasetId && referencedColumnName) {
+                                updateColumn(column.column_name, 'is_fk', true);
+                              }
+                              updateColumn(column.column_name, 'referenced_dataset_id', referencedDatasetId);
+                              updateColumn(column.column_name, 'referenced_column_name', referencedColumnName);
+                            }}
+                          />
+                          <label className="sl-column-detail">Default<Input aria-label={`Default value của ${column.column_name}`} disabled={disabled} value={column.default_value ?? ''} onChange={event => updateColumn(column.column_name, 'default_value', normalizeNullableText(event.target.value))} /></label>
+                          <label className="sl-column-detail">Unit<Input aria-label={`Unit của ${column.column_name}`} disabled={disabled} value={column.unit ?? ''} onChange={event => updateColumn(column.column_name, 'unit', normalizeNullableText(event.target.value))} /></label>
+                          <label className="sl-column-detail">Format<Input aria-label={`Format của ${column.column_name}`} disabled={disabled} value={column.format ?? ''} onChange={event => updateColumn(column.column_name, 'format', normalizeNullableText(event.target.value))} /></label>
+                          <label className="sl-column-detail is-check"><input aria-label={`${column.column_name} nullable`} disabled={disabled} type="checkbox" checked={column.nullable} onChange={event => updateColumn(column.column_name, 'nullable', event.target.checked)} />Nullable</label>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
