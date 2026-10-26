@@ -1,6 +1,8 @@
 # Đặc tả: Grain và ngữ nghĩa thời gian có cấu trúc
 
-Trạng thái: **đã duyệt** · Ngày: 26/10/2026 · Phạm vi: Semantic Layer (mô hình dữ liệu) và AI Agent
+Trạng thái: **đã duyệt** · Bước 1 đã làm (commit `a6f9f93`). Bước 3 và 4 được thay bằng
+[schema-link.md](schema-link.md) (26/10/2026): truy vấn sẽ do module schema link của AI Agent sinh SQL trên base table,
+không còn đi qua `time_grain` của ChartData. Bước 2 được gộp vào `/schema-graph` của đặc tả đó. · Ngày: 26/10/2026 · Phạm vi: Semantic Layer (mô hình dữ liệu) và AI Agent
 
 ## 1. Vấn đề
 
