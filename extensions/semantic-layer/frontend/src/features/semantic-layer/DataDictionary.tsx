@@ -18,12 +18,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi, supersetApi } from './api';
 import { layerLevels } from './datasets';
+import { IndicatorsPanel } from './IndicatorsPanel';
 import { ReferenceFields } from './ReferenceFields';
 import { RelationshipsPanel } from './RelationshipsPanel';
 import { TimeSemanticsFields, type TimeSemantics } from './TimeSemanticsFields';
 import type {
   ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DataLayer, DatasetDictionary, ReferenceDataset,
-  TemporalKind,
+  Aggregation, SemanticRole, TemporalKind,
 } from './types';
 
 type DataDictionaryProps = {
@@ -46,6 +47,33 @@ const temporalKindItems: Array<{ label: string; value: TemporalKind | null }> = 
   { label: 'Ngày giờ', value: 'timestamp' },
 ];
 const TEMPORAL_KIND_LABELS: Record<TemporalKind, string> = { date: 'Ngày', timestamp: 'Ngày giờ' };
+const ROLE_LABELS: Record<SemanticRole, string> = {
+  key: 'Khoá', measure: 'Đo lường', dimension: 'Chiều', label: 'Nhãn', time: 'Thời gian', row_kind: 'Loại dòng',
+  attribute: 'Thuộc tính',
+};
+const roleItems = (Object.keys(ROLE_LABELS) as SemanticRole[]).map(role => ({ label: ROLE_LABELS[role], value: role }));
+const AGGREGATION_LABELS: Record<Aggregation, string> = {
+  SUM: 'Tổng', AVG: 'Trung bình', MIN: 'Nhỏ nhất', MAX: 'Lớn nhất', COUNT: 'Đếm', COUNT_DISTINCT: 'Đếm khác nhau',
+};
+
+/** Synonyms typed as one comma-separated line; the list is taken when the field is left, so a comma can be typed. */
+function SynonymsInput({ label, value, disabled, onChange }: {
+  label: string; value: string[]; disabled: boolean; onChange: (value: string[]) => void;
+}) {
+  const joined = value.join(', ');
+  const [draft, setDraft] = useState(joined);
+  useEffect(() => setDraft(joined), [joined]);
+  return (
+    <Input
+      aria-label={label}
+      disabled={disabled}
+      placeholder="nhiệt độ, nhiệt độ không khí"
+      value={draft}
+      onChange={event => setDraft(event.target.value)}
+      onBlur={() => onChange(draft.split(',').map(word => word.trim()).filter(Boolean))}
+    />
+  );
+}
 
 const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> = [
   'display_name',
@@ -60,16 +88,21 @@ const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> 
   'format',
   'business_term',
   'temporal_kind',
+  'semantic_role',
+  'aggregations',
+  'synonyms',
+  'description',
 ];
 
-type DictionaryTab = 'columns' | 'general' | 'time' | 'relationships';
+type DictionaryTab = 'columns' | 'general' | 'time' | 'relationships' | 'indicators';
 const TAB_STORAGE_KEY = 'sl-dictionary-tab';
 
 /** The tab last opened in this browser, so switching datasets keeps the administrator where they work. */
 function rememberedTab(): DictionaryTab {
   try {
     const stored = window.localStorage.getItem(TAB_STORAGE_KEY);
-    return stored === 'general' || stored === 'time' || stored === 'relationships' ? stored : 'columns';
+    const tabs: DictionaryTab[] = ['general', 'time', 'relationships', 'indicators'];
+    return tabs.includes(stored as DictionaryTab) ? stored as DictionaryTab : 'columns';
   } catch {
     return 'columns';
   }
@@ -106,6 +139,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     dataset_type: null as DatasetDictionary['dataset_type'],
     layer_id: null as number | null,
     timeSemantics: JSON.stringify({ time_column: null, row_kind_column: null, grains: [] }),
+    indicatorModel: 'null',
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -133,8 +167,10 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     || dictionary.layer_id !== datasetBaseline.layer_id
   );
   const timeDirty = dictionary !== null && JSON.stringify(timeSemanticsOf(dictionary)) !== datasetBaseline.timeSemantics;
+  const indicatorDirty = dictionary !== null
+    && JSON.stringify(dictionary.indicator_model ?? null) !== datasetBaseline.indicatorModel;
   const columnsDirty = useMemo(() => comparableColumns(columns) !== comparableColumns(baseline), [baseline, columns]);
-  const dirty = generalDirty || timeDirty || columnsDirty;
+  const dirty = generalDirty || timeDirty || indicatorDirty || columnsDirty;
   const selectTab = (next: DictionaryTab) => {
     setTab(next);
     try {
@@ -184,6 +220,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         dataset_type: payload.dataset_type,
         layer_id: payload.layer_id ?? null,
         timeSemantics: JSON.stringify(timeSemanticsOf(payload)),
+        indicatorModel: JSON.stringify(payload.indicator_model ?? null),
       });
     } catch (reason) {
       if ((reason as Error).name !== 'AbortError') {
@@ -421,12 +458,13 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             time_column: dictionary.time_column,
             row_kind_column: dictionary.row_kind_column,
             grains: dictionary.grains.map(item => ({ ...item, label: normalizeNullableText(item.label?.trim() ?? '') })),
+            indicator_model: dictionary.indicator_model ?? null,
           },
           columns: columns.map(({ column_name, ...column }) => ({
             column_name,
             ...Object.fromEntries(editableFields.map(field => {
               const value = column[field];
-              const nullableText = ['default_value', 'unit', 'format', 'business_term'].includes(field);
+              const nullableText = ['default_value', 'unit', 'format', 'business_term', 'description'].includes(field);
               return [field, nullableText && typeof value === 'string' ? normalizeNullableText(value.trim()) : value];
             })),
           })),
@@ -444,6 +482,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         dataset_type: payload.dataset_type,
         layer_id: payload.layer_id ?? null,
         timeSemantics: JSON.stringify(timeSemanticsOf(payload)),
+        indicatorModel: JSON.stringify(payload.indicator_model ?? null),
       });
       setSaved(true);
       onSaved(payload);
@@ -518,6 +557,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
           ['columns', `Cột (${columns.length})`, columnsDirty],
           ['time', 'Thời gian và grain', timeDirty],
           ['relationships', 'Quan hệ', false],
+          ['indicators', 'Chỉ số', indicatorDirty],
         ] as const).map(([id, label, tabDirty]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => selectTab(id)}>
             {label}
@@ -599,6 +639,19 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             onDictionaryChanged={() => void loadDictionary(undefined, true)}
           />
         ) : null}
+        {tab === 'indicators' ? (
+          <IndicatorsPanel
+            datasetId={dataset.id}
+            columns={columns}
+            value={dictionary.indicator_model ?? null}
+            disabled={readOnly || saving}
+            onChange={indicatorModel => {
+              setSaved(false);
+              setSaveError('');
+              setDictionary(current => current ? { ...current, indicator_model: indicatorModel } : current);
+            }}
+          />
+        ) : null}
         {tab === 'columns' ? (
           <table className="sl-dictionary-table">
             <thead>
@@ -606,6 +659,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                 <th scope="col"><span className="sl-visually-hidden">Chi tiết</span></th>
                 <th scope="col">Column</th>
                 <th scope="col">Display name</th>
+                <th scope="col">Vai trò</th>
                 <th scope="col">Business term</th>
                 <th scope="col">Khóa</th>
               </tr>
@@ -632,6 +686,19 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                         {column.temporal_kind ? <span className="sl-type-badge is-temporal">{TEMPORAL_KIND_LABELS[column.temporal_kind]}</span> : null}
                       </th>
                       <td><Input aria-label={`Display name của ${column.column_name}`} disabled={disabled} value={column.display_name} onChange={event => updateColumn(column.column_name, 'display_name', event.target.value)} /></td>
+                      <td>
+                        <Select items={roleItems} value={column.semantic_role} disabled={disabled} onValueChange={role => {
+                          updateColumn(column.column_name, 'semantic_role', role);
+                          if (role !== 'measure') updateColumn(column.column_name, 'aggregations', []);
+                        }}>
+                          <SelectTrigger aria-label={`Vai trò của ${column.column_name}`} className="w-full"><SelectValue placeholder="Chưa rõ" /></SelectTrigger>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              {roleItems.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </td>
                       <td><Textarea aria-label={`Business term của ${column.column_name}`} className="min-h-8 max-h-24 resize-none py-1" disabled={disabled} value={column.business_term ?? ''} onChange={event => updateColumn(column.column_name, 'business_term', normalizeNullableText(event.target.value))} /></td>
                       <td>
                         <div className="sl-key-toggles">
@@ -654,7 +721,41 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                     {expanded ? (
                       <tr className="sl-column-details-row" id={detailsId}>
                         <td />
-                        <td colSpan={4}>
+                        <td colSpan={5}>
+                          <div className="sl-column-semantics">
+                            <label className="sl-column-detail">
+                              Mô tả
+                              <Textarea aria-label={`Mô tả của ${column.column_name}`} className="min-h-8 max-h-24 resize-none py-1" disabled={disabled} value={column.description ?? ''} onChange={event => updateColumn(column.column_name, 'description', normalizeNullableText(event.target.value))} />
+                            </label>
+                            <label className="sl-column-detail">
+                              Từ đồng nghĩa
+                              <SynonymsInput label={`Từ đồng nghĩa của ${column.column_name}`} value={column.synonyms ?? []} disabled={disabled} onChange={synonyms => updateColumn(column.column_name, 'synonyms', synonyms)} />
+                            </label>
+                            {column.semantic_role === 'measure' ? (
+                              <fieldset className="sl-column-detail sl-aggregations">
+                                <legend>Phép gộp hợp lệ</legend>
+                                <div>
+                                  {(Object.keys(AGGREGATION_LABELS) as Aggregation[]).map(aggregation => {
+                                    const selected = column.aggregations ?? [];
+                                    const checked = selected.includes(aggregation);
+                                    return (
+                                      <label key={aggregation} className={checked ? 'is-on' : undefined}>
+                                        <input
+                                          type="checkbox"
+                                          disabled={disabled}
+                                          checked={checked}
+                                          onChange={event => updateColumn(column.column_name, 'aggregations', event.target.checked
+                                            ? [...selected, aggregation]
+                                            : selected.filter(item => item !== aggregation))}
+                                        />
+                                        {AGGREGATION_LABELS[aggregation]}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </fieldset>
+                            ) : null}
+                          </div>
                           <div className="sl-column-details">
                             <ReferenceFields
                               datasets={referenceDatasets}

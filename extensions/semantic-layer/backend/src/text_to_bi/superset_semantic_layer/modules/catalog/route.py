@@ -64,6 +64,13 @@ from ..business_model.service import (
     serialize_domain,
     serialize_layer,
 )
+from ..data_dictionary.column_semantics import checked_column_semantics, default_semantic_role, json_list
+from ..data_dictionary.indicators import (
+    build_indicators_payload,
+    checked_indicator_model,
+    indicators_from_rows,
+    stored_indicator_model,
+)
 from ..data_dictionary.repository.repo_column_dictionary import ColumnDictionaryRepository
 from ..data_dictionary.repository.repo_dataset_dictionary import DatasetDictionaryRepository
 from ..data_dictionary.time_semantics import (
@@ -129,8 +136,10 @@ logger = logging.getLogger(__name__)
 # Set in a Superset database's extra JSON by superset/bootstrap_governance.py for the AI Agent reporting views.
 INTERNAL_DATABASE_FLAG = "text_to_bi_internal"
 DICTIONARY_FIELDS = {
+    "aggregations",
     "business_term",
     "default_value",
+    "description",
     "display_name",
     "format",
     "is_fk",
@@ -140,12 +149,16 @@ DICTIONARY_FIELDS = {
     "referenced_column",
     "referenced_dataset_id",
     "referenced_column_name",
+    "semantic_role",
+    "synonyms",
     "temporal_kind",
     "unit",
 }
 STRING_FIELD_LIMITS = {"display_name": 255}
 OPTIONAL_STRING_FIELD_LIMITS = {"format": 128, "unit": 128}
-DATASET_DICTIONARY_FIELDS = {"display_name", "description", "grain", "create_column", "dataset_type", "layer_id"}
+DATASET_DICTIONARY_FIELDS = {
+    "display_name", "description", "grain", "create_column", "dataset_type", "layer_id", "indicator_model",
+}
 # Saved together: the grains are checked against the time column and the column telling kinds of rows apart.
 DATASET_TIME_FIELDS = {"time_column", "row_kind_column", "grains"}
 # Arbitrary key shared by every Superset worker so only one of them migrates the dictionary tables at a time.
@@ -243,6 +256,7 @@ def _release_suggestion(dataset_id: int) -> None:
 
 def _column_metadata_values(column: Any) -> dict[str, Any]:
     column_name = str(column.column_name)
+    temporal_kind = default_temporal_kind(getattr(column, "type", None), bool(getattr(column, "is_dttm", False)))
     return {
         "column_name": column_name,
         "display_name": str(getattr(column, "verbose_name", None) or column_name)[:255],
@@ -256,7 +270,8 @@ def _column_metadata_values(column: Any) -> dict[str, Any]:
         "unit": None,
         "format": None,
         "business_term": None,
-        "temporal_kind": default_temporal_kind(getattr(column, "type", None), bool(getattr(column, "is_dttm", False))),
+        "temporal_kind": temporal_kind,
+        "semantic_role": default_semantic_role(getattr(column, "type", None), temporal_kind, is_key=False),
     }
 
 
@@ -348,6 +363,8 @@ def _validate_dictionary_payload(payload: Any, actual_column_names: set[str], da
                 values[field] = value if value is None or value.strip() else None
         if "temporal_kind" in item:
             values["temporal_kind"] = checked_temporal_kind(item["temporal_kind"], index)
+        # The stored role is not known here; the save clears aggregations on a column that ends up not a measure.
+        values.update(checked_column_semantics(item, index, item.get("semantic_role")))
         normalized.append(values)
     return normalized
 
@@ -399,6 +416,7 @@ def _serialize_dictionary(
         "layer_id": dictionary.layer_id,
         "time_column": dictionary.time_column,
         "row_kind_column": dictionary.row_kind_column,
+        "indicator_model": stored_indicator_model(dictionary.indicator_model),
         "grains": [
             {"row_kind_value": item.row_kind_value, "label": item.label, "grain": item.grain} for item in grains
         ],
@@ -419,6 +437,10 @@ def _serialize_dictionary(
                 "format": records[actual.column_name].format,
                 "business_term": records[actual.column_name].business_term,
                 "temporal_kind": records[actual.column_name].temporal_kind,
+                "semantic_role": records[actual.column_name].semantic_role,
+                "aggregations": json_list(records[actual.column_name].aggregations),
+                "synonyms": json_list(records[actual.column_name].synonyms),
+                "description": records[actual.column_name].description,
             }
             for actual in dataset.columns
         ],
@@ -661,6 +683,7 @@ def _migrate_dictionary_tables():
             ("layer_id", "INTEGER REFERENCES text_to_bi_data_layer (id) ON DELETE SET NULL"),
             ("time_column", "VARCHAR(255)"),
             ("row_kind_column", "VARCHAR(255)"),
+            ("indicator_model", "TEXT"),
         )
         for column_name, column_type in dataset_columns_to_add:
             if column_name not in dataset_columns:
@@ -685,6 +708,33 @@ def _migrate_dictionary_tables():
             )
             connection.execute(
                 text("UPDATE text_to_bi_column_dictionary SET temporal_kind = 'date' WHERE UPPER(TRIM(data_type)) = 'DATE'")
+            )
+
+    with db.engine.begin() as connection:
+        dictionary_columns = {
+            column["name"] for column in inspect(connection).get_columns(ColumnDictionary.__tablename__)
+        }
+        added = False
+        for column_name, column_type in (
+            ("semantic_role", "VARCHAR(16)"), ("aggregations", "TEXT"), ("synonyms", "TEXT"), ("description", "TEXT"),
+        ):
+            if column_name not in dictionary_columns:
+                connection.execute(text(f"ALTER TABLE text_to_bi_column_dictionary ADD COLUMN {column_name} {column_type}"))
+                added = True
+        if added:
+            # Rows seeded before roles existed take the role default_semantic_role would give them.
+            connection.execute(
+                text(
+                    "UPDATE text_to_bi_column_dictionary SET semantic_role = CASE "
+                    "WHEN is_pk OR is_fk THEN 'key' "
+                    "WHEN column_name = (SELECT dataset.row_kind_column FROM text_to_bi_dataset_dictionary dataset "
+                    "WHERE dataset.id = text_to_bi_column_dictionary.dataset_id) THEN 'row_kind' "
+                    "WHEN temporal_kind IS NOT NULL THEN 'time' "
+                    "WHEN UPPER(data_type) LIKE '%INT%' OR UPPER(data_type) LIKE '%NUMERIC%' "
+                    "OR UPPER(data_type) LIKE '%DECIMAL%' OR UPPER(data_type) LIKE '%FLOAT%' "
+                    "OR UPPER(data_type) LIKE '%DOUBLE%' OR UPPER(data_type) LIKE '%REAL%' THEN 'measure' "
+                    "ELSE 'dimension' END WHERE semantic_role IS NULL"
+                )
             )
 
     if postgres:
@@ -2525,6 +2575,12 @@ class SemanticLayerAPI(RestApi):
         if not isinstance(dataset_updates, dict):
             return self.response_400(message="dataset must be an object.")
         time_updates = {field: dataset_updates.pop(field) for field in DATASET_TIME_FIELDS if field in dataset_updates}
+        if "indicator_model" in dataset_updates:
+            try:
+                indicator_model = checked_indicator_model(dataset_updates.pop("indicator_model"), actual_column_names)
+            except ValueError as ex:
+                return self.response_400(message=str(ex))
+            dataset_updates["indicator_model"] = json.dumps(indicator_model, ensure_ascii=False) if indicator_model else None
         for field in ("time_column", "row_kind_column"):
             if time_updates.get(field) == "":
                 time_updates[field] = None
@@ -2582,7 +2638,9 @@ class SemanticLayerAPI(RestApi):
                         if referenced_row is None:
                             raise ValueError("Referenced column no longer exists.")
                         update["referenced_column"] = referenced_row.id
-                column_repository.update(rows_by_name[column_name], update)
+                row = column_repository.update(rows_by_name[column_name], update)
+                if row.semantic_role != "measure" and row.aggregations:
+                    row.aggregations = None
             if time_updates:
                 self._save_time_semantics(dataset_repository.get(dataset_id), time_updates, rows_by_name)
             db.session.commit()
@@ -2678,6 +2736,54 @@ class SemanticLayerAPI(RestApi):
         return self.response(
             200, time_column=time_column, row_kind_column=row_kind_column, profiles=profiles, too_many_kinds=too_many,
         )
+
+    @staticmethod
+    def _read_indicators(dataset: SqlaTable, model: dict[str, Any]) -> dict[str, Any]:
+        """The indicators a catalog table names, read through ChartData as the caller. Raises on a failed query."""
+        from superset.charts.schemas import ChartDataQueryContextSchema
+        from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+        command = ChartDataCommand(ChartDataQueryContextSchema().load(build_indicators_payload(dataset, model)))
+        command.validate()
+        result = command.run()["queries"][0]
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+        return indicators_from_rows(result.get("data", []), model)
+
+    @expose("/dataset/<int:dataset_id>/indicators", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def get_indicators(self, dataset_id: int):
+        """The indicators of a catalog table, with their aggregation mapped and the codes the map does not cover.
+
+        `model` in the query string previews a catalog declaration not saved yet; without it the stored one is read.
+        """
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        column_names = {
+            str(column.column_name) for column in dataset.columns if not getattr(column, "expression", None)
+        }
+        try:
+            raw = request.args.get("model")
+            model = checked_indicator_model(json.loads(raw), column_names) if raw else stored_indicator_model(
+                getattr(db.session.get(DatasetDictionary, dataset_id), "indicator_model", None)
+            )
+        except (TypeError, ValueError) as ex:
+            return self.response_400(message=str(ex))
+        if not model or model["kind"] != "catalog":
+            return self.response_400(message="The dataset is not declared an indicator catalog.")
+        try:
+            return self.response(200, dataset_id=dataset_id, **self._read_indicators(dataset, model))
+        except Exception as ex:
+            if _is_superset_access_error(ex):
+                return self.response(403, message="Dataset and database access required.")
+            logger.exception("Reading the indicators of %s failed", dataset.table_name)
+            return self.response_500(message="Could not read the indicators.")
 
     @expose("/business-model", methods=("GET",))
     @protect()

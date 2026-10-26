@@ -18,3 +18,6 @@ class DatasetDictionary(AuditMixinNullable, Model):
     # The column that places a row in time, and the one that tells kinds of rows of different grains apart.
     time_column = Column(String(255), nullable=True)
     row_kind_column = Column(String(255), nullable=True)
+    # For a table that keeps one value per indicator, or the table naming the indicators: JSON, see
+    # modules/data_dictionary/indicators.py.
+    indicator_model = Column(Text, nullable=True)

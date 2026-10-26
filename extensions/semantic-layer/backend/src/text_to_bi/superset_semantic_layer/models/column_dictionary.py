@@ -36,6 +36,12 @@ class ColumnDictionary(AuditMixinNullable, Model):
     business_term = Column(Text, nullable=True)
     # `date` or `timestamp` for a column that places rows in time; a date filter on a timestamp covers the whole day.
     temporal_kind = Column(String(16), nullable=True)
+    # What schema link does with the column (key, measure, dimension, label, time, row_kind, attribute), the
+    # aggregations that make sense on a measure and the words people use for it; lists are stored as JSON text.
+    semantic_role = Column(String(16), nullable=True)
+    aggregations = Column(Text, nullable=True)
+    synonyms = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
 
     referenced_column_record = relationship(
         "ColumnDictionary",

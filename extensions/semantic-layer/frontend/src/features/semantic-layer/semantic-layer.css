@@ -432,7 +432,8 @@
 .sl-dictionary-table thead th:nth-child(1) { width: 44px; }
 .sl-dictionary-table thead th:nth-child(2) { width: 22%; }
 .sl-dictionary-table thead th:nth-child(3) { width: 24%; }
-.sl-dictionary-table thead th:nth-child(5) { width: 200px; }
+.sl-dictionary-table thead th:nth-child(4) { width: 140px; }
+.sl-dictionary-table thead th:nth-child(6) { width: 200px; }
 .sl-dictionary-table tbody th { text-align: left; font-weight: 400; }
 .sl-dictionary-table code { display: block; overflow: hidden; color: var(--sl-text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
 .sl-type-badge { display: inline-block; max-width: 100%; margin-top: 2px; overflow: hidden; padding: 1px 6px; border-radius: 4px; color: var(--sl-muted); background: var(--sl-surface-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
@@ -452,6 +453,23 @@
 .sl-key-reference { display: block; margin-top: 4px; overflow: hidden; color: var(--sl-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .sl-column-details-row > td { padding-top: 0; background: color-mix(in srgb, var(--sl-accent) 3%, var(--sl-surface-raised)); }
 .sl-column-details { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(170px, 1.3fr) repeat(3, minmax(100px, 1fr)) auto; align-items: end; gap: 12px; padding: 4px 0 8px; }
+/* What a column means to schema link: its description, synonyms and, on a measure, the aggregations allowed. */
+.sl-column-semantics { display: grid; grid-template-columns: minmax(220px, 2fr) minmax(200px, 1.5fr) auto; align-items: start; gap: 12px; padding: 4px 0 10px; }
+.sl-aggregations { margin: 0; padding: 0; border: 0; }
+.sl-aggregations legend { margin-bottom: 6px; padding: 0; }
+.sl-aggregations > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.sl-aggregations label { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--sl-border); border-radius: 6px; color: var(--sl-text-secondary); font-size: 12px; font-weight: 400; cursor: pointer; }
+.sl-aggregations label.is-on { border-color: var(--sl-accent); color: var(--sl-text); background: color-mix(in srgb, var(--sl-accent) 8%, var(--sl-surface)); }
+.sl-aggregations input { margin: 0; accent-color: var(--sl-accent); }
+.sl-indicators-kind { max-width: 360px; }
+/* A column picker or an aggregation in a table row needs a name's width, not the row's. */
+.sl-indicators .sl-time-semantics-table [data-slot="select-trigger"] { max-width: 320px; }
+.sl-indicators .sl-time-semantics-columns { grid-template-columns: minmax(0, 360px); }
+/* The two-column mapping tables line up with the pickers above them; only the indicator list spans the panel. */
+.sl-indicators .sl-time-semantics-table:not(.sl-indicators-list) { max-width: 760px; }
+.sl-indicators-catalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 16px; }
+.sl-indicators-list td.is-warning { color: #ad6800; }
+.sl-indicators-map .is-unmapped { border-color: #d48806; }
 .sl-column-detail { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--sl-text-secondary); font-size: 12px; font-weight: 500; }
 .sl-column-detail.is-check { flex-direction: row; align-items: center; gap: 8px; height: 32px; font-size: 13px; }
 .sl-column-detail.is-check input[type='checkbox'] { width: 16px; height: 16px; margin: 0; accent-color: var(--sl-accent); }
@@ -1233,7 +1251,7 @@
 @media (max-width: 700px) {
   .sl-dataset-dictionary-fields { grid-template-columns: 1fr; }
   .sl-dataset-dictionary-fields .sl-field-wide { grid-column: auto; }
-  .sl-time-semantics-columns { grid-template-columns: 1fr; }
+  .sl-time-semantics-columns, .sl-indicators-catalog, .sl-column-semantics { grid-template-columns: 1fr; }
   /* Tabs that no longer fit scroll sideways; hiding the vertical overflow keeps the underline from adding a scrollbar. */
   .sl-dictionary-tabs { overflow-x: auto; overflow-y: hidden; }
   .sl-time-semantics-header { flex-direction: column; }

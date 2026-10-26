@@ -153,7 +153,13 @@ holds the relationships between base tables that the AI Agent's schema link may
 join on (`docs/specs/schema-link.md`): the Data Dictionary's "Quan hệ" tab
 suggests them from the database's foreign keys and from column names, checks
 the data (unique target, matching types, orphans) and approves only a passing
-check. `text_to_bi_dataset_proposal` holds the virtual datasets the AI
+check. Each column dictionary row also has a `semantic_role` (key, measure,
+dimension, label, time, row_kind, attribute), the `aggregations` that make
+sense on a measure, `synonyms` and a `description`; a dataset dictionary's
+`indicator_model` declares a table that keeps one value per indicator
+(`tb_gia_tri_quan_sat`) or the catalog naming the indicators
+(`dm_chi_so_thoi_tiet`, read through `/dataset/<id>/indicators`).
+`text_to_bi_dataset_proposal` holds the virtual datasets the AI
 Agent drafts over base (`dm_*`, `tb_*`) datasets when no aggregate dataset can
 answer a question; an administrator creates or rejects them in "Xử lý câu hỏi" →
 "Đề xuất dataset". Opening the Semantic Layer as an administrator creates these

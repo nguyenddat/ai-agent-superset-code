@@ -259,9 +259,50 @@ export type ColumnDictionary = {
   business_term: string | null;
   /** `date` or `timestamp` for a column that places rows in time; a date filter on a timestamp covers the whole day. */
   temporal_kind: TemporalKind | null;
+  /** What schema link does with the column. */
+  semantic_role: SemanticRole | null;
+  /** Aggregations that make sense on a measure; empty when not declared. */
+  aggregations: Aggregation[];
+  synonyms: string[];
+  description: string | null;
 };
 
 export type TemporalKind = 'date' | 'timestamp';
+export type SemanticRole = 'key' | 'measure' | 'dimension' | 'label' | 'time' | 'row_kind' | 'attribute';
+export type Aggregation = 'SUM' | 'AVG' | 'MIN' | 'MAX' | 'COUNT' | 'COUNT_DISTINCT';
+export type IndicatorAggregation = 'SUM' | 'AVG' | 'MIN' | 'MAX' | 'COUNT' | 'NONE';
+
+/** A table that keeps one value per indicator, or the table naming the indicators. */
+export type IndicatorModel =
+  | { kind: 'values'; indicator_column: string; value_columns: Record<string, string> }
+  | {
+    kind: 'catalog';
+    key_column: string;
+    code_column: string;
+    name_column: string;
+    unit_column: string | null;
+    value_kind_column: string | null;
+    aggregation_column: string | null;
+    aggregation_map: Record<string, IndicatorAggregation>;
+  };
+
+export type Indicator = {
+  key: string | number;
+  code: string | null;
+  name: string | null;
+  unit: string | null;
+  value_kind: string | null;
+  aggregation_code: string | null;
+  aggregation: IndicatorAggregation | null;
+};
+
+export type IndicatorsResponse = {
+  indicators: Indicator[];
+  value_kinds: string[];
+  aggregation_codes: string[];
+  unmapped_aggregation_codes: string[];
+  too_many: boolean;
+};
 
 /** From finest to coarsest; `instant` rows are taken at irregular moments. */
 export type Grain = 'instant' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year';
@@ -386,6 +427,7 @@ export type DatasetDictionary = {
   /** The column that tells kinds of rows of different grains apart, such as `loai_quan_sat`. */
   row_kind_column: string | null;
   grains: DatasetGrain[];
+  indicator_model: IndicatorModel | null;
   columns: ColumnDictionary[];
   read_only?: boolean;
 };
