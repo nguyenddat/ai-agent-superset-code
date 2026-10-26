@@ -18,14 +18,27 @@ const MARGIN = { top: 22, right: 48, bottom: 28, left: 44 };
 const MAX_BAR_WIDTH = 24;
 
 const numberFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+// A date, or a timestamp such as "2026-10-25T06:00:00+00:00"; the hour is shown as written, not shifted by its offset.
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+const AXIS_CHARACTER_WIDTH = 7;
+const AXIS_LABEL_GAP = 12;
 
 export function shownCell(value: ResultCell, short = false): string {
   if (value === null || value === undefined) return '—';
   if (typeof value === 'number') return numberFormat.format(value);
   const date = ISO_DATE.exec(value);
-  if (date) return short ? `${date[3]}/${date[2]}` : `${date[3]}/${date[2]}/${date[1]}`;
-  return value;
+  if (!date) return value;
+  const day = short ? `${date[3]}/${date[2]}` : `${date[3]}/${date[2]}/${date[1]}`;
+  return date[4] === undefined ? day : `${day} ${date[4]}:${date[5]}`;
+}
+
+/** Axis texts: the hour alone when every label is a time on the same day, which the result title already names. */
+function axisLabels(labels: string[]): string[] {
+  const dates = labels.map(label => ISO_DATE.exec(label));
+  const hours = dates.map(date => (date && date[4] !== undefined ? `${date[4]}:${date[5]}` : null));
+  const days = new Set(dates.map(date => date?.slice(1, 4).join('-')));
+  if (hours.every(hour => hour !== null) && days.size === 1) return hours as string[];
+  return labels.map(label => shownCell(label, true));
 }
 
 function withUnit(value: ResultCell, unit: string | null): string {
@@ -105,7 +118,10 @@ function TimeChart({ kind, title, unit, labels, series, domain, panel = false }:
   const band = plotWidth / labels.length;
   const x = (index: number) => MARGIN.left + band * (index + 0.5);
   const y = (value: number) => MARGIN.top + plotHeight * (1 - (value - low) / (high - low));
-  const labelEvery = Math.max(1, Math.ceil(labels.length / Math.floor(plotWidth / 48)));
+  const axisTexts = axisLabels(labels);
+  const longestText = Math.max(...axisTexts.map(text => text.length));
+  const labelSpace = Math.max(48, longestText * AXIS_CHARACTER_WIDTH + AXIS_LABEL_GAP);
+  const labelEvery = Math.max(1, Math.ceil(labels.length / Math.max(1, Math.floor(plotWidth / labelSpace))));
   const barWidth = Math.min(MAX_BAR_WIDTH, band - 2);
   const linePath = (item: Series) => item.values
     .map((value, index) => (value === null ? null : `${x(index)},${y(value)}`))
@@ -154,7 +170,7 @@ function TimeChart({ kind, title, unit, labels, series, domain, panel = false }:
         ))}
         {labels.map((label, index) => (index % labelEvery === 0 ? (
           <text key={label} className="ai-result-axis" x={x(index)} y={height - 8} textAnchor="middle">
-            {shownCell(label, true)}
+            {axisTexts[index]}
           </text>
         ) : null))}
         {columns && series[0].values.map((value, index) => (value === null ? null : (

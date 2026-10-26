@@ -82,6 +82,61 @@ def test_the_answer_reads_capped_rows():
     assert (len(shown["rows"]), shown["row_count"], shown["rows_omitted"]) == (60, 84, 24)
 
 
+def test_the_answer_reads_numbers_rounded_as_the_result_card_shows_them():
+    planned = plan_query(_plan(dimensions=["ngay"]), DATASETS, METRICS, [])
+    rows = [
+        {"ngay": "2026-10-25", "tong_luong_mua": 28.7583},
+        {"ngay": "2026-10-26", "tong_luong_mua": 0.125},
+        {"ngay": "2026-10-27", "tong_luong_mua": 3},
+    ]
+
+    shown = result_for_answer(combined_result(planned, [{"rows": rows}]))
+
+    assert [row["tong_luong_mua"] for row in shown["rows"]] == [28.76, 0.13, 3]
+
+
+HOURLY_COLUMNS = [
+    *COLUMNS,
+    {"name": "thoi_diem", "type": "TIMESTAMP WITHOUT TIME ZONE", "temporal": True, "groupby": True, "filterable": True},
+]
+
+
+def test_a_date_filter_on_a_timestamp_column_covers_the_whole_day():
+    day = [
+        {"column": "thoi_diem", "operator": ">=", "value": "2026-10-25", "source": "time"},
+        {"column": "thoi_diem", "operator": "<=", "value": "2026-10-25", "source": "time"},
+        {"column": "ngay", "operator": "<=", "value": "2026-10-25", "source": "time"},
+    ]
+    datasets = [{"id": 12, "columns": HOURLY_COLUMNS}]
+
+    planned = plan_query(_plan(dimensions=["thoi_diem"], filters=day), datasets, METRICS, [])
+
+    assert planned.request_body()["filters"] == [
+        {"column": "thoi_diem", "operator": ">=", "value": "2026-10-25"},
+        {"column": "thoi_diem", "operator": "<", "value": "2026-10-26"},
+        {"column": "ngay", "operator": "<=", "value": "2026-10-25"},
+    ]
+    assert [item["shown_value"] for item in planned.filters[:2]] == ["2026-10-25", "2026-10-25"]
+
+
+def test_an_hourly_series_keeps_the_time_of_its_midnight_row_and_a_daily_one_is_dates():
+    datasets = [{"id": 12, "columns": HOURLY_COLUMNS}]
+    planned = plan_query(_plan(dimensions=["thoi_diem"]), datasets, METRICS, [])
+    hourly = [
+        {"thoi_diem": "Sun, 25 Oct 2026 00:00:00 GMT", "tong_luong_mua": 1},
+        {"thoi_diem": "Sun, 25 Oct 2026 01:00:00 GMT", "tong_luong_mua": 2},
+    ]
+    daily = [{"thoi_diem": "Sun, 25 Oct 2026 00:00:00 GMT", "tong_luong_mua": 1}]
+
+    hourly_result = combined_result(planned, [{"rows": hourly}])
+    daily_result = combined_result(planned, [{"rows": daily}])
+
+    assert [row["thoi_diem"] for row in hourly_result["rows"]] == [
+        "2026-10-25T00:00:00+00:00", "2026-10-25T01:00:00+00:00",
+    ]
+    assert daily_result["rows"][0]["thoi_diem"] == "2026-10-25"
+
+
 def test_keys_with_labelled_values_are_shown_by_their_labels():
     labelled = [{
         "column": "thanh_pho_key", "label": "Thành phố",

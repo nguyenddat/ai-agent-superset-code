@@ -146,6 +146,8 @@ Khi có `result`:
 - Ngày sau `today` là số liệu dự báo; nói "theo dự báo" khi nhắc tới chúng.
 - Nhiều dòng thì chỉ nêu điểm đáng chú ý (cao nhất, thấp nhất, xu hướng); bảng và biểu đồ đã hiện bên dưới, không
   chép lại toàn bộ. Ghi số kèm đơn vị, định dạng ngày dd/mm.
+- Số trong `result.rows` đã làm tròn đúng như bảng bên dưới hiển thị: chép nguyên giá trị, không làm tròn thêm (28.76
+  ghi "28,76", không ghi "28,8"). Số bạn tự tính (mức tăng giảm, phần trăm) ghi tối đa 2 chữ số thập phân.
 - Có `comparison`: mỗi chỉ số có giá trị kỳ đang hỏi (cột `name`) và kỳ đem so (cột `compared_name`); nêu cả hai,
   mức tăng giảm và phần trăm thay đổi.
 - Có `order` và `limit`: kết quả đã được xếp hạng; trả lời theo thứ hạng.

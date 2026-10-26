@@ -11,7 +11,8 @@ with another period are applied here, on the rows it returned.
 """
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from email.utils import parsedate_to_datetime
 from typing import Any
 
@@ -23,7 +24,10 @@ MAX_LIMIT = 100
 # Rows the final answer reads; the browser receives every row the Semantic Layer returned.
 ROWS_FOR_ANSWER = 60
 NUMERIC_TYPES = ("INT", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "BIGINT", "SMALLINT")
+TIMESTAMP_TYPES = ("TIMESTAMP", "DATETIME")
 COMPARED_SUFFIX = "__compare"
+# Decimal places the answer quotes; the page's result card shows numbers the same way (`maximumFractionDigits: 2`).
+ANSWER_DECIMALS = Decimal("0.01")
 
 
 class QueryPlanError(ValueError):
@@ -46,6 +50,8 @@ class PlannedQuery:
     comparison: dict[str, Any] | None = None
     # {column, min, max, start, end, status}: which part of the asked period the data covers.
     coverage: dict[str, Any] | None = None
+    # Columns holding a time of day, where a filter by date has to cover the whole day.
+    timestamp_columns: set[str] = field(default_factory=set)
 
     def request_body(self, compared: bool = False) -> dict[str, Any]:
         """What the Semantic Layer's execution endpoint accepts: column names and filters, nothing else."""
@@ -53,9 +59,41 @@ class PlannedQuery:
         return {
             "dimensions": [dimension["name"] for dimension in self.dimensions],
             "filters": [
-                {"column": item["column"], "operator": item["operator"], "value": item["value"]} for item in filters
+                sent
+                for item in filters
+                for sent in _whole_day_filters(item, item["column"] in self.timestamp_columns)
             ],
         }
+
+
+def _whole_day_filters(item: dict[str, Any], timestamp: bool) -> list[dict[str, Any]]:
+    """A filter as sent; on a timestamp column a date means the whole day, so "<= 25/10" keeps 25/10 23:00."""
+    sent = {"column": item["column"], "operator": item["operator"], "value": item["value"]}
+    day = _date_only(item["value"]) if timestamp else None
+    if day is None:
+        return [sent]
+    next_day = (day + timedelta(days=1)).isoformat()
+    if item["operator"] == "==":
+        return [{**sent, "operator": ">="}, {**sent, "operator": "<", "value": next_day}]
+    if item["operator"] == "<=":
+        return [{**sent, "operator": "<", "value": next_day}]
+    if item["operator"] == ">":
+        return [{**sent, "operator": ">=", "value": next_day}]
+    return [sent]
+
+
+def _date_only(value: Any) -> date | None:
+    """The date a value names when it is a bare date such as "2026-10-25", not a moment of a day."""
+    if not isinstance(value, str) or len(value) != 10:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _is_timestamp(column: dict[str, Any]) -> bool:
+    return any(name in str(column.get("type") or "").upper() for name in TIMESTAMP_TYPES)
 
 
 def _is_numeric(column: dict[str, Any]) -> bool:
@@ -319,6 +357,7 @@ def plan_query(
         limit=limit,
         comparison=comparison,
         coverage=coverage,
+        timestamp_columns={name for name, column in columns.items() if _is_timestamp(column)},
     )
 
 
@@ -331,8 +370,7 @@ def _cell(value: Any, dimension: dict[str, Any]) -> Any:
             moment = parsedate_to_datetime(value)
         except (TypeError, ValueError):
             return value
-        at_midnight = (moment.hour, moment.minute, moment.second) == (0, 0, 0)
-        return moment.date().isoformat() if at_midnight else moment.isoformat()
+        return moment.isoformat()
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return value
@@ -365,6 +403,22 @@ def _merge(
     return truncated
 
 
+def _days_when_daily(rows: list[dict[str, Any]], planned: PlannedQuery) -> None:
+    """A time column whose every value falls at midnight holds days, shown as dates; an hourly one keeps its times."""
+    for dimension in planned.dimensions:
+        if not dimension["temporal"]:
+            continue
+        moments = []
+        for row in rows:
+            try:
+                moments.append(datetime.fromisoformat(row[dimension["name"]]))
+            except (TypeError, ValueError):
+                moments.append(None)
+        if all(moment is not None and moment.time() == datetime.min.time() for moment in moments):
+            for row, moment in zip(rows, moments):
+                row[dimension["name"]] = moment.date().isoformat()
+
+
 def _ordered(rows: list[dict[str, Any]], planned: PlannedQuery) -> list[dict[str, Any]]:
     names = [dimension["name"] for dimension in planned.dimensions]
     ordered = sorted(rows, key=lambda row: tuple(str(row[name]) for name in names))
@@ -387,6 +441,7 @@ def combined_result(
     # An aggregate over no rows comes back as one row of empty values; that is no data, not a value.
     value_names = [metric["metric_name"] + suffix for metric in planned.metrics for suffix in ("", COMPARED_SUFFIX)]
     found = [row for row in rows.values() if any(row.get(name) is not None for name in value_names)]
+    _days_when_daily(found, planned)
     shown = _ordered(found, planned)
     notes = list(planned.notes)
     if truncated and planned.order:
@@ -433,8 +488,15 @@ def combined_result(
     }
 
 
+def shown_number(value: Any) -> Any:
+    """A float rounded as the result card shows it, half away from zero, so the answer quotes the same figure."""
+    if isinstance(value, float):
+        return float(Decimal(value).quantize(ANSWER_DECIMALS, rounding=ROUND_HALF_UP))
+    return value
+
+
 def result_for_answer(result: dict[str, Any]) -> dict[str, Any]:
-    """The result as the final answer reads it: the rows capped, the row count kept, the queries left to the page."""
-    shown = result["rows"][:ROWS_FOR_ANSWER]
+    """The result as the final answer reads it: the rows capped and rounded, the row count kept, the queries left out."""
+    shown = [{key: shown_number(value) for key, value in row.items()} for row in result["rows"][:ROWS_FOR_ANSWER]]
     answer = {key: value for key, value in result.items() if key != "queries"}
     return {**answer, "rows": shown, "rows_omitted": result["row_count"] - len(shown)}
