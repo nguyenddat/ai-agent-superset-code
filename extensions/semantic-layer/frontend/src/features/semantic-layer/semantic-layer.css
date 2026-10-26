@@ -297,19 +297,22 @@
 .sl-time-semantics-profile .is-muted, .sl-time-semantics-empty { color: var(--sl-muted); }
 .sl-time-semantics-add { display: flex; max-width: 480px; gap: 8px; }
 /* Relationships between base tables: declared ones going out and in, their data checks, and suggestions. */
-.sl-relationships { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; }
-.sl-relationships-section { display: flex; flex-direction: column; gap: 6px; }
-.sl-relationships-section h4 { margin: 0; color: var(--sl-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
-.sl-relationships-table .is-link { width: 34%; }
-.sl-relationships-table .is-cardinality { width: 64px; }
-.sl-relationships-table .is-source { width: 88px; }
+.sl-relationships { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; }
+.sl-relationships-table .is-link { width: 38%; }
+.sl-relationships-table .is-cardinality { width: 72px; }
+.sl-relationships-table .is-source { width: 96px; }
+.sl-relationships-table .is-check { width: 28%; }
 .sl-relationships-table .is-state { width: 120px; }
-.sl-relationships-table .is-actions { width: 190px; }
+.sl-relationships-table .is-actions { width: auto; }
+.sl-relationships-group th { padding-top: 14px; color: var(--sl-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.sl-relationships-table tbody tr:first-child.sl-relationships-group th { padding-top: 8px; }
+.sl-relationships-empty, .sl-relationships-hint { color: var(--sl-muted); }
+.sl-relationships-hint { display: block; font-size: 11px; text-align: right; }
 .sl-relationship-link { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
 .sl-relationship-link svg { width: 12px; height: 12px; flex: 0 0 auto; color: var(--sl-muted); }
 .sl-relationship-link code { overflow-wrap: anywhere; }
 .sl-relationship-problem { display: block; margin-top: 2px; color: #ad6800; font-size: 11px; }
-.sl-relationship-check { display: flex; flex-direction: column; gap: 2px; }
+.sl-relationship-check { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .sl-relationship-check span { display: inline-flex; align-items: center; gap: 4px; }
 .sl-relationship-check svg { width: 12px; height: 12px; }
 .sl-relationship-check .is-ok { color: #237804; }

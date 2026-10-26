@@ -33,15 +33,18 @@ function VerificationCell({ contract }: { contract: RelationshipContractView | n
   if (!verification) return <span className="is-muted">Chưa kiểm tra</span>;
   return (
     <div className="sl-relationship-check">
-      <span className={verification.target_unique ? 'is-ok' : 'is-bad'}>
-        {verification.target_unique ? <Check /> : <X />} Đích {verification.target_unique ? 'duy nhất' : 'có giá trị lặp'}
+      <span className={verification.target_unique ? 'is-ok' : 'is-bad'} title="Cột đích giữ mỗi giá trị một lần">
+        {verification.target_unique ? <Check /> : <X />}{verification.target_unique ? 'Duy nhất' : 'Đích lặp'}
       </span>
-      <span className={verification.type_match ? 'is-ok' : 'is-bad'}>
-        {verification.type_match ? <Check /> : <X />} Kiểu {verification.type_match ? 'khớp' : 'không khớp'}
+      <span className={verification.type_match ? 'is-ok' : 'is-bad'} title="Kiểu dữ liệu hai đầu so sánh được">
+        {verification.type_match ? <Check /> : <X />}{verification.type_match ? 'Kiểu khớp' : 'Kiểu lệch'}
       </span>
       {verification.target_unique ? (
-        <span className={verification.orphans ? 'is-warning' : 'is-ok'} title={verification.orphan_samples.length ? `Ví dụ: ${verification.orphan_samples.join(', ')}` : undefined}>
-          {countFormat.format(verification.references)} tham chiếu · mồ côi {countFormat.format(verification.orphans)} ({percentFormat.format(verification.orphan_ratio)})
+        <span
+          className={verification.orphans ? 'is-warning' : 'is-ok'}
+          title={`${countFormat.format(verification.references)} tham chiếu, ${percentFormat.format(verification.orphan_ratio)} không có ở bảng đích${verification.orphan_samples.length ? `. Ví dụ: ${verification.orphan_samples.join(', ')}` : ''}`}
+        >
+          Mồ côi {countFormat.format(verification.orphans)}/{countFormat.format(verification.references)}
         </span>
       ) : null}
     </div>
@@ -166,98 +169,99 @@ export function RelationshipsPanel({ datasetId, dictionaryDirty, disabled, onDic
       ) : null}
       {error ? <div className="sl-dictionary-save-error" role="alert"><AlertCircle /> {error}</div> : null}
 
-      <section className="sl-relationships-section">
-        <h4>Đi ra · {outgoing.length}</h4>
-        {outgoing.length ? (
-          <table className="sl-time-semantics-table sl-relationships-table">
-            <thead>
-              <tr>
-                <th scope="col" className="is-link">Quan hệ</th>
-                <th scope="col" className="is-cardinality">Bản số</th>
-                <th scope="col" className="is-source">Nguồn</th>
-                <th scope="col">Kiểm chứng dữ liệu</th>
-                <th scope="col" className="is-state">Trạng thái</th>
-                <th scope="col" className="is-actions"><span className="sl-visually-hidden">Thao tác</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {outgoing.map(row => {
-                const state = contractState(row.contract);
-                return (
-                  <tr key={row.column_id}>
-                    <td>
-                      <div className="sl-relationship-link">
-                        <code>{row.from_column}</code><ArrowRight /><code>{row.to_dataset_name}.{row.to_column}</code>
-                      </div>
-                      {row.problem ? <span className="sl-relationship-problem">{row.problem}</span> : null}
-                    </td>
-                    <td>{row.cardinality ? CARDINALITY_LABELS[row.cardinality] : '—'}</td>
-                    <td>{row.contract?.source ? SOURCE_LABELS[row.contract.source] : '—'}</td>
-                    <td><VerificationCell contract={row.contract} /></td>
-                    <td>
-                      <span className={`sl-metric-state is-${state.key}`}>{state.key === 'approved' ? <ShieldCheck className="sl-inline-icon" /> : null}{state.label}</span>
-                    </td>
-                    <td><div className="sl-relationship-actions">{rowActions(row)}</div></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : <p className="sl-time-semantics-note">Chưa khai báo quan hệ nào đi ra từ bảng này. Bấm “Tìm quan hệ” để nhận gợi ý.</p>}
-      </section>
-
-      {suggestions ? (
-        <section className="sl-relationships-section">
-          <h4>Gợi ý chưa khai báo · {suggestions.length}</h4>
-          {data?.suggestion_note ? <p className="sl-time-semantics-note is-warning">{data.suggestion_note}</p> : null}
-          {dictionaryDirty ? <p className="sl-time-semantics-note is-warning">Có thay đổi chưa lưu trong data dictionary. Lưu trước khi dùng gợi ý.</p> : null}
-          {suggestions.length ? (
-            <table className="sl-time-semantics-table sl-relationships-table">
-              <tbody>
-                {suggestions.map(item => {
-                  const key = `${item.from_column}>${item.to_dataset_id}.${item.to_column}`;
-                  return (
-                    <tr key={key}>
-                      <td className="is-link">
-                        <div className="sl-relationship-link"><code>{item.from_column}</code><ArrowRight /><code>{item.to_dataset_name}.{item.to_column}</code></div>
-                        {item.replaces ? <span className="sl-relationship-problem">Cột này đang khai báo trỏ tới bảng khác; dùng gợi ý sẽ thay quan hệ đó.</span> : null}
-                      </td>
-                      <td>{item.sources.map(source => <span key={source} className="sl-relationship-source">{SOURCE_LABELS[source]}</span>)}</td>
-                      <td className="is-actions">
-                        <Button size="sm" variant="outline" disabled={disabled || dictionaryDirty || busy !== null} onClick={() => void applySuggestion(item)}>
-                          {busy === key ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}Dùng gợi ý
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : <p className="sl-time-semantics-note">Không có gợi ý mới: các quan hệ tìm được đều đã khai báo.</p>}
-        </section>
+      {suggestions && data?.suggestion_note ? <p className="sl-time-semantics-note is-warning">{data.suggestion_note}</p> : null}
+      {suggestions?.length && dictionaryDirty ? (
+        <p className="sl-time-semantics-note is-warning">Có thay đổi chưa lưu trong data dictionary. Lưu trước khi dùng gợi ý.</p>
       ) : null}
 
-      <section className="sl-relationships-section">
-        <h4>Đi vào · {incoming.length}</h4>
-        {incoming.length ? (
-          <table className="sl-time-semantics-table sl-relationships-table">
-            <tbody>
-              {incoming.map(row => {
-                const state = contractState(row.contract);
-                return (
-                  <tr key={row.column_id}>
-                    <td className="is-link">
-                      <div className="sl-relationship-link"><code>{row.from_dataset_name}.{row.from_column}</code><ArrowRight /><code>{row.to_column}</code></div>
-                    </td>
-                    <td>{row.cardinality ? CARDINALITY_LABELS[row.cardinality] : '—'}</td>
-                    <td><span className={`sl-metric-state is-${state.key}`}>{state.label}</span></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : <p className="sl-time-semantics-note">Chưa có bảng nào khai báo trỏ tới bảng này.</p>}
-      </section>
+      {/* One table for every group, so the columns line up from one group to the next. */}
+      <table className="sl-time-semantics-table sl-relationships-table">
+        <thead>
+          <tr>
+            <th scope="col" className="is-link">Quan hệ</th>
+            <th scope="col" className="is-cardinality">Bản số</th>
+            <th scope="col" className="is-source">Nguồn</th>
+            <th scope="col" className="is-check">Kiểm chứng dữ liệu</th>
+            <th scope="col" className="is-state">Trạng thái</th>
+            <th scope="col" className="is-actions"><span className="sl-visually-hidden">Thao tác</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="sl-relationships-group"><th colSpan={6} scope="rowgroup">Đi ra · {outgoing.length}</th></tr>
+          {outgoing.map(row => {
+            const state = contractState(row.contract);
+            return (
+              <tr key={`out-${row.column_id}`}>
+                <td>
+                  <div className="sl-relationship-link">
+                    <code>{row.from_column}</code><ArrowRight /><code>{row.to_dataset_name}.{row.to_column}</code>
+                  </div>
+                  {row.problem ? <span className="sl-relationship-problem">{row.problem}</span> : null}
+                </td>
+                <td>{row.cardinality ? CARDINALITY_LABELS[row.cardinality] : '—'}</td>
+                <td>{row.contract?.source ? SOURCE_LABELS[row.contract.source] : '—'}</td>
+                <td><VerificationCell contract={row.contract} /></td>
+                <td>
+                  <span className={`sl-metric-state is-${state.key}`}>{state.key === 'approved' ? <ShieldCheck className="sl-inline-icon" /> : null}{state.label}</span>
+                </td>
+                <td><div className="sl-relationship-actions">{rowActions(row)}</div></td>
+              </tr>
+            );
+          })}
+          {outgoing.length === 0 ? (
+            <tr><td colSpan={6} className="sl-relationships-empty">Chưa khai báo quan hệ nào đi ra từ bảng này. Bấm “Tìm quan hệ” để nhận gợi ý.</td></tr>
+          ) : null}
+
+          {suggestions ? (
+            <tr className="sl-relationships-group"><th colSpan={6} scope="rowgroup">Gợi ý chưa khai báo · {suggestions.length}</th></tr>
+          ) : null}
+          {suggestions?.map(item => {
+            const key = `${item.from_column}>${item.to_dataset_id}.${item.to_column}`;
+            return (
+              <tr key={`suggest-${key}`}>
+                <td>
+                  <div className="sl-relationship-link"><code>{item.from_column}</code><ArrowRight /><code>{item.to_dataset_name}.{item.to_column}</code></div>
+                  {item.replaces ? <span className="sl-relationship-problem">Cột này đang khai báo trỏ tới bảng khác; dùng gợi ý sẽ thay quan hệ đó.</span> : null}
+                </td>
+                <td>—</td>
+                <td>{item.sources.map(source => <span key={source} className="sl-relationship-source">{SOURCE_LABELS[source]}</span>)}</td>
+                <td><span className="is-muted">Kiểm tra sau khi dùng gợi ý</span></td>
+                <td><span className="sl-metric-state is-not_started">Gợi ý</span></td>
+                <td>
+                  <div className="sl-relationship-actions">
+                    <Button size="sm" variant="outline" disabled={disabled || dictionaryDirty || busy !== null} onClick={() => void applySuggestion(item)}>
+                      {busy === key ? <LoaderCircle data-icon="inline-start" className="animate-spin" /> : null}Dùng gợi ý
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+          {suggestions && suggestions.length === 0 ? (
+            <tr><td colSpan={6} className="sl-relationships-empty">Không có gợi ý mới: các quan hệ tìm được đều đã khai báo.</td></tr>
+          ) : null}
+
+          <tr className="sl-relationships-group"><th colSpan={6} scope="rowgroup">Đi vào · {incoming.length}</th></tr>
+          {incoming.map(row => {
+            const state = contractState(row.contract);
+            return (
+              <tr key={`in-${row.column_id}`}>
+                <td>
+                  <div className="sl-relationship-link"><code>{row.from_dataset_name}.{row.from_column}</code><ArrowRight /><code>{row.to_column}</code></div>
+                </td>
+                <td>{row.cardinality ? CARDINALITY_LABELS[row.cardinality] : '—'}</td>
+                <td>{row.contract?.source ? SOURCE_LABELS[row.contract.source] : '—'}</td>
+                <td><VerificationCell contract={row.contract} /></td>
+                <td><span className={`sl-metric-state is-${state.key}`}>{state.key === 'approved' ? <ShieldCheck className="sl-inline-icon" /> : null}{state.label}</span></td>
+                <td><span className="sl-relationships-hint">Quản lý ở bảng {row.from_dataset_name}</span></td>
+              </tr>
+            );
+          })}
+          {incoming.length === 0 ? (
+            <tr><td colSpan={6} className="sl-relationships-empty">Chưa có bảng nào khai báo trỏ tới bảng này.</td></tr>
+          ) : null}
+        </tbody>
+      </table>
     </div>
   );
 }
