@@ -512,8 +512,8 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
       </header>
       <div className="sl-metrics-tabs sl-dictionary-tabs" role="tablist" aria-label="Nội dung data dictionary">
         {([
-          ['columns', `Cột (${columns.length})`, columnsDirty],
           ['general', 'Thông tin chung', generalDirty],
+          ['columns', `Cột (${columns.length})`, columnsDirty],
           ['time', 'Thời gian và grain', timeDirty],
         ] as const).map(([id, label, tabDirty]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => selectTab(id)}>
