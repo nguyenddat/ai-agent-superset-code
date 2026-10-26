@@ -1,0 +1,1696 @@
+{
+ "database": {
+  "dialect": "postgresql",
+  "id": 1,
+  "name": "Weather Warehouse"
+ },
+ "edges": [
+  {
+   "cardinality": "many_to_one",
+   "from": {
+    "column": "quan_sat_id",
+    "dataset_id": 13
+   },
+   "id": 1,
+   "to": {
+    "column": "quan_sat_id",
+    "dataset_id": 15
+   }
+  },
+  {
+   "cardinality": "many_to_one",
+   "from": {
+    "column": "chi_so_id",
+    "dataset_id": 13
+   },
+   "id": 2,
+   "to": {
+    "column": "chi_so_id",
+    "dataset_id": 6
+   }
+  },
+  {
+   "cardinality": "many_to_one",
+   "from": {
+    "column": "thanh_pho_id",
+    "dataset_id": 15
+   },
+   "id": 3,
+   "to": {
+    "column": "thanh_pho_id",
+    "dataset_id": 10
+   }
+  },
+  {
+   "cardinality": "many_to_one",
+   "from": {
+    "column": "nguon_du_lieu_id",
+    "dataset_id": 15
+   },
+   "id": 4,
+   "to": {
+    "column": "nguon_du_lieu_id",
+    "dataset_id": 9
+   }
+  },
+  {
+   "cardinality": "many_to_one",
+   "from": {
+    "column": "dieu_kien_id",
+    "dataset_id": 15
+   },
+   "id": 5,
+   "to": {
+    "column": "dieu_kien_id",
+    "dataset_id": 7
+   }
+  },
+  {
+   "cardinality": "many_to_one",
+   "from": {
+    "column": "ngay_id",
+    "dataset_id": 15
+   },
+   "id": 6,
+   "to": {
+    "column": "ngay_id",
+    "dataset_id": 8
+   }
+  }
+ ],
+ "excluded": [],
+ "tables": [
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Định danh bản ghi quan sát thời tiết.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": true,
+     "label": "Mã quan sát",
+     "name": "quan_sat_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã định danh thành phố liên quan đến quan sát.",
+     "is_fk": true,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Mã thành phố",
+     "name": "thanh_pho_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã định danh nguồn cung cấp dữ liệu quan sát.",
+     "is_fk": true,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Mã nguồn dữ liệu",
+     "name": "nguon_du_lieu_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã định danh điều kiện thời tiết được ghi nhận.",
+     "is_fk": true,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Mã điều kiện thời tiết",
+     "name": "dieu_kien_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Phân loại hình thức hoặc loại quan sát thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Loại quan sát",
+     "name": "loai_quan_sat",
+     "role": "row_kind",
+     "synonyms": [
+      "loại quan sát",
+      "dự báo",
+      "hiện tại"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(30)",
+     "unit": null,
+     "values": [
+      "DU_BAO_GIO",
+      "DU_BAO_NGAY",
+      "HIEN_TAI"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm ghi nhận quan sát thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm quan sát",
+     "name": "thoi_diem_quan_sat",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITHOUT TIME ZONE",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Ngày gắn với bản ghi quan sát thời tiết.",
+     "is_fk": true,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Ngày quan sát",
+     "name": "ngay_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": "date",
+     "type": "DATE",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm dữ liệu được lấy hoặc ghi nhận.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm lấy dữ liệu",
+     "name": "lay_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 15,
+   "description": "Lưu thông tin quan sát thời tiết theo thành phố, nguồn dữ liệu, điều kiện và loại quan sát, kèm thời điểm quan sát.",
+   "grain_description": "Mỗi dòng là một quan sát thời tiết.",
+   "indicator_model": null,
+   "indicators": null,
+   "label": "Metadata quan sát thời tiết",
+   "layer": {
+    "id": 2,
+    "level": 1,
+    "name": "Nghiệp vụ"
+   },
+   "schema": "public",
+   "table": "tb_quan_sat_thoi_tiet",
+   "time": {
+    "column": "thoi_diem_quan_sat",
+    "row_kind_column": "loai_quan_sat",
+    "row_kinds": [
+     {
+      "grain": "hour",
+      "label": "Dự báo theo giờ",
+      "value": "DU_BAO_GIO"
+     },
+     {
+      "grain": "day",
+      "label": "Dự báo theo ngày",
+      "value": "DU_BAO_NGAY"
+     },
+     {
+      "grain": "instant",
+      "label": "Quan sát hiện tại",
+      "value": "HIEN_TAI"
+     }
+    ]
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Mã định danh của nguồn dữ liệu.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": true,
+     "label": "ID nguồn dữ liệu",
+     "name": "nguon_du_lieu_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã dùng để nhận diện nguồn dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": true,
+     "label": "Mã nguồn",
+     "name": "ma_nguon",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(30)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tên hiển thị của nguồn dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên nguồn dữ liệu",
+     "name": "ten_nguon",
+     "role": "label",
+     "synonyms": [
+      "nguồn dữ liệu"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(100)",
+     "unit": null,
+     "values": [
+      "Open-Meteo Forecast API"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Địa chỉ API của nguồn dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Địa chỉ API",
+     "name": "dia_chi_api",
+     "role": "attribute",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(255)",
+     "unit": null,
+     "values": [
+      "https://api.open-meteo.com/v1/forecast"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Phân loại nguồn dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Loại nguồn",
+     "name": "loai_nguon",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(30)",
+     "unit": null,
+     "values": [
+      "API"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm bản ghi được tạo.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm tạo",
+     "name": "tao_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 9,
+   "description": "Danh mục nguồn dữ liệu, gồm mã và tên nguồn, địa chỉ API, loại nguồn và thời điểm tạo.",
+   "grain_description": "Một dòng đại diện cho một nguồn dữ liệu.",
+   "indicator_model": null,
+   "indicators": null,
+   "label": "Danh mục nguồn dữ liệu",
+   "layer": {
+    "id": 1,
+    "level": 0,
+    "name": "Danh mục"
+   },
+   "schema": "public",
+   "table": "dm_nguon_du_lieu",
+   "time": {
+    "column": null,
+    "row_kind_column": null,
+    "row_kinds": []
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Mã định danh nội bộ của thành phố.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": true,
+     "label": "ID thành phố",
+     "name": "thanh_pho_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã dùng để nhận diện thành phố.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": true,
+     "label": "Mã thành phố",
+     "name": "ma_thanh_pho",
+     "role": "dimension",
+     "synonyms": [
+      "mã thành phố"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(10)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tên của thành phố.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên thành phố",
+     "name": "ten_thanh_pho",
+     "role": "label",
+     "synonyms": [
+      "thành phố",
+      "tỉnh thành",
+      "địa điểm"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(100)",
+     "unit": null,
+     "values": [
+      "Buon Ma Thuot",
+      "Can Tho",
+      "Da Nang",
+      "Ha Long",
+      "Ha Noi",
+      "Hai Phong",
+      "Ho Chi Minh",
+      "Hue",
+      "Nha Trang",
+      "Phu Quoc",
+      "Thai Binh",
+      "Vinh"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Vùng địa lý nơi thành phố thuộc về.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Vùng",
+     "name": "vung",
+     "role": "dimension",
+     "synonyms": [
+      "vùng",
+      "miền"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(100)",
+     "unit": null,
+     "values": [
+      "Bac Trung Bo",
+      "Dong Bac Bo",
+      "Dong Nam Bo",
+      "Dong bang song Cuu Long",
+      "Dong bang song Hong",
+      "Nam Trung Bo",
+      "Tay Nguyen"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Tọa độ địa lý xác định vị trí theo hướng Bắc–Nam.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Vĩ độ",
+     "name": "vi_do",
+     "role": "attribute",
+     "synonyms": [
+      "vĩ độ"
+     ],
+     "temporal_kind": null,
+     "type": "NUMERIC(8, 5)",
+     "unit": "độ",
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tọa độ địa lý xác định vị trí theo hướng Đông–Tây.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Kinh độ",
+     "name": "kinh_do",
+     "role": "attribute",
+     "synonyms": [
+      "kinh độ"
+     ],
+     "temporal_kind": null,
+     "type": "NUMERIC(8, 5)",
+     "unit": "độ",
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Khu vực khí hậu mà thành phố thuộc về.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Vùng khí hậu",
+     "name": "vung_khi_hau",
+     "role": "dimension",
+     "synonyms": [
+      "vùng khí hậu"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(50)",
+     "unit": null,
+     "values": [
+      "Mien Bac",
+      "Mien Nam",
+      "Mien Trung",
+      "Tay Nguyen"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Cho biết trạng thái hoạt động của thành phố.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Đang hoạt động",
+     "name": "hoat_dong",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BOOLEAN",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm bản ghi được tạo.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm tạo",
+     "name": "tao_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm bản ghi được cập nhật gần nhất.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm cập nhật",
+     "name": "cap_nhat_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 10,
+   "description": "Thông tin thành phố gồm mã, tên, vùng, tọa độ địa lý, vùng khí hậu, trạng thái hoạt động và thời điểm tạo, cập nhật.",
+   "grain_description": "Một bản ghi đại diện cho một thành phố.",
+   "indicator_model": null,
+   "indicators": null,
+   "label": "Danh mục thành phố",
+   "layer": {
+    "id": 1,
+    "level": 0,
+    "name": "Danh mục"
+   },
+   "schema": "public",
+   "table": "dm_thanh_pho",
+   "time": {
+    "column": null,
+    "row_kind_column": null,
+    "row_kinds": []
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Mã định danh của điều kiện thời tiết.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": true,
+     "label": "ID điều kiện thời tiết",
+     "name": "dieu_kien_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã phân loại thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": true,
+     "label": "Mã thời tiết",
+     "name": "ma_thoi_tiet",
+     "role": "dimension",
+     "synonyms": [
+      "mã thời tiết"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tên gọi của điều kiện thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên điều kiện thời tiết",
+     "name": "ten_dieu_kien",
+     "role": "label",
+     "synonyms": [
+      "điều kiện thời tiết",
+      "trời",
+      "thời tiết"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(100)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thông tin mô tả chi tiết về điều kiện thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Mô tả",
+     "name": "mo_ta",
+     "role": "attribute",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(255)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": null,
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Nhóm mức độ",
+     "name": "nhom_muc_do",
+     "role": "dimension",
+     "synonyms": [
+      "mức độ"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(30)",
+     "unit": null,
+     "values": [
+      "Binh thuong",
+      "Dong",
+      "Han che tam nhin",
+      "Mua",
+      "Mua lon",
+      "Nguy hiem",
+      "Tuyet"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm bản ghi được tạo.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm tạo",
+     "name": "tao_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 7,
+   "description": "Danh mục điều kiện thời tiết, gồm mã, tên, mô tả và nhóm mức độ.",
+   "grain_description": "Một dòng đại diện cho một điều kiện thời tiết.",
+   "indicator_model": null,
+   "indicators": null,
+   "label": "Danh mục điều kiện thời tiết",
+   "layer": {
+    "id": 1,
+    "level": 0,
+    "name": "Danh mục"
+   },
+   "schema": "public",
+   "table": "dm_dieu_kien_thoi_tiet",
+   "time": {
+    "column": null,
+    "row_kind_column": null,
+    "row_kinds": []
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Mã định danh của lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": false,
+     "label": "Mã lần nạp dữ liệu",
+     "name": "lan_nap_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm bắt đầu lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm bắt đầu",
+     "name": "bat_dau_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm kết thúc lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm kết thúc",
+     "name": "ket_thuc_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Trạng thái xử lý của lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Trạng thái",
+     "name": "trang_thai",
+     "role": "dimension",
+     "synonyms": [
+      "trạng thái",
+      "kết quả nạp"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(20)",
+     "unit": null,
+     "values": [
+      "THANH_CONG",
+      "THAT_BAI"
+     ]
+    },
+    {
+     "aggregations": [
+      "SUM",
+      "AVG",
+      "MIN",
+      "MAX"
+     ],
+     "description": "Số lượng thành phố trong lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Số thành phố",
+     "name": "so_thanh_pho",
+     "role": "measure",
+     "synonyms": [
+      "số thành phố"
+     ],
+     "temporal_kind": null,
+     "type": "INTEGER",
+     "unit": "thành phố",
+     "values": []
+    },
+    {
+     "aggregations": [
+      "SUM",
+      "AVG",
+      "MIN",
+      "MAX"
+     ],
+     "description": "Số lượng quan sát được ghi nhận trong lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Số quan sát",
+     "name": "so_quan_sat",
+     "role": "measure",
+     "synonyms": [
+      "số quan sát"
+     ],
+     "temporal_kind": null,
+     "type": "INTEGER",
+     "unit": "quan sát",
+     "values": []
+    },
+    {
+     "aggregations": [
+      "SUM",
+      "AVG",
+      "MIN",
+      "MAX"
+     ],
+     "description": "Số lượng giá trị được ghi nhận trong lần nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Số giá trị",
+     "name": "so_gia_tri",
+     "role": "measure",
+     "synonyms": [
+      "số giá trị"
+     ],
+     "temporal_kind": null,
+     "type": "INTEGER",
+     "unit": "giá trị",
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thông tin lỗi phát sinh trong quá trình nạp dữ liệu.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Lỗi",
+     "name": "loi",
+     "role": "attribute",
+     "synonyms": [
+      "lỗi"
+     ],
+     "temporal_kind": null,
+     "type": "TEXT",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 14,
+   "description": "Thông tin về các lần nạp dữ liệu, gồm thời điểm bắt đầu và kết thúc, trạng thái, số thành phố, số quan sát, số giá trị và thông tin lỗi.",
+   "grain_description": "Một dòng đại diện cho một lần nạp dữ liệu.",
+   "indicator_model": null,
+   "indicators": null,
+   "label": "Lần nạp dữ liệu",
+   "layer": {
+    "id": 3,
+    "level": 0,
+    "name": "Kỹ thuật"
+   },
+   "schema": "public",
+   "table": "tb_lan_nap_du_lieu",
+   "time": {
+    "column": null,
+    "row_kind_column": null,
+    "row_kinds": []
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Ngày lịch dùng làm khóa định danh trong bảng ngày.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": true,
+     "label": "Ngày",
+     "name": "ngay_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": "date",
+     "type": "DATE",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Năm tương ứng với ngày lịch.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Năm",
+     "name": "nam",
+     "role": "dimension",
+     "synonyms": [
+      "năm"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": "năm",
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Quý trong năm tương ứng với ngày lịch.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Quý",
+     "name": "quy",
+     "role": "dimension",
+     "synonyms": [
+      "quý"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": "quý",
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tháng trong năm tương ứng với ngày lịch.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tháng",
+     "name": "thang",
+     "role": "dimension",
+     "synonyms": [
+      "tháng"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": "tháng",
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tên của tháng trong năm.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên tháng",
+     "name": "ten_thang",
+     "role": "label",
+     "synonyms": [
+      "tên tháng"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(20)",
+     "unit": null,
+     "values": [
+      "Thang 1",
+      "Thang 10",
+      "Thang 11",
+      "Thang 12",
+      "Thang 2",
+      "Thang 3",
+      "Thang 4",
+      "Thang 5",
+      "Thang 6",
+      "Thang 7",
+      "Thang 8",
+      "Thang 9"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Số thứ tự của tuần trong năm.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tuần trong năm",
+     "name": "tuan_trong_nam",
+     "role": "dimension",
+     "synonyms": [
+      "tuần"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Số thứ tự của ngày trong tháng.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Ngày trong tháng",
+     "name": "ngay_trong_thang",
+     "role": "dimension",
+     "synonyms": [
+      "ngày trong tháng"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Số thứ tự hoặc mã thứ trong tuần.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thứ trong tuần",
+     "name": "thu_trong_tuan",
+     "role": "dimension",
+     "synonyms": [
+      "thứ"
+     ],
+     "temporal_kind": null,
+     "type": "SMALLINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tên ngày trong tuần.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên thứ trong tuần",
+     "name": "ten_thu",
+     "role": "label",
+     "synonyms": [
+      "tên thứ"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(20)",
+     "unit": null,
+     "values": [
+      "Chu nhat",
+      "Thu 2",
+      "Thu 3",
+      "Thu 4",
+      "Thu 5",
+      "Thu 6",
+      "Thu 7"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Cho biết ngày có thuộc cuối tuần hay không.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Là cuối tuần",
+     "name": "la_cuoi_tuan",
+     "role": "dimension",
+     "synonyms": [
+      "cuối tuần"
+     ],
+     "temporal_kind": null,
+     "type": "BOOLEAN",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 8,
+   "description": "Bảng ngày với các thuộc tính lịch như năm, quý, tháng, tuần, ngày trong tháng, thứ trong tuần và trạng thái cuối tuần.",
+   "grain_description": "Mỗi dòng đại diện cho một ngày lịch.",
+   "indicator_model": null,
+   "indicators": null,
+   "label": "Danh mục ngày",
+   "layer": {
+    "id": 1,
+    "level": 0,
+    "name": "Danh mục"
+   },
+   "schema": "public",
+   "table": "dm_ngay",
+   "time": {
+    "column": "ngay_id",
+    "row_kind_column": null,
+    "row_kinds": [
+     {
+      "grain": "day",
+      "label": null,
+      "value": null
+     }
+    ]
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Mã định danh của chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": true,
+     "is_unique": true,
+     "label": "ID chỉ số",
+     "name": "chi_so_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Mã dùng để phân biệt các chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": true,
+     "label": "Mã chỉ số",
+     "name": "ma_chi_so",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(50)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Tên gọi của chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên chỉ số",
+     "name": "ten_chi_so",
+     "role": "label",
+     "synonyms": [
+      "chỉ số",
+      "chỉ tiêu"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(100)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Nhóm phân loại của chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Nhóm chỉ số",
+     "name": "nhom_chi_so",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(50)",
+     "unit": null,
+     "values": [
+      "Buc xa",
+      "Do am",
+      "Gio",
+      "Khi tuong",
+      "May",
+      "Mua",
+      "Nhiet do",
+      "Tam nhin",
+      "Thoi gian",
+      "Tuyet"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Mã định danh của đơn vị đo hoặc đơn vị quản lý chỉ số.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Mã đơn vị",
+     "name": "ma_don_vi",
+     "role": "attribute",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(20)",
+     "unit": null,
+     "values": [
+      "BOOLEAN",
+      "CM",
+      "DEG_C",
+      "HOUR",
+      "HPA",
+      "KMH",
+      "METER",
+      "MM",
+      "PERCENT"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Tên của đơn vị đo hoặc đơn vị quản lý chỉ số.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Tên đơn vị",
+     "name": "ten_don_vi",
+     "role": "attribute",
+     "synonyms": [
+      "đơn vị"
+     ],
+     "temporal_kind": null,
+     "type": "VARCHAR(50)",
+     "unit": null,
+     "values": [
+      "Centimet",
+      "Do C",
+      "Dung/Sai",
+      "Gio",
+      "Hectopascal",
+      "Kilomet/gio",
+      "Met",
+      "Milimet",
+      "Phan tram"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Loại dữ liệu được sử dụng để biểu diễn chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Kiểu dữ liệu",
+     "name": "kieu_du_lieu",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(20)",
+     "unit": null,
+     "values": [
+      "DUNG_SAI",
+      "SO"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Phương pháp tổng hợp giá trị chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Cách tổng hợp",
+     "name": "cach_tong_hop",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(20)",
+     "unit": null,
+     "values": [
+      "BAT_KY",
+      "LON_NHAT",
+      "NHO_NHAT",
+      "TONG",
+      "TRUNG_BINH"
+     ]
+    },
+    {
+     "aggregations": [],
+     "description": "Nội dung mô tả chỉ số thời tiết.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Mô tả",
+     "name": "mo_ta",
+     "role": "attribute",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "VARCHAR(255)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Cho biết chỉ số thời tiết có đang được sử dụng hay không.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Đang hoạt động",
+     "name": "hoat_dong",
+     "role": "dimension",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BOOLEAN",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Thời điểm bản ghi được tạo.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Thời điểm tạo",
+     "name": "tao_luc",
+     "role": "time",
+     "synonyms": [],
+     "temporal_kind": "timestamp",
+     "type": "TIMESTAMP WITH TIME ZONE",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 6,
+   "description": "Danh mục chỉ số thời tiết, gồm mã, tên, nhóm chỉ số, đơn vị đo, kiểu dữ liệu, cách tổng hợp, mô tả và trạng thái hoạt động.",
+   "grain_description": "Một dòng đại diện cho một chỉ số thời tiết.",
+   "indicator_model": {
+    "aggregation_column": "cach_tong_hop",
+    "aggregation_map": {
+     "BAT_KY": "NONE",
+     "CUOI_CUNG": "NONE",
+     "LON_NHAT": "MAX",
+     "NHO_NHAT": "MIN",
+     "TONG": "SUM",
+     "TRUNG_BINH": "AVG"
+    },
+    "code_column": "ma_chi_so",
+    "key_column": "chi_so_id",
+    "kind": "catalog",
+    "name_column": "ten_chi_so",
+    "unit_column": "ten_don_vi",
+    "value_kind_column": "kieu_du_lieu"
+   },
+   "indicators": {
+    "aggregation_codes": [
+     "BAT_KY",
+     "LON_NHAT",
+     "NHO_NHAT",
+     "TONG",
+     "TRUNG_BINH"
+    ],
+    "indicators": [
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "ap_suat_hpa",
+      "key": 7,
+      "name": "Ap suat",
+      "unit": "Hectopascal",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "cam_nhan_c",
+      "key": 2,
+      "name": "Nhiet do cam nhan",
+      "unit": "Do C",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MAX",
+      "aggregation_code": "LON_NHAT",
+      "code": "cam_nhan_cao_nhat_c",
+      "key": 15,
+      "name": "Cam nhan cao nhat",
+      "unit": "Do C",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MIN",
+      "aggregation_code": "NHO_NHAT",
+      "code": "cam_nhan_thap_nhat_c",
+      "key": 14,
+      "name": "Cam nhan thap nhat",
+      "unit": "Do C",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "do_am_pct",
+      "key": 3,
+      "name": "Do am tuong doi",
+      "unit": "Phan tram",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MAX",
+      "aggregation_code": "LON_NHAT",
+      "code": "gio_giat_kmh",
+      "key": 10,
+      "name": "Gio giat",
+      "unit": "Kilomet/gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MAX",
+      "aggregation_code": "LON_NHAT",
+      "code": "gio_giat_toi_da_kmh",
+      "key": 22,
+      "name": "Gio giat toi da",
+      "unit": "Kilomet/gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "NONE",
+      "aggregation_code": "BAT_KY",
+      "code": "la_ban_ngay",
+      "key": 25,
+      "name": "Ban ngay",
+      "unit": "Dung/Sai",
+      "value_kind": "DUNG_SAI"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "luong_mua_mm",
+      "key": 4,
+      "name": "Luong mua",
+      "unit": "Milimet",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "may_phu_pct",
+      "key": 8,
+      "name": "Do che phu may",
+      "unit": "Phan tram",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "mua_mm",
+      "key": 5,
+      "name": "Mua",
+      "unit": "Milimet",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "nhiet_do_c",
+      "key": 1,
+      "name": "Nhiet do",
+      "unit": "Do C",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MAX",
+      "aggregation_code": "LON_NHAT",
+      "code": "nhiet_do_cao_nhat_c",
+      "key": 13,
+      "name": "Nhiet do cao nhat",
+      "unit": "Do C",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MIN",
+      "aggregation_code": "NHO_NHAT",
+      "code": "nhiet_do_thap_nhat_c",
+      "key": 12,
+      "name": "Nhiet do thap nhat",
+      "unit": "Do C",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "so_gio_co_mua",
+      "key": 20,
+      "name": "So gio co mua",
+      "unit": "Gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "tam_nhin_m",
+      "key": 11,
+      "name": "Tam nhin",
+      "unit": "Met",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "thoi_luong_ban_ngay_gio",
+      "key": 24,
+      "name": "Thoi luong ban ngay",
+      "unit": "Gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "thoi_luong_nang_gio",
+      "key": 23,
+      "name": "Thoi luong nang",
+      "unit": "Gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "toc_do_gio_kmh",
+      "key": 9,
+      "name": "Toc do gio",
+      "unit": "Kilomet/gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "MAX",
+      "aggregation_code": "LON_NHAT",
+      "code": "toc_do_gio_toi_da_kmh",
+      "key": 21,
+      "name": "Toc do gio toi da",
+      "unit": "Kilomet/gio",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "tong_luong_mua_mm",
+      "key": 16,
+      "name": "Tong luong mua ngay",
+      "unit": "Milimet",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "tong_mua_mm",
+      "key": 17,
+      "name": "Tong mua ngay",
+      "unit": "Milimet",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "tong_mua_rao_mm",
+      "key": 18,
+      "name": "Tong mua rao ngay",
+      "unit": "Milimet",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "SUM",
+      "aggregation_code": "TONG",
+      "code": "tuyet_roi_cm",
+      "key": 19,
+      "name": "Tuyet roi",
+      "unit": "Centimet",
+      "value_kind": "SO"
+     },
+     {
+      "aggregation": "AVG",
+      "aggregation_code": "TRUNG_BINH",
+      "code": "xac_suat_mua_pct",
+      "key": 6,
+      "name": "Xac suat mua",
+      "unit": "Phan tram",
+      "value_kind": "SO"
+     }
+    ],
+    "too_many": false,
+    "unmapped_aggregation_codes": [],
+    "value_kinds": [
+     "DUNG_SAI",
+     "SO"
+    ]
+   },
+   "label": "Danh mục chỉ số thời tiết",
+   "layer": {
+    "id": 1,
+    "level": 0,
+    "name": "Danh mục"
+   },
+   "schema": "public",
+   "table": "dm_chi_so_thoi_tiet",
+   "time": {
+    "column": null,
+    "row_kind_column": null,
+    "row_kinds": []
+   }
+  },
+  {
+   "columns": [
+    {
+     "aggregations": [],
+     "description": "Định danh của bản ghi quan sát.",
+     "is_fk": true,
+     "is_pk": true,
+     "is_unique": false,
+     "label": "Mã quan sát",
+     "name": "quan_sat_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Định danh chỉ số được ghi nhận trong quan sát.",
+     "is_fk": true,
+     "is_pk": true,
+     "is_unique": false,
+     "label": "Mã chỉ số",
+     "name": "chi_so_id",
+     "role": "key",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BIGINT",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Giá trị dạng số của chỉ số được quan sát.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Giá trị số",
+     "name": "gia_tri_so",
+     "role": "measure",
+     "synonyms": [
+      "giá trị"
+     ],
+     "temporal_kind": null,
+     "type": "NUMERIC(12, 4)",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Giá trị dạng đúng hoặc sai của chỉ số được quan sát.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Giá trị đúng/sai",
+     "name": "gia_tri_dung_sai",
+     "role": "measure",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "BOOLEAN",
+     "unit": null,
+     "values": []
+    },
+    {
+     "aggregations": [],
+     "description": "Giá trị quan sát được lưu dưới dạng văn bản.",
+     "is_fk": false,
+     "is_pk": false,
+     "is_unique": false,
+     "label": "Giá trị dạng chữ",
+     "name": "gia_tri_chu",
+     "role": "attribute",
+     "synonyms": [],
+     "temporal_kind": null,
+     "type": "TEXT",
+     "unit": null,
+     "values": []
+    }
+   ],
+   "dataset_id": 13,
+   "description": "Lưu các giá trị quan sát theo chỉ số, gồm giá trị dạng số, đúng/sai hoặc văn bản.",
+   "grain_description": "Một bản ghi cho một giá trị quan sát của một chỉ số.",
+   "indicator_model": {
+    "indicator_column": "chi_so_id",
+    "kind": "values",
+    "value_columns": {
+     "CHU": "gia_tri_chu",
+     "DUNG_SAI": "gia_tri_dung_sai",
+     "SO": "gia_tri_so"
+    }
+   },
+   "indicators": null,
+   "label": "Giá trị quan sát",
+   "layer": {
+    "id": 2,
+    "level": 1,
+    "name": "Nghiệp vụ"
+   },
+   "schema": "public",
+   "table": "tb_gia_tri_quan_sat",
+   "time": {
+    "column": null,
+    "row_kind_column": null,
+    "row_kinds": []
+   }
+  }
+ ],
+ "version": 1
+}

@@ -187,9 +187,11 @@ Tập đỉnh cần nối (terminal) là các bảng chứa cột đã link. M�
    bước này.
 3. **Phương án dự phòng: cây Steiner** trên toàn đồ thị khi bước 2 không tới được mọi terminal, tức phải đi ngược chiều.
    Kho dữ liệu thường có dưới vài chục bảng, nên dùng Dreyfus–Wagner chính xác khi số terminal ≤ 6. Nhiều hơn thì dùng
-   xấp xỉ Kou–Markowsky–Berman (không quá gấp đôi cây tối ưu).
+   heuristic Takahashi–Matsuyama. Cây là cây có hướng, gốc tại bảng gốc, vì chiều đi quyết định có nhân dòng hay không;
+   xấp xỉ Kou–Markowsky–Berman chỉ dành cho đồ thị vô hướng nên không phân biệt được join an toàn với join nhân dòng.
 4. **Kiểm tra nhân dòng:** cạnh đi ngược chiều một → nhiều làm nhân dòng. Phép đo được gộp trước trong một subquery ở
-   grain của bảng gốc, rồi mới nối. Không làm được thì dừng và giải thích.
+   grain của bảng gốc, rồi mới nối. Không làm được thì dừng và giải thích. Bước 4 (26/10/2026) mới dừng và giải thích;
+   gộp trước để lại sau.
 5. **Nhiều đường cùng chi phí** (ví dụ hai FK cùng trỏ về `dm_ngay`): chọn theo cột đã link. Nếu vẫn còn mơ hồ thì hỏi
    lại người dùng bằng thẻ lựa chọn như hiện nay.
 
@@ -247,7 +249,8 @@ trả về cả tầng dữ liệu của từng bảng.
    table.
 3. **Semantic Layer: `/schema-graph` (4.5)**, có test quyền: người không được xem bảng thì không thấy đỉnh và cạnh của
    bảng đó.
-4. **AI Agent: thuật toán đồ thị và sinh SQL (5.2–5.3).** Python thuần, test trên đồ thị của kho mẫu và các đồ thị tự
+4. **AI Agent: thuật toán đồ thị và sinh SQL (5.2–5.3)**, kèm trang "Thử phân tích dữ liệu" cho quản trị viên
+   (`/ai-agent/?lab=schema-link`): nhập mục tiêu dạng JSON, xem bốn chặng của 5.5 và SQL đã dựng. Đã làm 26/10/2026. Python thuần, test trên đồ thị của kho mẫu và các đồ thị tự
    dựng: nhiều đường, nhân dòng, không có đường.
 5. **AI Agent: linking, chạy và trả lời (5.1, 5.4)**, gắn vào ladder thay cho đề xuất dataset.
 6. **AI Agent: hiển thị quá trình linking (5.5).**

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUp, BookMarked, LayoutDashboard, LoaderCircle, MessageSquare, Pencil, Plus, Search, Sparkles, Square, Trash2,
+  ArrowUp, BookMarked, FlaskConical, LayoutDashboard, LoaderCircle, MessageSquare, Pencil, Plus, Search, Sparkles, Square, Trash2,
 } from 'lucide-react';
 import {
   ChatSession, ChatStreamEvent, DashboardOption, UserDefinition, answerClarification,
@@ -11,6 +11,8 @@ import {
   ClarificationHandlers, Turn, TurnView, applyStreamEvent, newTurn, turnFromStored,
 } from './components/ChatTurn';
 import { DefinitionsPanel } from './components/DefinitionsPanel';
+import { canUseSchemaLinkLab } from '../../shared/api/schemaLink';
+import { SchemaLinkLab } from '../schema-link/SchemaLinkLab';
 
 export const AGENT_PAGE = '/ai-agent/';
 
@@ -40,6 +42,8 @@ const sessionFromLocation = (): number | null => {
   return Number.isInteger(sessionId) && sessionId > 0 ? sessionId : null;
 };
 
+const LAB_PAGE = '?lab=schema-link';
+const labFromLocation = () => new URLSearchParams(window.location.search).get('lab') === 'schema-link';
 const dashboardRefFromLocation = () => new URLSearchParams(window.location.search).get('dashboard');
 
 const sessionHref = (sessionId: number | null) => (
@@ -126,11 +130,15 @@ export function AgentPage() {
   const [draft, setDraft] = useState('');
   const [definitions, setDefinitions] = useState<UserDefinition[]>([]);
   const [definitionsOpen, setDefinitionsOpen] = useState(false);
+  // The schema link lab is for administrators; the link shows only once the API says the user may open it.
+  const [labOpen, setLabOpen] = useState(labFromLocation);
+  const [canUseLab, setCanUseLab] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   // A conversation started by the running stream is already on screen and must not be reloaded over it.
   const streamedSessionRef = useRef<number | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const streaming = turns.some(turn => turn.state === 'streaming');
+  useEffect(() => { void canUseSchemaLinkLab().then(setCanUseLab); }, []);
   const activeSession = sessions?.find(chatSession => chatSession.id === activeSessionId) ?? null;
   const newChatDashboard = dashboards?.find(dashboard => dashboard.id === newChatDashboardId) ?? null;
 
@@ -143,6 +151,7 @@ export function AgentPage() {
     observer.observe(document.head, { childList: true });
     const onPopState = () => {
       abortRef.current?.abort();
+      setLabOpen(labFromLocation());
       setActiveSessionId(sessionFromLocation());
     };
     window.addEventListener('popstate', onPopState);
@@ -206,7 +215,8 @@ export function AgentPage() {
   }, [turns]);
 
   const navigate = (sessionId: number | null) => {
-    if (sessionId === activeSessionId) return;
+    if (sessionId === activeSessionId && !labOpen) return;
+    setLabOpen(false);
     abortRef.current?.abort();
     streamedSessionRef.current = null;
     window.history.pushState(null, '', sessionHref(sessionId));
@@ -392,6 +402,20 @@ export function AgentPage() {
         <button type="button" className="ai-page-new-chat" onClick={startNewChat}>
           <Plus aria-hidden="true" /> Cuộc trò chuyện mới
         </button>
+        {canUseLab === true ? (
+          <a
+            className={`ai-page-lab-link${labOpen ? ' is-active' : ''}`}
+            href={`${AGENT_PAGE}${LAB_PAGE}`}
+            onClick={event => {
+              event.preventDefault();
+              abortRef.current?.abort();
+              window.history.pushState(null, '', `${AGENT_PAGE}${LAB_PAGE}`);
+              setLabOpen(true);
+            }}
+          >
+            <FlaskConical aria-hidden="true" /> Thử phân tích dữ liệu
+          </a>
+        ) : null}
         <label className="ai-page-search">
           <Search aria-hidden="true" />
           <input
@@ -445,7 +469,13 @@ export function AgentPage() {
       </aside>
 
       <main className="ai-page-main">
-        {activeSessionId === null ? (
+        {labOpen ? (
+          <div className="ai-page-lab-scroll">
+            {canUseLab === null ? <p className="ai-page-state"><LoaderCircle className="ai-spin" aria-hidden="true" /> Đang tải…</p> : null}
+            {canUseLab === true ? <SchemaLinkLab /> : null}
+            {canUseLab === false ? <p className="ai-page-state">Chỉ quản trị viên dùng được phòng thử phân tích.</p> : null}
+          </div>
+        ) : activeSessionId === null ? (
           <div className="ai-page-start">
             <span className="ai-chat-mark" aria-hidden="true"><Sparkles /></span>
             <h1>Hỏi AI Agent về dữ liệu</h1>

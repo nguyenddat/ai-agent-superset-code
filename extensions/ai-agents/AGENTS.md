@@ -258,3 +258,18 @@ describes.
 
 `OPENROUTER_API_KEY` comes from `extensions/ai-agents/.env`, which Compose loads
 into the Superset containers. Keep that file out of commits and bundles.
+
+## Schema link (in progress)
+
+`modules/schema_link/` answers over base tables when no metric can
+(`docs/specs/schema-link.md`). `graph.py` reads the Semantic Layer's
+`/schema-graph` (as the user, cached 60 seconds); `goal.py` checks a goal
+(measures, group by, filters, kinds of rows) against it, turning an indicator
+code such as `nhiet_do_c` into the values table's column, the catalog's code
+filter and its aggregation; `paths.py` finds the join tree, Dijkstra from the
+root along many-to-one edges first and a directed Steiner tree otherwise;
+`sql.py` builds the SQL as a sqlglot tree; `analysis.py` tells the run as the
+four stages the page draws (goal, nodes, graph, chosen path). Administrators
+try it at `/ai-agent/?lab=schema-link` ("Thử phân tích dữ liệu"), writing the
+goal by hand; nothing runs the SQL yet, and questions do not reach it yet.
+`tests/fixtures/schema_graph_weather.json` is the sample warehouse's graph.
