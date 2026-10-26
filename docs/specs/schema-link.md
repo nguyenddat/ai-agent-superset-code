@@ -176,16 +176,27 @@ cho việc soạn đề xuất dataset.
 - Đi theo chiều nhiều → một (FK → PK): chi phí 1, không nhân dòng.
 - Đi ngược chiều một → nhiều: chi phí cao, và đánh dấu **nhân dòng**.
 
-Tập đỉnh cần nối (terminal) là các bảng chứa cột đã link. Thuật toán:
+Tập đỉnh cần nối (terminal) là các bảng chứa cột đã link. Một câu hỏi thường cần từ ba bảng trở lên, nên bài toán là
+**cây nhỏ nhất nối mọi terminal** (cây Steiner); đường ngắn nhất giữa hai bảng là trường hợp riêng của nó. Ghép từng cặp
+đường ngắn nhất lại với nhau có thể thừa cạnh hoặc tạo vòng khi đồ thị có nhiều lối đi. Thuật toán (chốt 26/10/2026):
 
 1. Chọn **bảng gốc**: bảng chứa cột đo lường, hoặc bảng giá trị của chỉ số key-value. Đây là bảng có grain mịn nhất
    trong các bảng cần đo.
-2. Tìm cây Steiner nhỏ nhất nối bảng gốc với các terminal. Kho dữ liệu thường có dưới vài chục bảng, nên dùng
-   Dreyfus–Wagner chính xác khi số terminal ≤ 6. Nhiều hơn thì dùng xấp xỉ theo đường ngắn nhất (Kou–Markowsky–Berman).
-3. **Kiểm tra nhân dòng:** đường đi từ bảng gốc chỉ được đi theo chiều nhiều → một. Nếu buộc phải đi ngược, phép đo được
-   gộp trước trong một subquery ở grain của bảng gốc, rồi mới nối. Không làm được thì dừng và giải thích.
-4. **Nhiều đường cùng chi phí** (ví dụ hai FK cùng trỏ về `dm_ngay`): chọn theo cột đã link. Nếu vẫn còn mơ hồ thì hỏi
+2. **Đường chính: Dijkstra từ bảng gốc** theo chiều nhiều → một tới từng terminal. Mô hình danh mục và nghiệp vụ thường
+   có dạng snowflake, nên hợp các đường ngắn nhất từ gốc đã là một cây và không nhân dòng. Phần lớn câu hỏi xong ở
+   bước này.
+3. **Phương án dự phòng: cây Steiner** trên toàn đồ thị khi bước 2 không tới được mọi terminal, tức phải đi ngược chiều.
+   Kho dữ liệu thường có dưới vài chục bảng, nên dùng Dreyfus–Wagner chính xác khi số terminal ≤ 6. Nhiều hơn thì dùng
+   xấp xỉ Kou–Markowsky–Berman (không quá gấp đôi cây tối ưu).
+4. **Kiểm tra nhân dòng:** cạnh đi ngược chiều một → nhiều làm nhân dòng. Phép đo được gộp trước trong một subquery ở
+   grain của bảng gốc, rồi mới nối. Không làm được thì dừng và giải thích.
+5. **Nhiều đường cùng chi phí** (ví dụ hai FK cùng trỏ về `dm_ngay`): chọn theo cột đã link. Nếu vẫn còn mơ hồ thì hỏi
    lại người dùng bằng thẻ lựa chọn như hiện nay.
+
+Ví dụ: "nhiệt độ trung bình theo giờ ở Hà Nội" cần `tb_gia_tri_quan_sat` (giá trị, bảng gốc), `dm_chi_so_thoi_tiet`
+(chỉ số "nhiệt độ") và `dm_thanh_pho` (Hà Nội). Dijkstra từ gốc cho cây
+`dm_chi_so_thoi_tiet ← tb_gia_tri_quan_sat → tb_quan_sat_thoi_tiet → dm_thanh_pho`: ba phép join, đi qua bảng trung
+gian `tb_quan_sat_thoi_tiet`, không nhân dòng.
 
 Thuật toán là Python thuần, không gọi model, có unit test đầy đủ.
 
@@ -209,19 +220,24 @@ Thuật toán là Python thuần, không gọi model, có unit test đầy đủ
   bên dưới có "Xem truy vấn".
 - Câu hỏi được ghi log kèm SQL và đường join, để quản trị viên thấy câu nào hay được hỏi.
 
-### 5.5 Hiển thị quá trình linking trên trang AI Agent
+### 5.5 Hiển thị quá trình phân tích trên trang AI Agent
 
-Bước "Liên kết dữ liệu" trong danh sách công cụ của câu trả lời, mở ra được, gồm:
+Mỗi câu trả lời qua schema link có một bước "Phân tích dữ liệu", mở ra được, kể lại quá trình theo bốn chặng (yêu cầu
+ngày 26/10/2026). Chặng nào chưa chạy tới (dừng vì thiếu dữ liệu hoặc hỏi lại) thì hiện ở trạng thái chưa xong, kèm lý
+do.
 
-- **Đồ thị nhỏ:**
-  - Bảng ứng viên là đỉnh mờ. Bảng được chọn là đỉnh đậm, bảng gốc được đánh dấu.
-  - Cạnh trong cây join được tô màu, kèm cặp cột và bản số.
-  - Cạnh nhân dòng có cảnh báo.
-- **Danh sách cột đã link**, theo nhóm Đo, Chia theo, Lọc, Loại dòng, mỗi cột kèm lý do (khớp nhãn, từ đồng nghĩa, giá
-  trị mã).
-- **Các bước:** ứng viên → model chọn → cây join → SQL. Mỗi bước có thời gian chạy, theo kiểu tool call hiện có.
+1. **Mục tiêu.** Câu hỏi được hiểu thành đo gì (chỉ số hoặc cột đo, phép gộp), chia theo gì, lọc theo gì, loại dòng
+   nào. Mỗi mục ghi nguồn: khớp nhãn, từ đồng nghĩa, giá trị mã, tên chỉ số hoặc model chọn.
+2. **Node.** Các bảng và cột ứng viên kèm điểm khớp. Terminal (bảng phải có trong truy vấn) và bảng gốc được đánh dấu.
+3. **Đồ thị.** Toàn bộ đồ thị schema người hỏi được thấy: base table xếp theo tầng (Danh mục, Nghiệp vụ), cạnh đã duyệt
+   kèm bản số. Bảng không liên quan để mờ, terminal tô đậm.
+4. **Đường được chọn.** Cây join tô màu trên chính đồ thị đó, mỗi cạnh có cặp cột, chiều đi, chi phí và cờ nhân dòng.
+   Kèm thuật toán đã dùng (Dijkstra từ gốc hoặc Steiner), tổng chi phí, và các đường thay thế cùng chi phí nếu có. Cuối
+   cùng là SQL đã dựng.
 
-Bố cục đồ thị dùng thư viện xếp lớp (elkjs, đã dùng ở lineage của Semantic Layer) hoặc xếp lớp đơn giản từ bảng gốc.
+Các chặng chạy theo thứ tự, mỗi chặng có thời gian, theo kiểu tool call hiện có. Đồ thị dùng bố cục xếp lớp theo tầng dữ
+liệu (elkjs, đã dùng ở lineage của Semantic Layer). Dữ liệu cho chặng 3 lấy từ `/schema-graph` (4.5), nên endpoint này
+trả về cả tầng dữ liệu của từng bảng.
 
 ## 6. Các bước triển khai
 

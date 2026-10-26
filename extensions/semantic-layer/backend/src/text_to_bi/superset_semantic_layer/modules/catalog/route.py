@@ -131,6 +131,7 @@ from ..semantic_query.relationships import (
     relationship_contract_hash,
     relationship_is_approved_current,
 )
+from ..semantic_query.schema_graph import GRAPH_VERSION, graph_edges, table_node
 
 logger = logging.getLogger(__name__)
 # Set in a Superset database's extra JSON by superset/bootstrap_governance.py for the AI Agent reporting views.
@@ -2323,6 +2324,79 @@ class SemanticLayerAPI(RestApi):
         )
         _label_dimensions(catalog["datasets"])
         return self.response(200, **catalog)
+
+    @staticmethod
+    def _has_row_level_security(dataset: SqlaTable) -> bool:
+        """Whether a row-level security rule applies to the caller on this dataset; unreadable counts as yes."""
+        try:
+            return bool(security_manager.get_rls_filters(dataset))
+        except Exception:
+            logger.warning("Reading the RLS rules of %s failed", dataset.table_name, exc_info=True)
+            return True
+
+    @expose("/schema-graph", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def schema_graph(self):
+        """The base tables of a database the caller may read in full, and the approved relationships between them.
+
+        This is what the AI Agent's schema link searches for join paths, as the caller: a table the caller may not
+        read, or one a row-level security rule applies to, is no node, and its relationships are no edges.
+        """
+        database_id = request.args.get("database_id", type=int)
+        if database_id is None:
+            return self.response_400(message="database_id is required.")
+        _ensure_dictionary_tables()
+        database = db.session.get(Database, database_id)
+        if database is None:
+            return self.response(404, message="Database not found.")
+        nodes, excluded = [], []
+        for dataset in self._base_tables(database_id):
+            if not self._can_access_semantic_query_dataset(dataset):
+                continue
+            if self._has_row_level_security(dataset):
+                excluded.append({"dataset_id": dataset.id, "table": dataset.table_name, "reason": "row_level_security"})
+                continue
+            nodes.append(self._schema_graph_node(dataset))
+        node_ids = {node["dataset_id"] for node in nodes}
+        contracts = db.session.query(RelationshipContract).filter(
+            RelationshipContract.status == "approved", RelationshipContract.from_dataset_id.in_(node_ids),
+        ).all() if node_ids else []
+        relationships = []
+        for contract in contracts:
+            entry = ColumnDictionaryRepository(db.session).get_for_dataset_column(
+                contract.from_dataset_id, contract.from_column,
+            )
+            ends = self._relationship_ends(entry) if entry is not None else None
+            relationships.append((contract, bool(ends) and relationship_is_approved_current(contract, *ends)))
+        return self.response(
+            200,
+            version=GRAPH_VERSION,
+            database={"id": database.id, "name": database.database_name, "dialect": database.backend},
+            tables=nodes,
+            edges=graph_edges(relationships, node_ids),
+            excluded=excluded,
+        )
+
+    def _schema_graph_node(self, dataset: SqlaTable) -> dict[str, Any]:
+        _seed_dictionary(dataset)
+        dictionary = db.session.get(DatasetDictionary, dataset.id)
+        entries = {row.column_name: row for row in ColumnDictionaryRepository(db.session).list_for_dataset(dataset.id)}
+        grains = (
+            db.session.query(DatasetGrain).filter(DatasetGrain.dataset_id == dataset.id)
+            .order_by(DatasetGrain.row_kind_value).all()
+        )
+        model = stored_indicator_model(getattr(dictionary, "indicator_model", None))
+        indicators = None
+        if model and model["kind"] == "catalog":
+            try:
+                indicators = self._read_indicators(dataset, model)
+            except Exception:
+                # The graph still serves the table; linking then cannot name its indicators.
+                logger.exception("Reading the indicators of %s for the schema graph failed", dataset.table_name)
+        layer = db.session.get(DataLayer, dictionary.layer_id) if dictionary and dictionary.layer_id else None
+        return table_node(dataset, dictionary, entries, grains, self._coded_values(dataset, entries), indicators, layer)
 
     def _catalog_metric_details(self, dataset_ids: set[int]) -> Any:
         """Business definition, unit, steward and discoverable glossary terms for each catalog metric."""

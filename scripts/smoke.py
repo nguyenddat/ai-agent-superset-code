@@ -85,6 +85,8 @@ def main(argv: list[str] | None = None) -> None:
         endpoints.append(f"{SEMANTIC_API}/dataset/{dataset['id']}/dictionary")
         endpoints.append(f"{SEMANTIC_API}/business-model?database_id={dataset['database']['id']}")
         endpoints.append(f"{SEMANTIC_API}/metric-contracts?database_id={dataset['database']['id']}")
+        endpoints.append(f"{SEMANTIC_API}/schema-graph?database_id={dataset['database']['id']}")
+        endpoints.append(f"{SEMANTIC_API}/dataset/{dataset['id']}/relationships")
     else:
         print("No Superset dataset found; skipping the dataset dictionary, business model and metric endpoints.")
 
