@@ -34,6 +34,13 @@ export const semanticLayerApi = {
     });
     return `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/grain-profile?${query}`;
   },
+  relationships: (datasetId: number, suggest = false) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/relationships${suggest ? '?suggest=1' : ''}`
+  ),
+  relationshipApply: (datasetId: number) => `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/relationships/apply`,
+  relationshipAction: (datasetId: number, columnId: number, action: 'contract/candidate' | 'verify' | 'contract/approve' | 'contract/revoke') => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/relationships/${encodeURIComponent(columnId)}/${action}`
+  ),
   referenceOptions: `${SEMANTIC_LAYER_API}/datasets/reference-options`,
   businessModel: (databaseId: number) => `${SEMANTIC_LAYER_API}/business-model?database_id=${encodeURIComponent(databaseId)}`,
   businessCanvas: (databaseId: number) => `${SEMANTIC_LAYER_API}/business-canvas?database_id=${encodeURIComponent(databaseId)}`,

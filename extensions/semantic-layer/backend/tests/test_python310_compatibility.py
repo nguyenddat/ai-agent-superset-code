@@ -36,4 +36,5 @@ def test_catalog_route_uses_python_310_compatible_utc_timezone():
         and node.args[0].value.id == "timezone"
         and node.args[0].attr == "utc"
     ]
-    assert len(timezone_utc_calls) == 2
+    # Approving and revoking a relationship contract, and storing its data check.
+    assert len(timezone_utc_calls) == 3

@@ -294,6 +294,65 @@ export type GrainProfileResponse = {
   too_many_kinds: boolean;
 };
 
+export type RelationshipSource = 'database' | 'dictionary' | 'naming';
+
+/** What the last data check of a relationship found; it counts only for the snapshot it was made on. */
+export type RelationshipVerification = {
+  target_rows: number;
+  target_unique: boolean;
+  references: number;
+  orphans: number;
+  orphan_ratio: number;
+  orphan_samples: string[];
+  type_match: boolean;
+  passed: boolean;
+};
+
+export type RelationshipContractView = {
+  id: number;
+  status: 'candidate' | 'approved' | 'revoked';
+  source: RelationshipSource | null;
+  cardinality: 'many_to_one' | 'one_to_one';
+  /** Approved and still matching the live columns: an edge the AI Agent's schema link may join on. */
+  current: boolean;
+  verification: RelationshipVerification | null;
+  verified_at: string | null;
+};
+
+export type RelationshipRow = {
+  column_id: number;
+  from_dataset_id: number;
+  from_dataset_name: string;
+  from_column: string;
+  to_dataset_id: number;
+  to_dataset_name: string;
+  to_column: string;
+  cardinality: 'many_to_one' | 'one_to_one' | null;
+  /** Why the declared relationship cannot be a contract, such as a target that is not a key. */
+  problem: string | null;
+  contract: RelationshipContractView | null;
+};
+
+export type RelationshipSuggestion = {
+  from_dataset_id: number;
+  from_column: string;
+  to_dataset_id: number;
+  to_dataset_name: string;
+  to_column: string;
+  sources: RelationshipSource[];
+  /** The source column already declares another target, which this suggestion would replace. */
+  replaces: boolean;
+};
+
+export type RelationshipsResponse = {
+  dataset_id: number;
+  is_base: boolean;
+  outgoing: RelationshipRow[];
+  incoming: RelationshipRow[];
+  suggestions?: RelationshipSuggestion[];
+  suggestion_note?: string | null;
+};
+
 export type ReferenceDataset = {
   id: number;
   dataset_name: string;

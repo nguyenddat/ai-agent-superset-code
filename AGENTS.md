@@ -148,7 +148,12 @@ the `row_kind_column` that tells them apart; `text_to_bi_dataset_grain` holds
 the grain of each kind of row, and each column dictionary row has a
 `temporal_kind` (`date` or `timestamp`). "Phát hiện grain" in the Data
 Dictionary reads a suggestion from the data; see
-`docs/specs/grain-va-ngu-nghia-thoi-gian.md`. `text_to_bi_dataset_proposal` holds the virtual datasets the AI
+`docs/specs/grain-va-ngu-nghia-thoi-gian.md`. `text_to_bi_relationship_contract`
+holds the relationships between base tables that the AI Agent's schema link may
+join on (`docs/specs/schema-link.md`): the Data Dictionary's "Quan hệ" tab
+suggests them from the database's foreign keys and from column names, checks
+the data (unique target, matching types, orphans) and approves only a passing
+check. `text_to_bi_dataset_proposal` holds the virtual datasets the AI
 Agent drafts over base (`dm_*`, `tb_*`) datasets when no aggregate dataset can
 answer a question; an administrator creates or rejects them in "Xử lý câu hỏi" →
 "Đề xuất dataset". Opening the Semantic Layer as an administrator creates these

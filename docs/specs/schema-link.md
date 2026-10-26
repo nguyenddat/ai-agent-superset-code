@@ -75,6 +75,11 @@ bằng engine của database trong Superset, chỉ cho quản trị viên.
 - `verified_at`, `orphan_ratio`, `target_unique`;
 - cặp cột nhiều phần cho khoá ghép. Ví dụ `tb_gia_tri_quan_sat` có PK `(quan_sat_id, chi_so_id)`.
 
+> Đã làm ở bước 1 (26/10/2026): quan hệ **một cột**. Cả 6 FK của kho mẫu là một cột; khoá ghép của
+> `tb_gia_tri_quan_sat` chỉ nằm ở phía nguồn, nên không cần cặp cột nhiều phần. Phần khoá ghép để lại tới khi có FK
+> ghép thật. Kết quả kiểm chứng lưu thành JSON trong `verification`, chỉ có hiệu lực khi `verified_hash` bằng
+> `contract_hash`; duyệt cần kiểm chứng đạt (đích duy nhất, kiểu khớp).
+
 Contract chuyển `outdated` khi cấu trúc cột đổi, theo cơ chế dấu vân tay hiện có. Có thể bật `TEXT_TO_BI_REQUIRE_SECOND_REVIEWER` cho quan hệ như với metric.
 
 **Giao diện:** tab "Quan hệ" trong Data Dictionary của base table. Tab liệt kê quan hệ ra và vào bảng, có nguồn, kết

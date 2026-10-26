@@ -6,6 +6,7 @@ these tests exercise the real handler source without a Superset runtime.
 """
 
 import ast
+import json
 import sys
 import types
 from datetime import UTC, datetime, timezone
@@ -28,6 +29,10 @@ from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import 
     metric_contract_state,
     metric_is_eligible_for_contract,
     parse_contract_metric,
+)
+from text_to_bi.superset_semantic_layer.modules.semantic_query.relationship_discovery import (
+    SOURCES,
+    stored_verification,
 )
 from text_to_bi.superset_semantic_layer.modules.semantic_query.relationships import (
     RelationshipEnd,
@@ -138,6 +143,7 @@ def _route_api(datasets):
         "list_metric_contracts", "_user_names", "_active_users", "_metric_definition", "_serialize_metric_definition",
         "_review_reason", "_record_metric_event", "save_metric_definition", "list_metric_contract_events",
         "_second_reviewer_required", "create_agent_metric", "_agent_metric",
+        "_relationship_contract_fields", "_snapshot_relationship_candidate",
     }
     class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
     class_node.decorator_list = []
@@ -166,6 +172,7 @@ def _route_api(datasets):
         "_is_superset_access_error": lambda error: "access" in type(error).__name__.lower(),
         "logger": SimpleNamespace(exception=lambda *args, **kwargs: None), "SEMANTIC_QUERY_MAX_ROWS": 1000,
         "MetricContractEvent": _MetricContractEvent, "MetricDefinition": _MetricDefinition,
+        "SOURCES": SOURCES, "stored_verification": stored_verification,
         "METRIC_REVIEW_REASON_MAX_LENGTH": 2000, "METRIC_DEFINITION_MAX_LENGTH": 4000, "METRIC_UNIT_MAX_LENGTH": 64,
     }
     module = ast.Module(body=[cap_node, class_node], type_ignores=[])
@@ -324,6 +331,12 @@ def test_relationship_handlers_cover_candidate_approval_and_audit_reset():
     namespace["RelationshipContract"] = _RelationshipContract
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 201
     contract = holder["contract"] = namespace["db"].session.added[0]
+    assert contract.source == "dictionary"
+    # Approval waits for a passing data check made on the current snapshot.
+    assert api.approve_relationship_contract(source.dataset.id, 23)[0] == 400
+    contract.verification, contract.verified_hash = json.dumps({"passed": False}), contract.contract_hash
+    assert api.approve_relationship_contract(source.dataset.id, 23)[0] == 400
+    contract.verification = json.dumps({"passed": True})
     assert api.approve_relationship_contract(source.dataset.id, 23)[0] == 200
     assert contract.status == "approved" and contract.approver_id == 3
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 409
@@ -335,6 +348,7 @@ def test_relationship_handlers_cover_candidate_approval_and_audit_reset():
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 201
     assert contract.status == "candidate"
     assert (contract.approver_id, contract.approved_at, contract.revoker_id, contract.revoked_at) == (None, None, None, None)
+    assert (contract.verification, contract.verified_hash) == (None, None)
     contract.contract_hash = "changed"
     assert api.approve_relationship_contract(source.dataset.id, 23)[0] == 400
     namespace["current_user"].roles = []

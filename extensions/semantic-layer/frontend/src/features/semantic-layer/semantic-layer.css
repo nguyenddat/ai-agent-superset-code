@@ -296,6 +296,29 @@
 .sl-time-semantics-profile { display: flex; flex-direction: column; gap: 2px; color: var(--sl-text-secondary); }
 .sl-time-semantics-profile .is-muted, .sl-time-semantics-empty { color: var(--sl-muted); }
 .sl-time-semantics-add { display: flex; max-width: 480px; gap: 8px; }
+/* Relationships between base tables: declared ones going out and in, their data checks, and suggestions. */
+.sl-relationships { display: flex; flex-direction: column; gap: 16px; padding: 14px 16px 16px; }
+.sl-relationships-section { display: flex; flex-direction: column; gap: 6px; }
+.sl-relationships-section h4 { margin: 0; color: var(--sl-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.sl-relationships-table .is-link { width: 34%; }
+.sl-relationships-table .is-cardinality { width: 64px; }
+.sl-relationships-table .is-source { width: 88px; }
+.sl-relationships-table .is-state { width: 120px; }
+.sl-relationships-table .is-actions { width: 190px; }
+.sl-relationship-link { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sl-relationship-link svg { width: 12px; height: 12px; flex: 0 0 auto; color: var(--sl-muted); }
+.sl-relationship-link code { overflow-wrap: anywhere; }
+.sl-relationship-problem { display: block; margin-top: 2px; color: #ad6800; font-size: 11px; }
+.sl-relationship-check { display: flex; flex-direction: column; gap: 2px; }
+.sl-relationship-check span { display: inline-flex; align-items: center; gap: 4px; }
+.sl-relationship-check svg { width: 12px; height: 12px; }
+.sl-relationship-check .is-ok { color: #237804; }
+.sl-relationship-check .is-bad { color: #cf1322; }
+.sl-relationship-check .is-warning { color: #ad6800; }
+.sl-relationships .is-muted { color: var(--sl-muted); }
+.sl-relationship-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.sl-relationship-source { display: inline-block; margin-right: 4px; padding: 1px 6px; border-radius: 4px; color: var(--sl-text-secondary); background: var(--sl-surface-muted); font-size: 11px; }
+.sl-inline-icon { width: 12px; height: 12px; margin-right: 3px; vertical-align: -2px; }
 .sl-type-badge.is-temporal { margin-left: 4px; color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 10%, var(--sl-surface)); }
 
 .sl-metrics { display: grid; min-height: 0; flex: 1; grid-template-columns: 264px minmax(0, 1fr); gap: 12px; }

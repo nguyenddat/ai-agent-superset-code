@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { requestJson, semanticLayerApi, supersetApi } from './api';
 import { layerLevels } from './datasets';
 import { ReferenceFields } from './ReferenceFields';
+import { RelationshipsPanel } from './RelationshipsPanel';
 import { TimeSemanticsFields, type TimeSemantics } from './TimeSemanticsFields';
 import type {
   ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DataLayer, DatasetDictionary, ReferenceDataset,
@@ -61,14 +62,14 @@ const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> 
   'temporal_kind',
 ];
 
-type DictionaryTab = 'columns' | 'general' | 'time';
+type DictionaryTab = 'columns' | 'general' | 'time' | 'relationships';
 const TAB_STORAGE_KEY = 'sl-dictionary-tab';
 
 /** The tab last opened in this browser, so switching datasets keeps the administrator where they work. */
 function rememberedTab(): DictionaryTab {
   try {
     const stored = window.localStorage.getItem(TAB_STORAGE_KEY);
-    return stored === 'general' || stored === 'time' ? stored : 'columns';
+    return stored === 'general' || stored === 'time' || stored === 'relationships' ? stored : 'columns';
   } catch {
     return 'columns';
   }
@@ -158,8 +159,9 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     return () => window.removeEventListener('beforeunload', warnBeforeUnload);
   }, [dirty]);
 
-  const loadDictionary = async (signal?: AbortSignal) => {
-    setLoading(true);
+  /** Reads the dictionary; a quiet reload, after another panel wrote it, keeps the page on screen. */
+  const loadDictionary = async (signal?: AbortSignal, quiet = false) => {
+    if (!quiet) setLoading(true);
     setError('');
     setSaveError('');
     setSaved(false);
@@ -188,7 +190,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         setError(reason instanceof Error ? reason.message : 'Không tải được data dictionary.');
       }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && !quiet) setLoading(false);
     }
   };
 
@@ -515,6 +517,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
           ['general', 'Thông tin chung', generalDirty],
           ['columns', `Cột (${columns.length})`, columnsDirty],
           ['time', 'Thời gian và grain', timeDirty],
+          ['relationships', 'Quan hệ', false],
         ] as const).map(([id, label, tabDirty]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => selectTab(id)}>
             {label}
@@ -586,6 +589,14 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             value={timeSemanticsOf(dictionary)}
             disabled={readOnly || saving}
             onChange={updateTimeSemantics}
+          />
+        ) : null}
+        {tab === 'relationships' ? (
+          <RelationshipsPanel
+            datasetId={dataset.id}
+            dictionaryDirty={dirty}
+            disabled={readOnly || saving}
+            onDictionaryChanged={() => void loadDictionary(undefined, true)}
           />
         ) : null}
         {tab === 'columns' ? (

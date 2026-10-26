@@ -1,10 +1,14 @@
 from flask_appbuilder import Model
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from superset.models.helpers import AuditMixinNullable
 
 
 class RelationshipContract(AuditMixinNullable, Model):
-    """Approval record for a dictionary foreign-key relationship; it is never executable yet."""
+    """Approval record for a dictionary foreign-key relationship.
+
+    An approved, current contract on base tables is an edge the AI Agent's schema link may join on. ``verification``
+    holds, as JSON, what the last data check found; it counts only while ``verified_hash`` equals ``contract_hash``.
+    """
 
     __tablename__ = "text_to_bi_relationship_contract"
     __table_args__ = (
@@ -25,3 +29,8 @@ class RelationshipContract(AuditMixinNullable, Model):
     approved_at = Column(DateTime(timezone=True), nullable=True)
     revoker_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
+    # Where the relationship was found: `database`, `dictionary` or `naming`.
+    source = Column(String(16), nullable=True)
+    verification = Column(Text, nullable=True)
+    verified_hash = Column(String(64), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
