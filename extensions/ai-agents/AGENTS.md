@@ -94,7 +94,15 @@ numbers, and logs the question so administrators can fill the gaps:
      which checks the formula, reuses a metric with the same formula, or saves a
      new one as an `ai_agent` candidate. The question is answered at once with a
      `provisional` result ("Tạm tính · chờ duyệt"), and still logged as
-     `needs_review` until an administrator approves the metric.
+     `needs_review` until an administrator approves the metric. The result
+     carries `formula`: the expression and, from `modules/chat/formula.py`, a
+     sentence of text and column parts ("Đếm số Mã lần nạp, chỉ tính các dòng
+     có Trạng thái là “THAT_BAI”") that the page shows with data dictionary
+     labels and switches to column names on request; a formula beyond the
+     contract grammar shows as its expression. When the figure is empty or all
+     zero, the agent runs the metric once more over all the data with no
+     filter; if that also gives nothing, `doubt` (`empty` or `zero`) warns the
+     asker that the formula may be wrong instead of stating the figure.
    - If no aggregate column fits, `draft_dataset` writes one read-only SELECT
      over base datasets plus the metric to put on it, and `propose_dataset`
      posts it to `/agent-dataset-proposals`. Nothing runs: an administrator

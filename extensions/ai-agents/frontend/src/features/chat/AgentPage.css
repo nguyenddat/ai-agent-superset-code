@@ -512,6 +512,25 @@ header#main-menu.top > .ant-row > .ant-col-md-8 { flex: 0 0 auto; max-width: non
 .ai-result-views button[aria-pressed='true'] {
   background: var(--ai-surface-soft); color: var(--ai-text); font-weight: 600;
 }
+/* How a provisional figure was computed; columns read as business labels until the asker switches to column names. */
+.ai-result-formula {
+  border: 1px solid var(--ai-border); border-radius: 8px; display: grid; gap: 4px; padding: 8px 10px;
+}
+.ai-result-formula-heading { align-items: center; display: flex; justify-content: space-between; gap: 8px; }
+.ai-result-formula-heading span { color: var(--ai-muted); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.ai-result-formula-heading button {
+  background: transparent; border: 0; color: var(--ai-accent); cursor: pointer; font-size: 12px; padding: 0;
+}
+.ai-result-formula p { color: var(--ai-text); font-size: 13px; line-height: 1.6; margin: 0; }
+.ai-result-formula-column { font-weight: 600; }
+.ai-result-formula code, .ai-result-formula-expression {
+  background: var(--ai-surface-muted); border-radius: 4px; font-size: 12px; padding: 0 4px;
+}
+.ai-result-doubt {
+  align-items: flex-start; background: color-mix(in srgb, #d99a1c 12%, transparent); border-radius: 8px;
+  color: var(--ai-text); display: flex; font-size: 12px; gap: 8px; margin: 0; padding: 8px 10px;
+}
+.ai-result-doubt svg { color: #a8730c; flex: none; height: 15px; width: 15px; }
 .ai-result-filters { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .ai-result-filters li {
   border: 1px solid var(--ai-border); border-radius: 999px; color: var(--ai-text); font-size: 12px; padding: 2px 9px;
@@ -530,6 +549,11 @@ header#main-menu.top > .ant-row > .ant-col-md-8 { flex: 0 0 auto; max-width: non
 .ai-result-tile small { color: var(--ai-muted); font-size: 14px; font-weight: 500; }
 .ai-result-chart { margin: 0; min-width: 0; position: relative; }
 .ai-result-chart figcaption { color: var(--ai-text-secondary); font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+/* Small multiples: a panel per group, in the first series colour, captioned by the group's name. */
+.ai-result-multiples { display: grid; gap: 6px; margin: 0; }
+.ai-result-multiples > figcaption { color: var(--ai-text-secondary); font-size: 12px; font-weight: 600; }
+.ai-result-multiples-grid { display: grid; gap: 8px 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.ai-result-chart.is-panel figcaption { color: var(--ai-text); font-weight: 500; }
 .ai-result-chart svg { display: block; overflow: visible; }
 .ai-result-grid line { stroke: var(--ai-border-soft); stroke-width: 1; }
 .ai-result-grid text,.ai-result-axis { fill: var(--ai-muted); font-size: 11px; font-variant-numeric: tabular-nums; }

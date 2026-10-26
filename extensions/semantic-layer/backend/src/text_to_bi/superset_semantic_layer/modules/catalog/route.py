@@ -1525,6 +1525,7 @@ class SemanticLayerAPI(RestApi):
             "metric_id": metric.id,
             "metric_name": metric.metric_name,
             "verbose_name": metric.verbose_name,
+            "expression": metric.expression,
             "business_definition": getattr(definition, "business_definition", None) or metric.description,
             "unit": getattr(definition, "unit", None),
             "d3format": metric.d3format,

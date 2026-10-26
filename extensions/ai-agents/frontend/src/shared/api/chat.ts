@@ -60,6 +60,9 @@ export type ResultFilter = {
 export type Coverage = { column: string; min: string; max: string; start: string; end: string;
   status: 'full' | 'partial' | 'none' };
 
+/** A piece of a formula sentence: plain text, or a column shown by its business label or its physical name. */
+export type FormulaPart = { text: string } | { column: string; label: string };
+
 export type QueryResult = {
   scope: string;
   presentation: 'number' | 'table' | 'bar' | 'line';
@@ -80,6 +83,13 @@ export type QueryResult = {
   notes: string[];
   /** True when the metric is one the agent built on an aggregate dataset that no administrator has approved yet. */
   provisional?: boolean;
+  /**
+   * How a provisional metric computes its figure: a sentence of text and columns, or null parts when the formula is
+   * beyond what a sentence tells faithfully, so only the expression is shown.
+   */
+  formula?: { expression: string; parts: FormulaPart[] | null };
+  /** A provisional figure that looks like a wrong formula: no matching rows, or only zeros. */
+  doubt?: 'empty' | 'zero' | null;
   /** What the agent asked the Semantic Layer for each metric; `sql` only when it shows it (to administrators). */
   queries?: Array<{
     metric: string;

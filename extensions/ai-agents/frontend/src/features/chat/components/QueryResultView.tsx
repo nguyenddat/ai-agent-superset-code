@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BarChart3, ChevronRight, Code2, Table2 } from 'lucide-react';
+import { AlertTriangle, BarChart3, ChevronRight, Code2, Table2 } from 'lucide-react';
 import { FilterSource, QueryResult, ResultCell, ResultFilter } from '../../../shared/api/chat';
 
 const SOURCE_LABELS: Record<FilterSource, string> = {
@@ -13,6 +13,7 @@ export const OPERATOR_LABELS: Record<ResultFilter['operator'], string> = {
   '==': '=', '!=': '≠', '<': '<', '<=': '≤', '>': '>', '>=': '≥', IN: 'thuộc', 'NOT IN': 'không thuộc',
 };
 const CHART_HEIGHT = 200;
+const PANEL_HEIGHT = 140;
 const MARGIN = { top: 22, right: 48, bottom: 28, left: 44 };
 const MAX_BAR_WIDTH = 24;
 
@@ -68,8 +69,10 @@ function useWidth(fallback: number) {
   return { ref, width };
 }
 
-// Categorical colors go to series in this fixed order; a ninth series is never coloured, the table shows it instead.
+// Categorical colors go to series in this fixed order; a ninth series is never coloured. More groups get a small
+// chart each on a shared scale, up to MAX_PANELS; past that the table shows them.
 const MAX_SERIES = 8;
+const MAX_PANELS = 24;
 
 type Series = { name: string; values: Array<number | null> };
 
@@ -79,24 +82,26 @@ function numericCell(value: ResultCell): number | null {
 
 /**
  * A metric over time: one line (or columns) for one series, a line per group otherwise, with a legend. The latest
- * value of each line is labelled; the rest are read from the axis or on hover.
+ * value of each line is labelled; the rest are read from the axis or on hover. As a `panel` of small multiples it is
+ * shorter, captioned by its group only, and drawn on the `domain` all panels share so they compare by eye.
  */
-function TimeChart({ kind, title, unit, labels, series }: {
+function TimeChart({ kind, title, unit, labels, series, domain, panel = false }: {
   kind: 'bar' | 'line'; title: string; unit: string | null; labels: string[]; series: Series[];
+  domain?: [number, number]; panel?: boolean;
 }) {
-  const { ref, width } = useWidth(560);
+  const { ref, width } = useWidth(panel ? 240 : 560);
   const [hovered, setHovered] = useState<number | null>(null);
   const values = series.flatMap(item => item.values).filter((value): value is number => value !== null);
   if (values.length === 0) return null;
   const columns = kind === 'bar' && series.length === 1;
   // Columns are read by their length, so they start at zero; a line is read by its course, so it fits the values.
-  const ticks = columns
-    ? niceTicks(Math.min(0, ...values), Math.max(0, ...values))
-    : niceTicks(Math.min(...values), Math.max(...values));
+  const [lowest, highest] = domain ?? [Math.min(...values), Math.max(...values)];
+  const ticks = columns ? niceTicks(Math.min(0, lowest), Math.max(0, highest)) : niceTicks(lowest, highest);
   const low = ticks[0];
   const high = ticks[ticks.length - 1];
   const plotWidth = width - MARGIN.left - MARGIN.right;
-  const plotHeight = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
+  const height = panel ? PANEL_HEIGHT : CHART_HEIGHT;
+  const plotHeight = height - MARGIN.top - MARGIN.bottom;
   const band = plotWidth / labels.length;
   const x = (index: number) => MARGIN.left + band * (index + 0.5);
   const y = (value: number) => MARGIN.top + plotHeight * (1 - (value - low) / (high - low));
@@ -129,8 +134,8 @@ function TimeChart({ kind, title, unit, labels, series }: {
     .filter(entry => entry.value !== null);
 
   return (
-    <figure className="ai-result-chart" ref={ref}>
-      <figcaption>{title}{unit ? ` (${unit})` : ''}</figcaption>
+    <figure className={`ai-result-chart${panel ? ' is-panel' : ''}`} ref={ref}>
+      <figcaption>{title}{unit && !panel ? ` (${unit})` : ''}</figcaption>
       {series.length > 1 && (
         <ul className="ai-result-legend">
           {series.map((item, order) => (
@@ -140,7 +145,7 @@ function TimeChart({ kind, title, unit, labels, series }: {
           ))}
         </ul>
       )}
-      <svg width={width} height={CHART_HEIGHT} role="img" aria-label={`${title}, ${labels.length} mốc`}>
+      <svg width={width} height={height} role="img" aria-label={`${title}, ${labels.length} mốc`}>
         {ticks.map(tick => (
           <g key={tick} className="ai-result-grid">
             <line x1={MARGIN.left} x2={width - MARGIN.right} y1={y(tick)} y2={y(tick)} />
@@ -148,7 +153,7 @@ function TimeChart({ kind, title, unit, labels, series }: {
           </g>
         ))}
         {labels.map((label, index) => (index % labelEvery === 0 ? (
-          <text key={label} className="ai-result-axis" x={x(index)} y={CHART_HEIGHT - 8} textAnchor="middle">
+          <text key={label} className="ai-result-axis" x={x(index)} y={height - 8} textAnchor="middle">
             {shownCell(label, true)}
           </text>
         ) : null))}
@@ -314,12 +319,16 @@ function ResultTable({ result }: { result: QueryResult }) {
 }
 
 type ChartPlan =
-  | { kind: 'time'; form: 'bar' | 'line'; time: string; group: string | null; labels: string[]; groups: string[] }
+  | {
+    kind: 'time'; form: 'bar' | 'line'; time: string; group: string | null; labels: string[]; groups: string[];
+    multiples: boolean;
+  }
   | { kind: 'ranking'; group: string };
 
 /**
  * How the rows can be drawn: over time when a dimension is a date (a line per group when there is a second one, up to
- * eight groups), as ranked bars when the only dimension is a group; anything else stays a table.
+ * eight groups, then a small chart per group), as ranked bars when the only dimension is a group; anything else stays
+ * a table.
  */
 function chartPlan(result: QueryResult): ChartPlan | null {
   // Two periods side by side read best as numbers with their change, so a comparison stays a table.
@@ -330,9 +339,10 @@ function chartPlan(result: QueryResult): ChartPlan | null {
   if (time && others.length <= 1) {
     const group = others[0]?.name ?? null;
     const groups = group ? distinct(group).sort((left, right) => left.localeCompare(right, 'vi')) : [];
-    if (groups.length > MAX_SERIES) return null;
+    if (groups.length > MAX_PANELS) return null;
     const form = result.presentation === 'bar' && !group ? 'bar' : 'line';
-    return { kind: 'time', form, time: time.name, group, labels: distinct(time.name).sort(), groups };
+    const multiples = groups.length > MAX_SERIES;
+    return { kind: 'time', form, time: time.name, group, labels: distinct(time.name).sort(), groups, multiples };
   }
   if (!time && others.length === 1) return { kind: 'ranking', group: others[0].name };
   return null;
@@ -352,7 +362,63 @@ function MetricChart({ plan, result, metric }: {
     name: name || metric.label,
     values: plan.labels.map(label => valueAt.get(`${name}|${label}`) ?? null),
   }));
+  if (plan.multiples) {
+    return <SmallMultiples title={metric.label} unit={metric.unit} labels={plan.labels} series={series} />;
+  }
   return <TimeChart kind={plan.form} title={metric.label} unit={metric.unit} labels={plan.labels} series={series} />;
+}
+
+/** More groups than colours: one small line per group, in one colour, all on the same scale. */
+function SmallMultiples({ title, unit, labels, series }: {
+  title: string; unit: string | null; labels: string[]; series: Series[];
+}) {
+  const values = series.flatMap(item => item.values).filter((value): value is number => value !== null);
+  if (values.length === 0) return null;
+  const domain: [number, number] = [Math.min(...values), Math.max(...values)];
+  return (
+    <figure className="ai-result-multiples">
+      <figcaption>{title}{unit ? ` (${unit})` : ''} · {series.length} nhóm, cùng thang đo</figcaption>
+      <div className="ai-result-multiples-grid">
+        {series.map(item => (
+          <TimeChart
+            key={item.name} kind="line" title={item.name} unit={unit} labels={labels} series={[item]} domain={domain} panel
+          />
+        ))}
+      </div>
+    </figure>
+  );
+}
+
+const DOUBT_TEXT: Record<'empty' | 'zero', string> = {
+  empty: 'Không có dòng nào khớp công thức tạm tính',
+  zero: 'Công thức tạm tính chỉ cho ra giá trị 0',
+};
+
+/** How a provisional figure was computed, worded with business labels or, on request, the physical column names. */
+function ResultFormula({ formula }: { formula: NonNullable<QueryResult['formula']> }) {
+  const [byColumn, setByColumn] = useState(false);
+  const parts = formula.parts;
+  return (
+    <div className="ai-result-formula">
+      <div className="ai-result-formula-heading">
+        <span>Cách tính</span>
+        {parts && (
+          <button type="button" aria-pressed={byColumn} onClick={() => setByColumn(current => !current)}>
+            {byColumn ? 'Hiện tên nghiệp vụ' : 'Hiện tên cột gốc'}
+          </button>
+        )}
+      </div>
+      {parts ? (
+        <p>
+          {parts.map((part, index) => ('column' in part ? (
+            byColumn
+              ? <code key={index} title={part.label}>{part.column}</code>
+              : <span key={index} className="ai-result-formula-column" title={part.column}>{part.label}</span>
+          ) : <React.Fragment key={index}>{part.text}</React.Fragment>))}
+        </p>
+      ) : <code className="ai-result-formula-expression">{formula.expression}</code>}
+    </div>
+  );
 }
 
 /** The data behind an answer: the conditions it used, then a number, a chart or a table of the metrics' rows. */
@@ -407,6 +473,13 @@ export function QueryResultView({ result }: { result: QueryResult }) {
           ))}
         </ul>
       )}
+      {result.doubt && (
+        <p className="ai-result-doubt" role="note">
+          <AlertTriangle aria-hidden="true" />
+          {DOUBT_TEXT[result.doubt]}; số liệu có thể chưa đúng. Quản trị viên sẽ kiểm tra cách tính trước khi duyệt.
+        </p>
+      )}
+      {result.formula && <ResultFormula formula={result.formula} />}
       {single && result.rows.length === 1 && (
         <div className="ai-result-tiles">
           {result.metrics.map(metric => {

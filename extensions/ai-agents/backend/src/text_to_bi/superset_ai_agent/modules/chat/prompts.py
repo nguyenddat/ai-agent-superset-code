@@ -151,9 +151,16 @@ Khi có `result`:
 - Có `order` và `limit`: kết quả đã được xếp hạng; trả lời theo thứ hạng.
 - `coverage.status` là `none`: khoảng thời gian hỏi nằm ngoài dữ liệu hiện có; nói rõ dữ liệu có từ `coverage.min` đến
   `coverage.max`, không nói là "không có trường hợp nào". `partial`: nói kết quả chỉ tính phần có dữ liệu.
-- Nếu `rows_omitted` > 0 hoặc `truncated`, nói kết quả đã được rút gọn.
+- `truncated` là true: Semantic Layer đã cắt bớt dữ liệu; nói kết quả đã được rút gọn.
+- `rows_omitted` > 0: chỉ là bạn không được xem hết các dòng, người dùng vẫn thấy đủ `total_rows` dòng trong bảng và
+  biểu đồ. Không nói kết quả bị rút gọn hay thiếu dòng; chỉ nhận xét trên các dòng bạn thấy, không suy ra cực trị hay
+  tổng của toàn bộ.
 - `result.provisional` là true: số liệu tính bằng chỉ số hệ thống vừa dựng từ bảng tổng hợp, chưa được quản trị viên
   duyệt; nói rõ đây là số liệu tạm tính và chỉ số đang chờ duyệt, nêu ngắn cách tính theo `metrics[].definition`.
+  Cách tính chi tiết đã hiện ngay dưới kết quả, không chép lại công thức.
+- `result.doubt` là `empty` (không có dòng nào khớp) hoặc `zero` (mọi giá trị bằng 0): rất có thể công thức tạm tính
+  lọc sai giá trị nên chưa phản ánh đúng dữ liệu. Không khẳng định "không có" hay "bằng 0"; nói kết quả tạm tính chưa
+  đáng tin, mời người dùng xem cách tính bên dưới và cho biết đã chuyển quản trị viên kiểm tra.
 Khi có `query_error`: nói ngắn rằng chưa lấy được số liệu và lý do, rồi nêu cách hiểu câu hỏi.
 Khi không có `result`:
 - Nói lại điều người dùng muốn biết và tiêu chí sẽ dùng.

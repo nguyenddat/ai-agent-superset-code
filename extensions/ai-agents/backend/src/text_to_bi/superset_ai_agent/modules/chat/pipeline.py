@@ -28,6 +28,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from . import prompts
+from .formula import answers_anything, doubtful_result, told_formula
 from .query import QueryPlanError, combined_result, plan_query, result_for_answer
 from .semantic_source import DataModelSources, MetricQueryError, SemanticCatalog, catalog_metric
 
@@ -425,6 +426,13 @@ def _build_metric(
             lambda: _run_metrics(planned, run_metric), _query_shown,
         )
         outcome.result["provisional"] = provisional
+        if provisional:
+            # The asker sees how the figure was computed, and is warned when it looks like a wrong formula.
+            expression = created.get("expression") or draft.expression
+            outcome.result["formula"] = {
+                "expression": expression, "parts": told_formula(expression, dataset.get("columns", [])),
+            }
+            outcome.result["doubt"] = _confirmed_doubt(outcome.result, metric, run_metric)
         yield "result", outcome.result
     except (QueryPlanError, MetricQueryError) as ex:
         outcome.query_error = str(ex)
@@ -433,6 +441,18 @@ def _build_metric(
         outcome.suggestions = {"metric": drafted}
         return step + 1, drafted
     return step + 1, metric
+
+
+def _confirmed_doubt(result: dict[str, Any], metric: dict[str, Any], run_metric: MetricRunner) -> str | None:
+    """Doubt a provisional figure of nothing or zero only when the metric gives nothing over all the data either."""
+    doubt = doubtful_result(result)
+    if doubt is None:
+        return None
+    try:
+        whole = run_metric(metric["dataset_id"], metric["metric_id"], {"dimensions": [], "filters": []})
+    except MetricQueryError:
+        return None
+    return None if answers_anything(whole, metric["metric_name"]) else doubt
 
 
 def _propose_dataset(

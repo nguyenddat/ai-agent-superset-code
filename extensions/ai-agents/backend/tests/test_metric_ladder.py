@@ -1,6 +1,7 @@
 import json
 from datetime import date
 
+import pytest
 from test_agent_pipeline import CATALOG, FakeModel, FakeSemanticLayer
 
 from text_to_bi.superset_ai_agent.modules.chat import pipeline
@@ -11,6 +12,7 @@ AGGREGATE = {
     "columns": [
         {"name": "ngay", "label": "Ngày", "type": "DATE", "temporal": True, "groupby": True, "filterable": True},
         {"name": "thanh_pho_key", "type": "INTEGER", "groupby": True, "filterable": True},
+        {"name": "loai_quan_sat", "label": "Loại quan sát", "type": "VARCHAR(30)", "values": ["DU_BAO_NGAY", "HIEN_TAI"]},
         {"name": "gio_giat_toi_da_kmh", "label": "Gió giật tối đa", "unit": "km/h", "groupby": True,
          "filterable": True},
     ],
@@ -114,6 +116,9 @@ def test_a_question_only_missing_a_metric_builds_one_on_an_aggregate_and_answers
     dataset_id, metric_id, query = semantic_layer.calls[0]
     assert (dataset_id, metric_id, query["dimensions"]) == (12, 41, ["thanh_pho_key"])
     assert outcome.result["provisional"] is True and outcome.result["order"]["metric_name"] == "gio_giat_toi_da"
+    sentence = "".join(part.get("label") or part["text"] for part in outcome.result["formula"]["parts"])
+    assert sentence == "Giá trị lớn nhất của Gió giật tối đa, chỉ tính các dòng có Loại quan sát là “DU_BAO_NGAY”"
+    assert outcome.result["formula"]["expression"] == GUST and "doubt" in outcome.result
     assert outcome.metrics == [{"dataset_id": 12, "metric_id": 41, "name": "Gió giật tối đa", "provisional": True}]
     # Until an administrator approves it the metric is still a gap, though the asker got an answer.
     assert outcome.missing == ["metric"] and outcome.status == "needs_review"
@@ -127,6 +132,7 @@ def test_a_question_only_missing_a_metric_builds_one_on_an_aggregate_and_answers
 def test_a_reused_approved_metric_answers_as_an_ordinary_one():
     outcome, _, _ = _run({"Understanding": _understanding(), "MetricDraft": _draft()}, FakeBuilder(provisional=False))
     assert outcome.result["provisional"] is False and outcome.status == "resolved"
+    assert "formula" not in outcome.result and "doubt" not in outcome.result
 
 
 def test_a_missing_term_is_asked_back_before_the_data_model_is_touched():
@@ -205,3 +211,25 @@ def test_a_dataset_the_semantic_layer_refuses_still_reaches_administrators_as_a_
     outcome, events, _ = _run(answers, builder)
     assert _steps(events)[-1] == "propose_missing_items"
     assert outcome.query_error == "SQL chỉ được đọc dữ liệu." and outcome.suggestions["metric"]["name"] == "Số lần nạp"
+
+
+class ZeroSemanticLayer(FakeSemanticLayer):
+    """Answers zero for the asked week; over all the data, `whole` decides whether the metric ever gives anything."""
+
+    def __init__(self, whole):
+        super().__init__()
+        self.whole = whole
+
+    def __call__(self, dataset_id, metric_id, query):
+        self.calls.append((dataset_id, metric_id, query))
+        value = self.whole if not query["filters"] else 0
+        return {"rows": [{"gio_giat_toi_da": value}], "truncated": False}
+
+
+@pytest.mark.parametrize(("whole", "doubt"), [(0, "zero"), (72.5, None)])
+def test_a_provisional_zero_is_doubted_only_when_the_metric_gives_nothing_over_all_the_data(whole, doubt):
+    draft = _draft(query=_draft().query.model_copy(update={"dimensions": [], "order_by": None, "limit": None}))
+    semantic_layer = ZeroSemanticLayer(whole)
+    outcome, _, _ = _run({"Understanding": _understanding(), "MetricDraft": draft}, FakeBuilder(), semantic_layer)
+    assert outcome.result["doubt"] == doubt
+    assert semantic_layer.calls[-1][2] == {"dimensions": [], "filters": []}
