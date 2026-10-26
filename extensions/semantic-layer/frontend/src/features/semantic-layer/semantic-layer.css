@@ -274,12 +274,12 @@
 .sl-dataset-dictionary-fields .sl-field-wide { grid-column: span 2; }
 
 /* The Data Dictionary's tabs sit under its toolbar; a dot marks a tab with changes not saved yet. */
-.sl-dictionary-tabs { flex: 0 0 auto; margin-top: 0; overflow-x: auto; }
+.sl-dictionary-tabs { flex: 0 0 auto; margin-top: 0; }
 .sl-dictionary-tabs button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .sl-tab-dirty { width: 6px; height: 6px; border-radius: 50%; background: #d48806; }
 
 /* Time column, row kind column and the grain of each kind of row. */
-.sl-time-semantics { display: flex; max-width: 1100px; flex-direction: column; gap: 12px; padding: 14px 16px 16px; }
+.sl-time-semantics { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; }
 .sl-time-semantics-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .sl-time-semantics-header p { margin: 0; color: var(--sl-muted); font-size: 12px; }
 .sl-time-semantics-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
@@ -1208,6 +1208,8 @@
   .sl-dataset-dictionary-fields { grid-template-columns: 1fr; }
   .sl-dataset-dictionary-fields .sl-field-wide { grid-column: auto; }
   .sl-time-semantics-columns { grid-template-columns: 1fr; }
+  /* Tabs that no longer fit scroll sideways; hiding the vertical overflow keeps the underline from adding a scrollbar. */
+  .sl-dictionary-tabs { overflow-x: auto; overflow-y: hidden; }
   .sl-time-semantics-header { flex-direction: column; }
   .sl-header { gap: 7px; padding-inline: 10px; }
   .sl-header p { display: none; }
