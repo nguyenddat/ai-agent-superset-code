@@ -125,12 +125,9 @@ export function TimeSemanticsFields({ datasetId, columns, value, disabled, onCha
   };
 
   return (
-    <div className="sl-time-semantics sl-field-full">
+    <div className="sl-time-semantics">
       <div className="sl-time-semantics-header">
-        <div>
-          <strong>Thời gian và grain</strong>
-          <span>Một dòng dữ liệu ứng với khoảng thời gian nào. AI Agent dựa vào đây để lọc trọn ngày và gom theo giờ, ngày, tháng.</span>
-        </div>
+        <p>Một dòng dữ liệu ứng với khoảng thời gian nào. AI Agent dựa vào đây để lọc trọn ngày và gom theo giờ, ngày, tháng.</p>
         <Button
           variant="outline"
           disabled={disabled || profiling || !value.time_column}
@@ -176,11 +173,11 @@ export function TimeSemanticsFields({ datasetId, columns, value, disabled, onCha
         <table className="sl-time-semantics-table">
           <thead>
             <tr>
-              {byRowKind ? <th scope="col">Loại dòng</th> : null}
-              {byRowKind ? <th scope="col">Nhãn nghiệp vụ</th> : null}
-              <th scope="col">Grain</th>
+              {byRowKind ? <th scope="col" className="is-kind">Loại dòng</th> : null}
+              {byRowKind ? <th scope="col" className="is-label">Nhãn nghiệp vụ</th> : null}
+              <th scope="col" className="is-grain">Grain</th>
               <th scope="col">Dữ liệu</th>
-              <th scope="col"><span className="sl-visually-hidden">Xoá</span></th>
+              <th scope="col" className="is-action"><span className="sl-visually-hidden">Xoá</span></th>
             </tr>
           </thead>
           <tbody>
@@ -211,15 +208,19 @@ export function TimeSemanticsFields({ datasetId, columns, value, disabled, onCha
                       </SelectContent>
                     </Select>
                   </td>
-                  <td className="sl-time-semantics-profile">
-                    {profile ? (
-                      <>
-                        <span>{profileText(profile)}</span>
-                        {profile.suggested_grain ? (
-                          <span className={disagrees ? 'is-warning' : undefined}>Gợi ý: {GRAIN_LABELS[profile.suggested_grain]}</span>
-                        ) : null}
-                      </>
-                    ) : <span className="is-muted">{profiles.length ? 'Không còn trong dữ liệu' : '—'}</span>}
+                  <td>
+                    <div className="sl-time-semantics-profile">
+                      {profile ? (
+                        <>
+                          <span>{profileText(profile)}</span>
+                          {profile.suggested_grain ? (
+                            <span className={disagrees ? 'is-warning' : undefined}>Gợi ý: {GRAIN_LABELS[profile.suggested_grain]}</span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="is-muted">{profiles.length ? 'Không còn trong dữ liệu' : 'Bấm “Phát hiện grain” để xem'}</span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <Button variant="ghost" size="icon" aria-label={`Xoá grain của ${item.row_kind_value ?? 'dataset'}`} disabled={disabled} onClick={() => removeGrain(index)}>
