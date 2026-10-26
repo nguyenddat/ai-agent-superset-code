@@ -15,3 +15,6 @@ class DatasetDictionary(AuditMixinNullable, Model):
     create_column = Column(String(255), nullable=True)
     dataset_type = Column(String(32), nullable=True)
     layer_id = Column(Integer, ForeignKey("text_to_bi_data_layer.id", ondelete="SET NULL"), nullable=True, index=True)
+    # The column that places a row in time, and the one that tells kinds of rows of different grains apart.
+    time_column = Column(String(255), nullable=True)
+    row_kind_column = Column(String(255), nullable=True)

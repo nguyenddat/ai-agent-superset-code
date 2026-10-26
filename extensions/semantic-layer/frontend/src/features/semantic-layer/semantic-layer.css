@@ -272,6 +272,25 @@
   background: var(--sl-surface-raised);
 }
 .sl-dataset-dictionary-fields .sl-field-wide { grid-column: span 2; }
+.sl-dataset-dictionary-fields .sl-field-full { grid-column: 1 / -1; }
+
+/* Time column, row kind column and the grain of each kind of row. */
+.sl-time-semantics { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--sl-border); border-radius: 8px; background: var(--sl-surface); }
+.sl-time-semantics-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sl-time-semantics-header > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.sl-time-semantics-header strong { font-size: 13px; }
+.sl-time-semantics-header span { color: var(--sl-muted); font-size: 12px; }
+.sl-time-semantics-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.sl-time-semantics-note { margin: 0; color: var(--sl-muted); font-size: 12px; }
+.sl-time-semantics-note.is-warning, .sl-time-semantics-profile .is-warning { color: #ad6800; }
+.sl-time-semantics-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sl-time-semantics-table th, .sl-time-semantics-table td { padding: 6px 8px; border-bottom: 1px solid var(--sl-border); text-align: left; vertical-align: middle; }
+.sl-time-semantics-table thead th { color: var(--sl-text-secondary); font-weight: 600; }
+.sl-time-semantics-table td:last-child { width: 40px; }
+.sl-time-semantics-profile { display: flex; flex-direction: column; gap: 2px; color: var(--sl-text-secondary); }
+.sl-time-semantics-profile .is-muted, .sl-time-semantics-empty { color: var(--sl-muted); }
+.sl-time-semantics-add { display: flex; max-width: 480px; gap: 8px; }
+.sl-type-badge.is-temporal { margin-left: 4px; color: var(--sl-accent); background: color-mix(in srgb, var(--sl-accent) 10%, var(--sl-surface)); }
 
 .sl-metrics { display: grid; min-height: 0; flex: 1; grid-template-columns: 264px minmax(0, 1fr); gap: 12px; }
 .sl-metrics-browser, .sl-metrics-detail { display: flex; min-height: 0; flex-direction: column; border: 1px solid var(--sl-border); border-radius: 10px; background: var(--sl-surface-raised); }
@@ -1182,6 +1201,8 @@
 @media (max-width: 700px) {
   .sl-dataset-dictionary-fields { grid-template-columns: 1fr; }
   .sl-dataset-dictionary-fields .sl-field-wide { grid-column: auto; }
+  .sl-time-semantics-columns { grid-template-columns: 1fr; }
+  .sl-time-semantics-header { flex-direction: column; }
   .sl-header { gap: 7px; padding-inline: 10px; }
   .sl-header p { display: none; }
   .sl-header-select { flex-basis: 0; flex-grow: 1; }

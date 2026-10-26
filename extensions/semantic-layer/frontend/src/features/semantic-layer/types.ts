@@ -257,6 +257,41 @@ export type ColumnDictionary = {
   unit: string | null;
   format: string | null;
   business_term: string | null;
+  /** `date` or `timestamp` for a column that places rows in time; a date filter on a timestamp covers the whole day. */
+  temporal_kind: TemporalKind | null;
+};
+
+export type TemporalKind = 'date' | 'timestamp';
+
+/** From finest to coarsest; `instant` rows are taken at irregular moments. */
+export type Grain = 'instant' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year';
+
+/** The grain of one kind of row; a dataset whose rows share one grain has a single entry with no row kind value. */
+export type DatasetGrain = {
+  row_kind_value: string | null;
+  label: string | null;
+  grain: Grain;
+};
+
+/** How the time column's values fall for one kind of row, read when an administrator asks for a suggestion. */
+export type GrainProfile = {
+  row_kind_value: string | null;
+  row_count: number;
+  first_moment: string | null;
+  last_moment: string | null;
+  moments: number;
+  days: number;
+  off_the_hour: number;
+  off_midnight: number;
+  off_first_day: number;
+  suggested_grain: Grain | null;
+};
+
+export type GrainProfileResponse = {
+  time_column: string;
+  row_kind_column: string | null;
+  profiles: GrainProfile[];
+  too_many_kinds: boolean;
 };
 
 export type ReferenceDataset = {
@@ -287,6 +322,11 @@ export type DatasetDictionary = {
   create_column: string | null;
   dataset_type: 'base' | 'aggregate' | null;
   layer_id: number | null;
+  /** The column that places a row in time. */
+  time_column: string | null;
+  /** The column that tells kinds of rows of different grains apart, such as `loai_quan_sat`. */
+  row_kind_column: string | null;
+  grains: DatasetGrain[];
   columns: ColumnDictionary[];
   read_only?: boolean;
 };

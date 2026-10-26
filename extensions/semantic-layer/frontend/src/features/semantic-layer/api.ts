@@ -28,6 +28,12 @@ export const semanticLayerApi = {
   suggestColumnDictionary: (datasetId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/dictionary/suggest`
   ),
+  grainProfile: (datasetId: number, timeColumn: string, temporalKind: string, rowKindColumn: string | null) => {
+    const query = new URLSearchParams({
+      time_column: timeColumn, temporal_kind: temporalKind, ...(rowKindColumn ? { row_kind_column: rowKindColumn } : {}),
+    });
+    return `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/grain-profile?${query}`;
+  },
   referenceOptions: `${SEMANTIC_LAYER_API}/datasets/reference-options`,
   businessModel: (databaseId: number) => `${SEMANTIC_LAYER_API}/business-model?database_id=${encodeURIComponent(databaseId)}`,
   businessCanvas: (databaseId: number) => `${SEMANTIC_LAYER_API}/business-canvas?database_id=${encodeURIComponent(databaseId)}`,

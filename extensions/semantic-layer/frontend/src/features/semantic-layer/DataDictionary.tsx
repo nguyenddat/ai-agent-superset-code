@@ -19,8 +19,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { requestJson, semanticLayerApi, supersetApi } from './api';
 import { layerLevels } from './datasets';
 import { ReferenceFields } from './ReferenceFields';
+import { TimeSemanticsFields, type TimeSemantics } from './TimeSemanticsFields';
 import type {
   ColumnDictionary, ColumnDictionarySuggestion, DashboardDataset, DataLayer, DatasetDictionary, ReferenceDataset,
+  TemporalKind,
 } from './types';
 
 type DataDictionaryProps = {
@@ -37,6 +39,13 @@ const datasetTypeItems: Array<{ label: string; value: DatasetDictionary['dataset
   { label: 'Aggregate dataset', value: 'aggregate' },
 ];
 
+const temporalKindItems: Array<{ label: string; value: TemporalKind | null }> = [
+  { label: 'Không phải cột thời gian', value: null },
+  { label: 'Ngày', value: 'date' },
+  { label: 'Ngày giờ', value: 'timestamp' },
+];
+const TEMPORAL_KIND_LABELS: Record<TemporalKind, string> = { date: 'Ngày', timestamp: 'Ngày giờ' };
+
 const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> = [
   'display_name',
   'nullable',
@@ -49,7 +58,12 @@ const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> 
   'unit',
   'format',
   'business_term',
+  'temporal_kind',
 ];
+
+function timeSemanticsOf(dictionary: DatasetDictionary): TimeSemantics {
+  return { time_column: dictionary.time_column, row_kind_column: dictionary.row_kind_column, grains: dictionary.grains ?? [] };
+}
 
 function normalizeNullableText(value: string | null): string | null {
   return value === '' ? null : value;
@@ -77,6 +91,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     create_column: null as string | null,
     dataset_type: null as DatasetDictionary['dataset_type'],
     layer_id: null as number | null,
+    timeSemantics: JSON.stringify({ time_column: null, row_kind_column: null, grains: [] }),
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -101,6 +116,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     || dictionary.create_column !== datasetBaseline.create_column
     || dictionary.dataset_type !== datasetBaseline.dataset_type
     || dictionary.layer_id !== datasetBaseline.layer_id
+    || JSON.stringify(timeSemanticsOf(dictionary)) !== datasetBaseline.timeSemantics
   );
   const dirty = useMemo(
     () => datasetDirty || comparableColumns(columns) !== comparableColumns(baseline),
@@ -145,6 +161,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         create_column: payload.create_column,
         dataset_type: payload.dataset_type,
         layer_id: payload.layer_id ?? null,
+        timeSemantics: JSON.stringify(timeSemanticsOf(payload)),
       });
     } catch (reason) {
       if ((reason as Error).name !== 'AbortError') {
@@ -212,6 +229,12 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     setSaved(false);
     setSaveError('');
     setDictionary(current => current ? { ...current, [field]: value } : current);
+  };
+
+  const updateTimeSemantics = (timeSemantics: TimeSemantics) => {
+    setSaved(false);
+    setSaveError('');
+    setDictionary(current => current ? { ...current, ...timeSemantics } : current);
   };
 
   const suggestDictionary = async () => {
@@ -373,6 +396,9 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             create_column: dictionary.create_column || null,
             dataset_type: dictionary.dataset_type,
             layer_id: dictionary.layer_id ?? null,
+            time_column: dictionary.time_column,
+            row_kind_column: dictionary.row_kind_column,
+            grains: dictionary.grains.map(item => ({ ...item, label: normalizeNullableText(item.label?.trim() ?? '') })),
           },
           columns: columns.map(({ column_name, ...column }) => ({
             column_name,
@@ -395,6 +421,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         create_column: payload.create_column,
         dataset_type: payload.dataset_type,
         layer_id: payload.layer_id ?? null,
+        timeSemantics: JSON.stringify(timeSemanticsOf(payload)),
       });
       setSaved(true);
       onSaved(payload);
@@ -514,9 +541,16 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             <Textarea id="sl-dataset-description" className="max-h-36" disabled={readOnly || saving} value={dictionary.description ?? ''} onChange={event => updateDataset('description', normalizeNullableText(event.target.value))} />
           </Field>
           <Field className="sl-field-wide">
-            <FieldLabel htmlFor="sl-dataset-grain">Grain</FieldLabel>
+            <FieldLabel htmlFor="sl-dataset-grain" title="Mô tả bằng lời một dòng đại diện cho điều gì; grain dùng để truy vấn khai báo ở mục Thời gian và grain">Mô tả grain</FieldLabel>
             <Textarea id="sl-dataset-grain" className="max-h-36" disabled={readOnly || saving} value={dictionary.grain ?? ''} onChange={event => updateDataset('grain', normalizeNullableText(event.target.value))} />
           </Field>
+          <TimeSemanticsFields
+            datasetId={dataset.id}
+            columns={columns}
+            value={timeSemanticsOf(dictionary)}
+            disabled={readOnly || saving}
+            onChange={updateTimeSemantics}
+          />
         </div>
         <table className="sl-dictionary-table">
           <thead>
@@ -547,6 +581,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                     <th scope="row">
                       <code title={column.column_name}>{column.column_name}</code>
                       <span className="sl-type-badge" title={column.data_type}>{column.data_type}</span>
+                      {column.temporal_kind ? <span className="sl-type-badge is-temporal">{TEMPORAL_KIND_LABELS[column.temporal_kind]}</span> : null}
                     </th>
                     <td><Input aria-label={`Display name của ${column.column_name}`} disabled={disabled} value={column.display_name} onChange={event => updateColumn(column.column_name, 'display_name', event.target.value)} /></td>
                     <td><Textarea aria-label={`Business term của ${column.column_name}`} className="min-h-8 max-h-24 resize-none py-1" disabled={disabled} value={column.business_term ?? ''} onChange={event => updateColumn(column.column_name, 'business_term', normalizeNullableText(event.target.value))} /></td>
@@ -591,6 +626,17 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                           <label className="sl-column-detail">Default<Input aria-label={`Default value của ${column.column_name}`} disabled={disabled} value={column.default_value ?? ''} onChange={event => updateColumn(column.column_name, 'default_value', normalizeNullableText(event.target.value))} /></label>
                           <label className="sl-column-detail">Unit<Input aria-label={`Unit của ${column.column_name}`} disabled={disabled} value={column.unit ?? ''} onChange={event => updateColumn(column.column_name, 'unit', normalizeNullableText(event.target.value))} /></label>
                           <label className="sl-column-detail">Format<Input aria-label={`Format của ${column.column_name}`} disabled={disabled} value={column.format ?? ''} onChange={event => updateColumn(column.column_name, 'format', normalizeNullableText(event.target.value))} /></label>
+                          <label className="sl-column-detail">
+                            Kiểu thời gian
+                            <Select items={temporalKindItems} value={column.temporal_kind} disabled={disabled} onValueChange={value => updateColumn(column.column_name, 'temporal_kind', value)}>
+                              <SelectTrigger aria-label={`Kiểu thời gian của ${column.column_name}`} className="w-full"><SelectValue /></SelectTrigger>
+                              <SelectContent alignItemWithTrigger={false}>
+                                <SelectGroup>
+                                  {temporalKindItems.map(item => <SelectItem key={item.value ?? 'none'} value={item.value}>{item.label}</SelectItem>)}
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          </label>
                           <label className="sl-column-detail is-check"><input aria-label={`${column.column_name} nullable`} disabled={disabled} type="checkbox" checked={column.nullable} onChange={event => updateColumn(column.column_name, 'nullable', event.target.checked)} />Nullable</label>
                         </div>
                       </td>

@@ -28,6 +28,7 @@ from ...models.business_domain import BusinessDomain, business_domain_dataset
 from ...models.column_dictionary import ColumnDictionary
 from ...models.data_layer import DataLayer
 from ...models.dataset_dictionary import DatasetDictionary
+from ...models.dataset_grain import DatasetGrain
 from ...models.dataset_proposal import DatasetProposal
 from ...models.expert_rule import ExpertRule, ExpertRuleAuditEvent, ExpertRuleLink, ExpertRuleRevision
 from ...models.glossary_term import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
@@ -65,6 +66,13 @@ from ..business_model.service import (
 )
 from ..data_dictionary.repository.repo_column_dictionary import ColumnDictionaryRepository
 from ..data_dictionary.repository.repo_dataset_dictionary import DatasetDictionaryRepository
+from ..data_dictionary.time_semantics import (
+    build_grain_profile_payload,
+    checked_temporal_kind,
+    checked_time_semantics,
+    default_temporal_kind,
+    grain_profile_from_rows,
+)
 from ..glossary.service import (
     GlossaryConflictError,
     GlossarySelfApprovalError,
@@ -120,11 +128,14 @@ DICTIONARY_FIELDS = {
     "referenced_column",
     "referenced_dataset_id",
     "referenced_column_name",
+    "temporal_kind",
     "unit",
 }
 STRING_FIELD_LIMITS = {"display_name": 255}
 OPTIONAL_STRING_FIELD_LIMITS = {"format": 128, "unit": 128}
 DATASET_DICTIONARY_FIELDS = {"display_name", "description", "grain", "create_column", "dataset_type", "layer_id"}
+# Saved together: the grains are checked against the time column and the column telling kinds of rows apart.
+DATASET_TIME_FIELDS = {"time_column", "row_kind_column", "grains"}
 # Arbitrary key shared by every Superset worker so only one of them migrates the dictionary tables at a time.
 DICTIONARY_MIGRATION_LOCK_KEY = 74_116_201
 _dictionary_tables_ready = False
@@ -233,6 +244,7 @@ def _column_metadata_values(column: Any) -> dict[str, Any]:
         "unit": None,
         "format": None,
         "business_term": None,
+        "temporal_kind": default_temporal_kind(getattr(column, "type", None), bool(getattr(column, "is_dttm", False))),
     }
 
 
@@ -322,6 +334,8 @@ def _validate_dictionary_payload(payload: Any, actual_column_names: set[str], da
                 ):
                     raise ValueError(f"columns[{index}].{field} must be a string of at most 128 characters or null.")
                 values[field] = value if value is None or value.strip() else None
+        if "temporal_kind" in item:
+            values["temporal_kind"] = checked_temporal_kind(item["temporal_kind"], index)
         normalized.append(values)
     return normalized
 
@@ -359,6 +373,9 @@ def _serialize_dictionary(
             "referenced_column_name": referenced.column_name if referenced else None,
             "referenced_dataset_label": label or (table_name if referenced else None),
         }
+    grains = (
+        db.session.query(DatasetGrain).filter(DatasetGrain.dataset_id == dataset.id).order_by(DatasetGrain.row_kind_value)
+    )
     return {
         "dataset_id": dataset.id,
         "dataset_name": dataset.table_name,
@@ -368,6 +385,11 @@ def _serialize_dictionary(
         "create_column": dictionary.create_column,
         "dataset_type": dictionary.dataset_type,
         "layer_id": dictionary.layer_id,
+        "time_column": dictionary.time_column,
+        "row_kind_column": dictionary.row_kind_column,
+        "grains": [
+            {"row_kind_value": item.row_kind_value, "label": item.label, "grain": item.grain} for item in grains
+        ],
         "read_only": False,
         "columns": [
             {
@@ -384,6 +406,7 @@ def _serialize_dictionary(
                 "unit": records[actual.column_name].unit,
                 "format": records[actual.column_name].format,
                 "business_term": records[actual.column_name].business_term,
+                "temporal_kind": records[actual.column_name].temporal_kind,
             }
             for actual in dataset.columns
         ],
@@ -529,6 +552,7 @@ def _migrate_dictionary_tables():
     DataLayer.__table__.create(bind=db.engine, checkfirst=True)
     DatasetDictionary.__table__.create(bind=db.engine, checkfirst=True)
     ColumnDictionary.__table__.create(bind=db.engine, checkfirst=True)
+    DatasetGrain.__table__.create(bind=db.engine, checkfirst=True)
     BusinessDomain.__table__.create(bind=db.engine, checkfirst=True)
     business_domain_dataset.create(bind=db.engine, checkfirst=True)
     LineageEdge.__table__.create(bind=db.engine, checkfirst=True)
@@ -610,6 +634,8 @@ def _migrate_dictionary_tables():
             ("create_column", "VARCHAR(255)"),
             ("dataset_type", "VARCHAR(32)"),
             ("layer_id", "INTEGER REFERENCES text_to_bi_data_layer (id) ON DELETE SET NULL"),
+            ("time_column", "VARCHAR(255)"),
+            ("row_kind_column", "VARCHAR(255)"),
         )
         for column_name, column_type in dataset_columns_to_add:
             if column_name not in dataset_columns:
@@ -618,6 +644,23 @@ def _migrate_dictionary_tables():
                         f"ALTER TABLE text_to_bi_dataset_dictionary ADD COLUMN {column_name} {column_type}"
                     )
                 )
+
+    with db.engine.begin() as connection:
+        dictionary_columns = {
+            column["name"] for column in inspect(connection).get_columns(ColumnDictionary.__tablename__)
+        }
+        if "temporal_kind" not in dictionary_columns:
+            connection.execute(text("ALTER TABLE text_to_bi_column_dictionary ADD COLUMN temporal_kind VARCHAR(16)"))
+            # Rows seeded before temporal kinds existed take theirs from the type recorded when they were seeded.
+            connection.execute(
+                text(
+                    "UPDATE text_to_bi_column_dictionary SET temporal_kind = 'timestamp' "
+                    "WHERE UPPER(data_type) LIKE '%TIMESTAMP%' OR UPPER(data_type) LIKE '%DATETIME%'"
+                )
+            )
+            connection.execute(
+                text("UPDATE text_to_bi_column_dictionary SET temporal_kind = 'date' WHERE UPPER(TRIM(data_type)) = 'DATE'")
+            )
 
     if postgres:
         with db.engine.begin() as connection:
@@ -2222,6 +2265,10 @@ class SemanticLayerAPI(RestApi):
         dataset_updates = payload.get("dataset", {})
         if not isinstance(dataset_updates, dict):
             return self.response_400(message="dataset must be an object.")
+        time_updates = {field: dataset_updates.pop(field) for field in DATASET_TIME_FIELDS if field in dataset_updates}
+        for field in ("time_column", "row_kind_column"):
+            if time_updates.get(field) == "":
+                time_updates[field] = None
         unknown_fields = set(dataset_updates) - DATASET_DICTIONARY_FIELDS
         if unknown_fields:
             return self.response_400(message=f"dataset contains unsupported fields: {', '.join(sorted(unknown_fields))}.")
@@ -2277,13 +2324,101 @@ class SemanticLayerAPI(RestApi):
                             raise ValueError("Referenced column no longer exists.")
                         update["referenced_column"] = referenced_row.id
                 column_repository.update(rows_by_name[column_name], update)
+            if time_updates:
+                self._save_time_semantics(dataset_repository.get(dataset_id), time_updates, rows_by_name)
             db.session.commit()
             rows = column_repository.list_for_dataset(dataset_id)
             return self.response(200, **_serialize_dictionary(dataset, dataset_repository.get(dataset_id), rows))
+        except ValueError as ex:
+            db.session.rollback()
+            return self.response_400(message=str(ex))
         except Exception:
             logger.exception("Could not save dataset dictionary (dataset_id=%s)", dataset_id)
             db.session.rollback()
             return self.response_500(message="Could not save dataset dictionary.")
+
+    @staticmethod
+    def _save_time_semantics(
+        record: DatasetDictionary, time_updates: dict[str, Any], rows_by_name: dict[str, ColumnDictionary],
+    ) -> None:
+        """Store the time column, the row kind column and the grains, checked against the columns as just updated.
+
+        A field left out keeps its stored value; the grains are replaced as a whole.
+        """
+        stored = db.session.query(DatasetGrain).filter(DatasetGrain.dataset_id == record.id).all()
+        time_column = time_updates.get("time_column", record.time_column)
+        row_kind_column = time_updates.get("row_kind_column", record.row_kind_column)
+        grains = time_updates.get("grains")
+        if grains is None:
+            grains = [{"row_kind_value": item.row_kind_value, "label": item.label, "grain": item.grain} for item in stored]
+        temporal_kinds = {name: row.temporal_kind for name, row in rows_by_name.items()}
+        checked = checked_time_semantics(time_column, row_kind_column, grains, temporal_kinds)
+        record.time_column = time_column
+        record.row_kind_column = row_kind_column
+        for item in stored:
+            db.session.delete(item)
+        # The unique row kind constraint must see the old rows gone before the new ones arrive.
+        db.session.flush()
+        db.session.add_all(DatasetGrain(dataset_id=record.id, **item) for item in checked)
+        db.session.flush()
+
+    @expose("/dataset/<int:dataset_id>/grain-profile", methods=("GET",))
+    @protect()
+    @safe
+    @permission_name("read")
+    def get_grain_profile(self, dataset_id: int):
+        """How the time column's values fall for each kind of row, with the grain they suggest.
+
+        Read-only and run only when an administrator asks: one aggregate ChartData query as the caller, so Superset's
+        access rules and row-level security apply. `time_column` and `row_kind_column` come from the query string, so
+        a choice not saved yet can be profiled.
+        """
+        if not self._is_admin():
+            return self.response(403, message="Admin access required.")
+        _ensure_dictionary_tables()
+        dataset = db.session.get(SqlaTable, dataset_id)
+        if dataset is None:
+            return self.response(404, message="Dataset not found.")
+        time_column = request.args.get("time_column") or None
+        row_kind_column = request.args.get("row_kind_column") or None
+        columns = {str(column.column_name): column for column in dataset.columns}
+        if time_column not in columns or getattr(columns[time_column], "expression", None):
+            return self.response_400(message="time_column must be a physical column of this dataset.")
+        if row_kind_column is not None and (
+            row_kind_column not in columns or getattr(columns[row_kind_column], "expression", None)
+        ):
+            return self.response_400(message="row_kind_column must be a physical column of this dataset.")
+        # The kind the administrator sees in the form, which a page not saved yet may still show as its default.
+        entry = ColumnDictionaryRepository(db.session).get_for_dataset_column(dataset_id, time_column)
+        temporal_kind = request.args.get("temporal_kind") or (entry.temporal_kind if entry else None)
+        if temporal_kind is None:
+            column = columns[time_column]
+            temporal_kind = default_temporal_kind(getattr(column, "type", None), bool(getattr(column, "is_dttm", False)))
+        if temporal_kind not in ("date", "timestamp"):
+            return self.response_400(message="time_column must be a date or timestamp column.")
+        try:
+            payload = build_grain_profile_payload(dataset, time_column, row_kind_column, temporal_kind)
+        except ValueError as ex:
+            return self.response_400(message=str(ex))
+        from superset.charts.schemas import ChartDataQueryContextSchema
+        from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+        try:
+            command = ChartDataCommand(ChartDataQueryContextSchema().load(payload))
+            command.validate()
+            result = command.run()["queries"][0]
+        except Exception as ex:
+            if _is_superset_access_error(ex):
+                return self.response(403, message="Dataset and database access required.")
+            logger.exception("Reading the grain profile of %s failed", dataset.table_name)
+            return self.response_500(message="Could not read the grain profile.")
+        if result.get("error"):
+            logger.error("Grain profile query of %s failed: %s", dataset.table_name, result["error"])
+            return self.response_500(message="Could not read the grain profile.")
+        profiles, too_many = grain_profile_from_rows(result.get("data", []), row_kind_column)
+        return self.response(
+            200, time_column=time_column, row_kind_column=row_kind_column, profiles=profiles, too_many_kinds=too_many,
+        )
 
     @expose("/business-model", methods=("GET",))
     @protect()

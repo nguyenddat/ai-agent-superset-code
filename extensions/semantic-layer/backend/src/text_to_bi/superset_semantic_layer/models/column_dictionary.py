@@ -34,6 +34,8 @@ class ColumnDictionary(AuditMixinNullable, Model):
     unit = Column(String(128), nullable=True)
     format = Column(String(128), nullable=True)
     business_term = Column(Text, nullable=True)
+    # `date` or `timestamp` for a column that places rows in time; a date filter on a timestamp covers the whole day.
+    temporal_kind = Column(String(16), nullable=True)
 
     referenced_column_record = relationship(
         "ColumnDictionary",

@@ -133,6 +133,7 @@ def _migration_namespace():
         "DataLayer",
         "DatasetDictionary",
         "ColumnDictionary",
+        "DatasetGrain",
         "BusinessDomain",
         "LineageEdge",
         "BusinessCanvas",

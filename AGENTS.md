@@ -142,7 +142,13 @@ The Semantic Layer owns `text_to_bi_dataset_dictionary` and
 `text_to_bi_column_dictionary` in Superset's metadata database. A dataset
 dictionary `id` shares the corresponding Superset dataset ID through
 `tables.id`; each column dictionary row references its dataset dictionary with
-`dataset_id`. `text_to_bi_dataset_proposal` holds the virtual datasets the AI
+`dataset_id`. A dataset dictionary also names its `time_column` and, when one
+table mixes grains (hourly and daily forecasts in `fact_tong_hop_thoi_tiet`),
+the `row_kind_column` that tells them apart; `text_to_bi_dataset_grain` holds
+the grain of each kind of row, and each column dictionary row has a
+`temporal_kind` (`date` or `timestamp`). "Phát hiện grain" in the Data
+Dictionary reads a suggestion from the data; see
+`docs/specs/grain-va-ngu-nghia-thoi-gian.md`. `text_to_bi_dataset_proposal` holds the virtual datasets the AI
 Agent drafts over base (`dm_*`, `tb_*`) datasets when no aggregate dataset can
 answer a question; an administrator creates or rejects them in "Xử lý câu hỏi" →
 "Đề xuất dataset". Opening the Semantic Layer as an administrator creates these
