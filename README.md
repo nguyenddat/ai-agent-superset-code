@@ -115,24 +115,32 @@ docker compose down
 
 ## Configuration and secrets
 
-Local credentials belong in `extensions/ai-agents/.env` or a root `.env` file;
-they are ignored by Git. Before exposing the stack outside a development
-machine, set at least:
+Local settings and credentials belong in one `.env` file at the repository
+root, next to `docker-compose.yml`; it is ignored by Git. Start from the
+template:
 
-```dotenv
-SUPERSET_SECRET_KEY=replace-me
-SUPERSET_ADMIN_PASSWORD=replace-me
-POSTGRES_PASSWORD=replace-me
-SUPERSET_DB_PASSWORD=replace-me
-OPENROUTER_API_KEY=replace-me
-SUPERSET_BASE_URL=http://superset:8088
-SUPERSET_USERNAME=admin
-SUPERSET_PASSWORD=replace-me
+```sh
+cp .env.example .env
 ```
 
-The AI Agent backend reads its Superset and model settings from the extension
-environment. Do not commit API keys, passwords, or generated local `.env`
-files.
+Compose reads `.env` to fill the `${...}` values in `docker-compose.yml` and
+loads it into the Superset containers, where both extensions read
+`OPENROUTER_API_KEY`. Before exposing the stack outside a development machine,
+set at least:
+
+```dotenv
+OPENROUTER_API_KEY=replace-me
+SUPERSET_SECRET_KEY=replace-me
+SUPERSET_ADMIN_PASSWORD=replace-me
+SUPERSET_DB_PASSWORD=replace-me
+WAREHOUSE_DB_PASSWORD=replace-me
+TEXT_TO_BI_REPORTING_DB_PASSWORD=replace-me
+AIRFLOW_SECRET_KEY=replace-me
+AIRFLOW_ADMIN_PASSWORD=replace-me
+```
+
+Recreate the containers with `docker compose up -d` after changing `.env`. Do
+not commit API keys, passwords, or local `.env` files.
 
 ## Extension 1: Superset AI Agent
 

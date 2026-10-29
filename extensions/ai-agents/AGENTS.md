@@ -178,7 +178,7 @@ extensions/ai-agents/
 ├── backend/
 │   ├── src/text_to_bi/superset_ai_agent/
 │   │   ├── entrypoint.py
-│   │   ├── core/chat_models.py           # OpenRouter model, key from .env
+│   │   ├── core/chat_models.py           # OpenRouter model, key from the root .env
 │   │   ├── models/question_log.py        # question log, handling, chat session and user definition tables
 │   │   └── modules/
 │   │       ├── chat/                     # pipeline, prompts, catalog reader, query planner, /chat/stream
@@ -256,7 +256,7 @@ in this directory, resolving `npm` to `npm.cmd` on Windows), write the bundle to
 `superset_extensions` volume and restart Superset as the root `AGENTS.md`
 describes.
 
-`OPENROUTER_API_KEY` comes from `extensions/ai-agents/.env`, which Compose loads
+`OPENROUTER_API_KEY` comes from the repository root's `.env`, which Compose loads
 into the Superset containers. Keep that file out of commits and bundles.
 
 ## Schema link (in progress)

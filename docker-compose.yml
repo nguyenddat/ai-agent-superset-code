@@ -45,7 +45,7 @@ services:
       python /app/pythonpath/bootstrap_metrics.py && python /app/pythonpath/bootstrap_dashboard.py &&
       python /app/pythonpath/bootstrap_governance.py'
     env_file:
-      - ./extensions/ai-agents/.env
+      - ./.env
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-development-secret-change-me}
@@ -87,7 +87,7 @@ services:
       dockerfile: Dockerfile
     command: ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:8088 --worker-class gthread --workers 1 --threads 16 --timeout 120 'superset.app:create_app()'"]
     env_file:
-      - ./extensions/ai-agents/.env
+      - ./.env
     environment:
       SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
       SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-development-secret-change-me}

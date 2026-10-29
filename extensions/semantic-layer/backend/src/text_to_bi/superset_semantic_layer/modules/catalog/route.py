@@ -2624,7 +2624,7 @@ class SemanticLayerAPI(RestApi):
                 if status_code == 402:
                     message = "OpenRouter từ chối yêu cầu vì hết hạn mức credit của API key. Nạp thêm credit hoặc thử lại sau."
                 elif status_code == 401:
-                    message = "OpenRouter từ chối API key. Kiểm tra OPENROUTER_API_KEY trong extensions/ai-agents/.env."
+                    message = "OpenRouter từ chối API key. Kiểm tra OPENROUTER_API_KEY trong file .env ở thư mục gốc repo."
                 else:
                     message = "Không thể tạo gợi ý từ điển cột."
                 # Batches saved before the failure are already committed and shown; only the rest is missing.

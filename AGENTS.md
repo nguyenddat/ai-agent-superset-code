@@ -189,7 +189,12 @@ hand.
 
 ## Local configuration and secrets
 
-Local environment files such as `extensions/ai-agents/.env` are not source code.
-Keep credentials and API keys out of commits, bundles, and documentation. The
-Compose defaults are for local development; configure secrets through local
-environment files before exposing the stack outside the development machine.
+Local settings and secrets live in one `.env` at the repository root, next to
+`docker-compose.yml`; `.env.example` lists its variables. Compose reads it to
+fill the `${...}` values in `docker-compose.yml` and loads it into the
+`superset-init` and `superset` containers, where both extensions read
+`OPENROUTER_API_KEY`. Extensions keep no `.env` of their own. The file is not
+source code: keep credentials and API keys out of commits, bundles, and
+documentation. The Compose defaults are for local development; set real secrets
+in `.env` before exposing the stack outside the development machine, then
+recreate the containers with `docker compose up -d`.
