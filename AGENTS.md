@@ -40,7 +40,8 @@ When a change alters one of these rules, update the handbook in the same commit.
 - `extensions/*.supx` contains the bundles copied into the running Superset
   container. Keep one current bundle per extension here.
 - `docs/handbook/` holds the agreed conventions, architecture and API behaviour;
-  `docs/specs/` holds the specification of each feature.
+  `docs/specs/` holds the specification of each feature; `docs/reports/` holds
+  the reports written for the client (Word and PDF).
 
 ## Python environment
 
