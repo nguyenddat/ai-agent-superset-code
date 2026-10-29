@@ -6,6 +6,22 @@ This repository runs a local Text to BI stack around Apache Superset 6.1.0. It
 contains a PostgreSQL analytics database with sample weather data, a Superset
 metadata database, and two Superset extensions: an AI Agent and a Semantic Layer.
 
+## Read the handbook first
+
+`docs/handbook/` holds what the team agreed on for writing code here. Read it
+before changing code, and follow it over habits from other projects:
+
+- `docs/handbook/quy-uoc-code.md`: code conventions (line length, naming,
+  docstrings, tests) and Conventional Commits messages,
+  `<type>(<scope>): <description>`.
+- `docs/handbook/kien-truc.md`: the backend layers (`common`, `core`,
+  `modules`), modules split by business area, the `superset` module for
+  Superset's own datasets and users, and the layout inside a module.
+- `docs/handbook/hanh-vi.md`: exceptions and status codes, route decorator
+  order, transactions, admin checks and CSRF.
+
+When a change alters one of these rules, update the handbook in the same commit.
+
 ## Main directories
 
 - `data_wh/` defines the warehouse schema. `001_init_bang_co_so.sql` creates
@@ -23,6 +39,8 @@ metadata database, and two Superset extensions: an AI Agent and a Semantic Layer
   backend. Its metadata tables live in Superset's metadata database.
 - `extensions/*.supx` contains the bundles copied into the running Superset
   container. Keep one current bundle per extension here.
+- `docs/handbook/` holds the agreed conventions, architecture and API behaviour;
+  `docs/specs/` holds the specification of each feature.
 
 ## Python environment
 
@@ -172,7 +190,8 @@ tables and seeds dictionary rows from the existing Superset datasets.
 
 ## Code style
 
-These rules apply to Python and TypeScript alike:
+The full rules are in `docs/handbook/quy-uoc-code.md`. In short, for Python and
+TypeScript alike:
 
 - Lines may be up to 120 characters. Wrap only past that limit; keep a short
   call, import, object or JSX element on one line instead of splitting it.
@@ -180,12 +199,16 @@ These rules apply to Python and TypeScript alike:
   such as `metricContract`, `selectedDataset` or `approvedAt`. Do not abbreviate
   (`ds`, `col`, `m`, `tmp`, `res`); single letters are only for short loop
   indexes.
+- Write no module-level docstrings in Python; Ruff rule `D100` is ignored on
+  purpose. Scripts in `scripts/` keep theirs because `argparse` shows `__doc__`
+  as their `--help` text.
+- Write commit messages as Conventional Commits:
+  `<type>(<scope>): <description>`, for example
+  `fix(semantic-layer): answer an expert rule name collision with 400`.
 
 Ruff configuration is in the root `pyproject.toml` and each extension backend's
-`pyproject.toml`, with the 120-character line length. Ruff rule `D100` is
-ignored, so Python modules do not need a module-level docstring solely to
-satisfy that rule. The frontends have no formatter; follow the same limit by
-hand.
+`pyproject.toml`, with the 120-character line length. The frontends have no
+formatter; follow the same limit by hand.
 
 ## Local configuration and secrets
 
