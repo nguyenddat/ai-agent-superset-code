@@ -31,7 +31,7 @@ def _docker_run_command_arguments(dockerfile: str, command_prefix: str) -> list[
 def test_sqlglot_runtime_dependency_contract() -> None:
     project = tomllib.loads((BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     lock = tomllib.loads((BACKEND_ROOT / "uv.lock").read_text(encoding="utf-8"))
-    dockerfile = (REPOSITORY_ROOT / "superset" / "Dockerfile").read_text(encoding="utf-8")
+    dockerfile = (REPOSITORY_ROOT / "simulation" / "superset" / "Dockerfile").read_text(encoding="utf-8")
 
     assert project["requires-python"] == ">=3.10,<3.11"
     assert "sqlglot==28.10.1" in project["dependencies"]

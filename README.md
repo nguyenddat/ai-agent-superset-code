@@ -18,9 +18,10 @@ packaged, installed, and evolved independently.
 
 ```text
 Text to BI
-├── data_wh/                     Weather warehouse schema and seed dimensions
-├── airflow/                     Open-Meteo warehouse ingestion DAG
-├── superset/                    Superset image and local configuration
+├── simulation/                  Simulated environment the extensions run against
+│   ├── data_wh/                 Weather warehouse schema and seed dimensions
+│   ├── airflow/                 Open-Meteo warehouse ingestion DAG
+│   └── superset/                Superset image, local configuration and bootstrap scripts
 ├── extensions/
 │   ├── ai-agents/               Superset AI Agent extension
 │   │   ├── backend/             Python REST API and BI agents

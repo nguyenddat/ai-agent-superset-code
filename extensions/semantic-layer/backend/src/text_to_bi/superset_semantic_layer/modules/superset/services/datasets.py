@@ -9,7 +9,8 @@ from superset.models.core import Database
 from ..dependencies import superset_database_repository, superset_dataset_repository
 from ..exceptions import DatabaseNotFoundError, DatasetNotFoundError
 
-# Set in a Superset database's extra JSON by superset/bootstrap_governance.py for the AI Agent reporting views.
+# Set in a Superset database's extra JSON by simulation/superset/bootstrap_governance.py for the AI Agent reporting
+# views.
 INTERNAL_DATABASE_FLAG = "text_to_bi_internal"
 
 

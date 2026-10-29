@@ -9,7 +9,7 @@ services:
       - "${WAREHOUSE_DB_PORT:-5433}:5432"
     volumes:
       - warehouse_db_data:/var/lib/postgresql/data
-      - ./data_wh/scripts:/docker-entrypoint-initdb.d:ro
+      - ./simulation/data_wh/scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${WAREHOUSE_DB_USER:-bi} -d ${WAREHOUSE_DB:-data_wh}"]
       interval: 5s
@@ -37,7 +37,7 @@ services:
   superset-init:
     image: text-to-bi-superset:6.1.0
     build:
-      context: ./superset
+      context: ./simulation/superset
       dockerfile: Dockerfile
     command: >-
       sh -c 'superset db upgrade && superset init && python /app/pythonpath/create_admin.py &&
@@ -66,12 +66,12 @@ services:
       # Read-only login that the "Text to BI Governance" connection uses for the AI Agent reporting views.
       TEXT_TO_BI_REPORTING_DB_PASSWORD: ${TEXT_TO_BI_REPORTING_DB_PASSWORD:-reporting_dev_password}
     volumes:
-      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
-      - ./superset/create_admin.py:/app/pythonpath/create_admin.py:ro
-      - ./superset/bootstrap_warehouse.py:/app/pythonpath/bootstrap_warehouse.py:ro
-      - ./superset/bootstrap_metrics.py:/app/pythonpath/bootstrap_metrics.py:ro
-      - ./superset/bootstrap_dashboard.py:/app/pythonpath/bootstrap_dashboard.py:ro
-      - ./superset/bootstrap_governance.py:/app/pythonpath/bootstrap_governance.py:ro
+      - ./simulation/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./simulation/superset/create_admin.py:/app/pythonpath/create_admin.py:ro
+      - ./simulation/superset/bootstrap_warehouse.py:/app/pythonpath/bootstrap_warehouse.py:ro
+      - ./simulation/superset/bootstrap_metrics.py:/app/pythonpath/bootstrap_metrics.py:ro
+      - ./simulation/superset/bootstrap_dashboard.py:/app/pythonpath/bootstrap_dashboard.py:ro
+      - ./simulation/superset/bootstrap_governance.py:/app/pythonpath/bootstrap_governance.py:ro
       - superset_extensions:/app/superset_home/extensions
     depends_on:
       superset-db:
@@ -83,7 +83,7 @@ services:
   superset:
     image: text-to-bi-superset:6.1.0
     build:
-      context: ./superset
+      context: ./simulation/superset
       dockerfile: Dockerfile
     command: ["/bin/sh", "-c", "gunicorn --bind 0.0.0.0:8088 --worker-class gthread --workers 1 --threads 16 --timeout 120 'superset.app:create_app()'"]
     env_file:
@@ -97,7 +97,7 @@ services:
     ports:
       - "${SUPERSET_PORT:-8089}:8088"
     volumes:
-      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./simulation/superset/superset_config.py:/app/pythonpath/superset_config.py:ro
       # Extension bundles live in a named volume filled with `docker compose cp` (see AGENTS.md): bind-mounting the
       # .supx files from the host drive served stale copies under Docker Desktop's Hyper-V file sharing.
       - superset_extensions:/app/superset_home/extensions
@@ -110,7 +110,7 @@ services:
 
   airflow:
     build:
-      context: ./airflow
+      context: ./simulation/airflow
       dockerfile: Dockerfile
     command: ["bash", "/opt/airflow-bootstrap.sh"]
     environment:
@@ -134,9 +134,9 @@ services:
       - "${AIRFLOW_PORT:-8080}:8080"
     volumes:
       - airflow_home:/opt/airflow
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
+      - ./simulation/airflow/dags:/opt/airflow/dags
+      - ./simulation/airflow/logs:/opt/airflow/logs
+      - ./simulation/airflow/plugins:/opt/airflow/plugins
     depends_on:
       warehouse-db:
         condition: service_healthy

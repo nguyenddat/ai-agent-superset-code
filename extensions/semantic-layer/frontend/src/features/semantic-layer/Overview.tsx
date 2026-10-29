@@ -7,8 +7,8 @@ import { GOVERNANCE_DASHBOARD_SLUG } from './constants';
 const dashboardPath = `/superset/dashboard/${GOVERNANCE_DASHBOARD_SLUG}/`;
 
 /**
- * The governance home is a Superset dashboard built by superset/bootstrap_governance.py on read-only reporting views,
- * embedded in standalone mode so its charts keep Superset's permissions, tooltips and drill-down.
+ * The governance home is a Superset dashboard built by simulation/superset/bootstrap_governance.py on read-only
+ * reporting views, embedded in standalone mode so its charts keep Superset's permissions, tooltips and drill-down.
  */
 export function Overview() {
   const [available, setAvailable] = useState<boolean | null>(null);

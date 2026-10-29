@@ -62,7 +62,7 @@ datasets = {
 Dùng [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <description>`.
 
 - `type`: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `build`, `perf`, `style`, `ci`.
-- `scope`: phần bị sửa, ví dụ `semantic-layer`, `ai-agent`, `superset`, `airflow`, `data-wh`, `scripts`, `docs`.
+- `scope`: phần bị sửa, ví dụ `semantic-layer`, `ai-agent`, `simulation`, `scripts`, `docs`.
 - `description`: tiếng Anh, thể mệnh lệnh, chữ thường ở đầu, không có dấu chấm cuối.
 - Thân commit (nếu có) giải thích vì sao và những gì thay đổi về hành vi; thay đổi phá vỡ tương thích ghi
   `BREAKING CHANGE:` ở chân.

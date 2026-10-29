@@ -24,14 +24,18 @@ When a change alters one of these rules, update the handbook in the same commit.
 
 ## Main directories
 
-- `data_wh/` defines the warehouse schema. `001_init_bang_co_so.sql` creates
-  the `dm_*` and normalized `tb_*` tables; `002_init_bang_dashboard.sql`
-  creates dashboard tables from that business layer.
-- `airflow/` contains the Open-Meteo ingestion DAG and its runtime files.
-- `superset/` contains the Superset image definition, local configuration, and
-  admin, warehouse and governance bootstrap scripts. `bootstrap_governance.py`
-  builds the "Tổng quan AI Agent" dashboard on read-only views of the AI Agent
-  question log.
+- `simulation/` holds the simulated environment the extensions run against; the
+  repository's own product is the extensions. It contains:
+  - `simulation/data_wh/` defines the warehouse schema.
+    `001_init_bang_co_so.sql` creates the `dm_*` and normalized `tb_*` tables;
+    `002_init_bang_dashboard.sql` creates dashboard tables from that business
+    layer.
+  - `simulation/airflow/` contains the Open-Meteo ingestion DAG and its runtime
+    files.
+  - `simulation/superset/` contains the Superset image definition, local
+    configuration, and admin, warehouse and governance bootstrap scripts.
+    `bootstrap_governance.py` builds the "Tổng quan AI Agent" dashboard on
+    read-only views of the AI Agent question log.
 - `extensions/ai-agents/` contains the AI Agent frontend and backend. Its
   `/ai-agent/` chat page keeps each user's conversations and streams each step
   as a tool call; see its own `AGENTS.md`.

@@ -2,7 +2,7 @@ export const SEMANTIC_LAYER_API = '/extensions/text-to-bi/superset-semantic-laye
 
 export const EXPERT_RULES_API = '/extensions/text-to-bi/superset-semantic-layer/expert-rules';
 
-/** The Superset dashboard superset/bootstrap_governance.py builds from the AI Agent question log. */
+/** The Superset dashboard simulation/superset/bootstrap_governance.py builds from the AI Agent question log. */
 export const GOVERNANCE_DASHBOARD_SLUG = 'ai-agent-tong-quan';
 
 /** The AI Agent extension owns the question log; this module only reads it and records handling decisions. */

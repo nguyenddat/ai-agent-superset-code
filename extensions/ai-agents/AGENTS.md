@@ -236,7 +236,7 @@ The Semantic Layer's "Xử lý câu hỏi" module uses the question and definiti
 `text_to_bi_agent_question`, `text_to_bi_agent_question_handling`,
 `text_to_bi_agent_chat_session` and `text_to_bi_agent_user_definition` live in
 Superset's metadata database and are created on first use.
-`superset/bootstrap_governance.py` (run by `superset-init`) publishes read-only
+`simulation/superset/bootstrap_governance.py` (run by `superset-init`) publishes read-only
 views of them in the `text_to_bi_reporting` schema, a login role that may read
 only that schema, the "Text to BI Governance" connection, and the
 "Tổng quan AI Agent" dashboard that the Semantic Layer's "Tổng quan" module
