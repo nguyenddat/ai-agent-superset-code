@@ -1,24 +1,16 @@
 import ast
-from pathlib import Path
 
-ROUTE_PATH = (
-    Path(__file__).parents[1]
-    / "src"
-    / "text_to_bi"
-    / "superset_semantic_layer"
-    / "modules"
-    / "catalog"
-    / "route.py"
-)
+from catalog_source import SOURCE_PATHS
 
 
 def test_catalog_route_uses_python_310_compatible_utc_timezone():
-    tree = ast.parse(ROUTE_PATH.read_text(encoding="utf-8"))
+    tree = ast.Module(
+        body=[node for path in SOURCE_PATHS for node in ast.parse(path.read_text(encoding="utf-8")).body],
+        type_ignores=[],
+    )
 
     datetime_imports = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module == "datetime"
+        node for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module == "datetime"
     ]
     assert all(alias.name != "UTC" for node in datetime_imports for alias in node.names)
 

@@ -3,7 +3,7 @@ import json
 from sqlalchemy import create_engine, text
 from sqlalchemy.dialects import postgresql
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.relationship_discovery import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationship_discovery import (
     MAX_ORPHAN_SAMPLES,
     TableKeys,
     database_suggestions,
@@ -28,7 +28,9 @@ TABLES = [CITY, DAY, OBSERVATION, VALUE]
 
 
 def _pairs(suggestions):
-    return {(item["from_dataset_id"], item["from_column"], item["to_dataset_id"], item["to_column"]) for item in suggestions}
+    return {
+        (item["from_dataset_id"], item["from_column"], item["to_dataset_id"], item["to_column"]) for item in suggestions
+    }
 
 
 def test_types_compare_by_family():
@@ -51,23 +53,46 @@ def test_a_key_of_another_type_is_not_suggested():
 
 
 def test_database_foreign_keys_map_to_datasets_and_composite_or_outside_keys_are_left_out():
-    foreign_keys = {15: [
-        {"constrained_columns": ["thanh_pho_id"], "referred_schema": "public", "referred_table": "dm_thanh_pho",
-         "referred_columns": ["thanh_pho_id"]},
-        {"constrained_columns": ["ngay_id", "thanh_pho_id"], "referred_schema": "public", "referred_table": "dm_ngay",
-         "referred_columns": ["ngay_id", "x"]},
-        {"constrained_columns": ["nguon_du_lieu_id"], "referred_schema": "public", "referred_table": "dm_nguon",
-         "referred_columns": ["nguon_du_lieu_id"]},
-    ]}
+    foreign_keys = {
+        15: [
+            {
+                "constrained_columns": ["thanh_pho_id"],
+                "referred_schema": "public",
+                "referred_table": "dm_thanh_pho",
+                "referred_columns": ["thanh_pho_id"],
+            },
+            {
+                "constrained_columns": ["ngay_id", "thanh_pho_id"],
+                "referred_schema": "public",
+                "referred_table": "dm_ngay",
+                "referred_columns": ["ngay_id", "x"],
+            },
+            {
+                "constrained_columns": ["nguon_du_lieu_id"],
+                "referred_schema": "public",
+                "referred_table": "dm_nguon",
+                "referred_columns": ["nguon_du_lieu_id"],
+            },
+        ]
+    }
 
     assert _pairs(database_suggestions(TABLES, foreign_keys)) == {(15, "thanh_pho_id", 10, "thanh_pho_id")}
 
 
 def test_suggestions_from_several_sources_merge_with_the_strongest_first():
-    database = database_suggestions(TABLES, {15: [{
-        "constrained_columns": ["thanh_pho_id"], "referred_schema": None, "referred_table": "dm_thanh_pho",
-        "referred_columns": ["thanh_pho_id"],
-    }]})
+    database = database_suggestions(
+        TABLES,
+        {
+            15: [
+                {
+                    "constrained_columns": ["thanh_pho_id"],
+                    "referred_schema": None,
+                    "referred_table": "dm_thanh_pho",
+                    "referred_columns": ["thanh_pho_id"],
+                }
+            ]
+        },
+    )
 
     merged = merged_suggestions(naming_suggestions(TABLES), database)
 
@@ -95,8 +120,13 @@ def test_check_queries_count_uniqueness_and_orphans_on_real_tables():
         uniqueness = dict(connection.execute(queries["uniqueness"]).mappings().one())
         orphans = dict(connection.execute(queries["orphans"]).mappings().one())
         samples = connection.execute(queries["samples"]).scalars().all()
-        duplicated = dict(connection.execute(verification_queries(
-            None, "observation", "city_id", None, "twin", "city_id")["uniqueness"]).mappings().one())
+        duplicated = dict(
+            connection.execute(
+                verification_queries(None, "observation", "city_id", None, "twin", "city_id")["uniqueness"]
+            )
+            .mappings()
+            .one()
+        )
 
     result = verification_result(uniqueness, orphans, samples, type_match=True)
 
@@ -108,8 +138,9 @@ def test_check_queries_count_uniqueness_and_orphans_on_real_tables():
 
 
 def test_orphan_samples_are_bounded_and_a_stored_check_survives_only_as_json():
-    result = verification_result({"target_values": 1, "target_distinct": 1}, {"references": 9, "orphans": 9},
-                                 list(range(20)), type_match=True)
+    result = verification_result(
+        {"target_values": 1, "target_distinct": 1}, {"references": 9, "orphans": 9}, list(range(20)), type_match=True
+    )
 
     assert len(result["orphan_samples"]) == MAX_ORPHAN_SAMPLES
     assert stored_verification(json.dumps(result)) == result

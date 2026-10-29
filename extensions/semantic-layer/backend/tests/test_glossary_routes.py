@@ -1,15 +1,15 @@
-"""Route-contract tests for the governed glossary admin endpoints.
-
-These tests deliberately inspect the isolated API source instead of importing
-Superset.  The extension's normal route tests use the same approach: Superset
-is a runtime dependency, while route policy must remain testable locally.
-"""
-
 import ast
-from pathlib import Path
 from types import SimpleNamespace
 
-ROUTE_PATH = Path(__file__).parents[1] / "src" / "text_to_bi" / "superset_semantic_layer" / "modules" / "catalog" / "route.py"
+from catalog_source import api_methods, compile_into, module_function
+
+from text_to_bi.superset_semantic_layer.core.exceptions import AdminRequiredError
+from text_to_bi.superset_semantic_layer.modules.glossary.exceptions import (
+    GlossaryConflictError,
+    GlossarySelfApprovalError,
+    GlossaryValidationError,
+)
+
 ADMIN_ENDPOINTS = {
     "list_glossary": ("/glossary", "GET"),
     "glossary_options": ("/glossary/options", "GET"),
@@ -19,12 +19,6 @@ ADMIN_ENDPOINTS = {
     "revoke_glossary": ("/glossary/<int:term_id>/revoke", "POST"),
     "glossary_audit": ("/glossary/<int:term_id>/audit", "GET"),
 }
-
-
-def _api_methods():
-    tree = ast.parse(ROUTE_PATH.read_text(encoding="utf-8"))
-    api = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
-    return {node.name: node for node in api.body if isinstance(node, ast.FunctionDef)}
 
 
 def _call_name(node):
@@ -43,7 +37,9 @@ def _decorator_calls(method):
 
 def _route(method):
     expose = next(decorator for decorator in method.decorator_list if _call_name(decorator) == "expose")
-    return expose.args[0].value, next(keyword.value.elts[0].value for keyword in expose.keywords if keyword.arg == "methods")
+    return expose.args[0].value, next(
+        keyword.value.elts[0].value for keyword in expose.keywords if keyword.arg == "methods"
+    )
 
 
 class _GlossaryResponseAPI:
@@ -67,35 +63,41 @@ class _CurrentRevisionQuery:
 
 def _update_handler(payload, update_draft):
     """Compile the real handler with Superset's request/session boundary faked."""
-    methods = _api_methods()
+    methods = api_methods()
     handler = methods["update_glossary_draft"]
-    handler.decorator_list = []
-    api = ast.ClassDef(name="HarnessAPI", bases=[ast.Name(id="RestApi", ctx=ast.Load())], keywords=[], body=[handler], decorator_list=[])
+    # Keep only @handle_errors, which turns the module's errors into responses.
+    handler.decorator_list = [item for item in handler.decorator_list if _call_name(item) == "handle_errors"]
+    api = ast.ClassDef(
+        name="HarnessAPI",
+        bases=[ast.Name(id="RestApi", ctx=ast.Load())],
+        keywords=[],
+        body=[handler],
+        decorator_list=[],
+    )
     current = SimpleNamespace(revision_number=3, term=SimpleNamespace(id=7))
     session = SimpleNamespace(
-        query=lambda _model: _CurrentRevisionQuery(current), get=lambda *_args: None, commit=lambda: None, rollback=lambda: None
+        query=lambda _model: _CurrentRevisionQuery(current),
+        get=lambda *_args: None,
+        commit=lambda: None,
+        rollback=lambda: None,
     )
-    validation_error = type("GlossaryValidationError", (ValueError,), {})
-    conflict_error = type("GlossaryConflictError", (ValueError,), {})
     namespace = {
         "RestApi": _GlossaryResponseAPI,
         "GlossaryTermRevision": object,
-        "GlossaryValidationError": validation_error,
-        "GlossaryConflictError": conflict_error,
         "SqlaTable": object,
         "db": SimpleNamespace(session=session),
         "request": SimpleNamespace(get_json=lambda silent=True: payload),
         "current_user": SimpleNamespace(id=42),
-        "_ensure_dictionary_tables": lambda: None,
+        "ensure_dictionary_tables": lambda: None,
         "update_draft": update_draft,
+        "require_admin": lambda: None,
     }
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[api], type_ignores=[])), str(ROUTE_PATH), "exec"), namespace)  # noqa: S102
+    compile_into(namespace, api)
     instance = namespace["HarnessAPI"]()
-    instance._is_admin = lambda: True
     instance._glossary_user_exists = lambda _user_id: True
     instance._glossary_metric_approved = lambda _dataset, _metric: True
     instance._glossary_term = lambda term, revisions: {"id": term.id, "revisions": len(revisions)}
-    return instance, current, validation_error, conflict_error
+    return instance, current, GlossaryValidationError, GlossaryConflictError
 
 
 def _frontend_draft_payload(**overrides):
@@ -114,21 +116,21 @@ def _frontend_draft_payload(**overrides):
 
 
 def test_admin_glossary_management_routes_are_explicitly_guarded_and_csrf_protected():
-    methods = _api_methods()
+    methods = api_methods()
     for name, expected_route in ADMIN_ENDPOINTS.items():
         method = methods[name]
         decorators = _decorator_calls(method)
         assert _route(method) == expected_route
         assert "protect" in decorators and "safe" in decorators and "permission_name" in decorators
+        assert decorators[-1] == "handle_errors"
         if expected_route[1] != "GET":
-            assert "_csrf_protected" in decorators and "_rollback_on_error" in decorators
-        source = ast.unparse(method)
-        assert "self._is_admin()" in source
-        assert "Admin access required" in source
+            assert "csrf_protected" in decorators and "rollback_on_error" in decorators
+        assert "require_admin()" in ast.unparse(method)
+    assert (AdminRequiredError.status, AdminRequiredError.message) == (403, "Admin access required.")
 
 
 def test_management_routes_delegate_to_governed_service_with_expected_revision_and_actor():
-    methods = _api_methods()
+    methods = api_methods()
     for name in ("create_glossary", "update_glossary_draft", "approve_glossary", "revoke_glossary"):
         source = ast.unparse(methods[name])
         assert "current_user.id" in source
@@ -177,19 +179,24 @@ def test_update_draft_rejects_non_object_or_missing_revision_before_service_call
 
 
 def test_admin_routes_keep_service_errors_generic_and_rollback_unexpected_failures():
-    tree = ast.parse(ROUTE_PATH.read_text(encoding="utf-8"))
-    rollback = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_rollback_on_error")
-    session = type("Session", (), {"rollbacks": 0, "rollback": lambda self: setattr(self, "rollbacks", self.rollbacks + 1)})()
-    namespace = {"wraps": lambda method: lambda wrapper: wrapper, "db": type("DB", (), {"session": session})(), "logger": type("Log", (), {"exception": lambda *_: None})()}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[rollback], type_ignores=[])), str(ROUTE_PATH), "exec"), namespace)  # noqa: S102
-    wrapped = namespace["_rollback_on_error"](lambda _: (_ for _ in ()).throw(RuntimeError("internal detail")))
+    rollback = module_function("rollback_on_error")
+    session = type(
+        "Session", (), {"rollbacks": 0, "rollback": lambda self: setattr(self, "rollbacks", self.rollbacks + 1)}
+    )()
+    namespace = {
+        "wraps": lambda method: lambda wrapper: wrapper,
+        "db": type("DB", (), {"session": session})(),
+        "logger": type("Log", (), {"exception": lambda *_: None})(),
+    }
+    compile_into(namespace, rollback)
+    wrapped = namespace["rollback_on_error"](lambda _: (_ for _ in ()).throw(RuntimeError("internal detail")))
     response = type("API", (), {"response_500": lambda self, **payload: (500, payload)})()
     assert wrapped(response) == (500, {"message": "Could not save the change."})
     assert session.rollbacks == 1
 
 
 def test_audit_is_admin_only_read_only_and_cannot_be_used_for_cross_term_id_lookup():
-    method = _api_methods()["glossary_audit"]
+    method = api_methods()["glossary_audit"]
     source = ast.unparse(method)
     assert "term_id" in source and "audit" in source.lower()
     assert "current_user.id" not in source  # audit visibility is role-based, not caller-supplied identity.
@@ -197,13 +204,20 @@ def test_audit_is_admin_only_read_only_and_cannot_be_used_for_cross_term_id_look
 
 
 def test_approval_passes_the_second_reviewer_setting_and_answers_self_approval_with_403():
-    source = ast.unparse(_api_methods()["_glossary_lifecycle"])
-    assert "self._second_reviewer_required()" in source
-    assert "GlossarySelfApprovalError" in source and "403" in source
+    source = ast.unparse(api_methods()["_glossary_lifecycle"])
+    assert "second_reviewer_required()" in source
+    assert GlossarySelfApprovalError.status == 403 and "không thể tự duyệt" in GlossarySelfApprovalError.message
 
 
 def test_list_reports_review_state_reviewers_and_the_second_reviewer_setting():
-    source = ast.unparse(_api_methods()["list_glossary"]) + ast.unparse(_api_methods()["_glossary_review_entry"])
-    for field in ("state", "author_name", "approver_name", "revoker_name", "current_user_id", "require_second_reviewer"):
+    source = ast.unparse(api_methods()["list_glossary"]) + ast.unparse(api_methods()["_glossary_review_entry"])
+    for field in (
+        "state",
+        "author_name",
+        "approver_name",
+        "revoker_name",
+        "current_user_id",
+        "require_second_reviewer",
+    ):
         assert f"'{field}'" in source or f"{field}=" in source
     assert "'outdated'" in source

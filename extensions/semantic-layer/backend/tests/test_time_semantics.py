@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.data_dictionary.time_semantics import (
+from text_to_bi.superset_semantic_layer.modules.data_dictionary.services.time_semantics import (
     MAX_ROW_KINDS,
     build_grain_profile_payload,
     checked_time_semantics,
@@ -93,15 +93,23 @@ def test_a_date_column_is_profiled_without_extracting_a_time_of_day():
     query = build_grain_profile_payload(SimpleNamespace(id=12), "ngay_key", None, "date")["queries"][0]
 
     assert query["columns"] == []
-    assert not any("HOUR" in metric["sqlExpression"] or "MINUTE" in metric["sqlExpression"] for metric in query["metrics"])
+    assert not any(
+        "HOUR" in metric["sqlExpression"] or "MINUTE" in metric["sqlExpression"] for metric in query["metrics"]
+    )
 
 
 def test_the_profile_suggests_hours_days_months_and_irregular_moments():
     def row(value, off_the_hour=0, off_midnight=0, off_first_day=0, moments=24):
         return {
-            "loai_quan_sat": value, "row_count": 100, "first_moment": datetime(2026, 10, 15),
-            "last_moment": "2026-11-01T23:00:00", "moments": moments, "days": 18,
-            "off_the_hour": off_the_hour, "off_midnight": off_midnight, "off_first_day": off_first_day,
+            "loai_quan_sat": value,
+            "row_count": 100,
+            "first_moment": datetime(2026, 10, 15),
+            "last_moment": "2026-11-01T23:00:00",
+            "moments": moments,
+            "days": 18,
+            "off_the_hour": off_the_hour,
+            "off_midnight": off_midnight,
+            "off_first_day": off_first_day,
         }
 
     rows = [
@@ -115,7 +123,10 @@ def test_the_profile_suggests_hours_days_months_and_irregular_moments():
     profiles, too_many = grain_profile_from_rows(rows, "loai_quan_sat")
 
     assert [(item["row_kind_value"], item["suggested_grain"]) for item in profiles] == [
-        ("DU_BAO_GIO", "hour"), ("DU_BAO_NGAY", "day"), ("HIEN_TAI", "instant"), ("THANG", "month"),
+        ("DU_BAO_GIO", "hour"),
+        ("DU_BAO_NGAY", "day"),
+        ("HIEN_TAI", "instant"),
+        ("THANG", "month"),
     ]
     assert profiles[0]["first_moment"] == "2026-10-15T00:00:00" and too_many is False
 

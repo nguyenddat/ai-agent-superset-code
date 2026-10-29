@@ -1,5 +1,3 @@
-"""Create the sample weather dashboard and its charts from the saved fact metrics."""
-
 from __future__ import annotations
 
 import json

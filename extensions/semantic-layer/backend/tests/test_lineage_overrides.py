@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 
-from text_to_bi.superset_semantic_layer.modules.business_model.lineage_overrides import flipped_key, match_override
+from text_to_bi.superset_semantic_layer.modules.business_model.services.lineage_overrides import (
+    flipped_key,
+    match_override,
+)
 
 
 @dataclass

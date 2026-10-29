@@ -1,16 +1,13 @@
-"""Regression tests for glossary safety and isolated table bootstrap behavior."""
-
 from __future__ import annotations
 
-import ast
 import sys
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from catalog_source import compile_into, module_function
 from sqlalchemy.exc import IntegrityError
 
-from text_to_bi.superset_semantic_layer.modules.glossary import service
+from text_to_bi.superset_semantic_layer.modules.glossary.services import glossary as service
 
 
 def _payload(**overrides):
@@ -34,7 +31,7 @@ def test_duplicate_canonical_name_flush_rolls_back_and_raises_conflict(monkeypat
         def __init__(self, **values):
             self.__dict__.update(values)
 
-    models = ModuleType("text_to_bi.superset_semantic_layer.models.glossary_term")
+    models = ModuleType("text_to_bi.superset_semantic_layer.modules.glossary.models")
     models.GlossaryTerm = GlossaryTerm
     models.GlossaryTermAuditEvent = SimpleNamespace
     models.GlossaryTermLink = SimpleNamespace
@@ -64,11 +61,7 @@ def test_duplicate_canonical_name_flush_rolls_back_and_raises_conflict(monkeypat
 
 
 def test_glossary_bootstrap_creates_parent_tables_before_children_with_checkfirst():
-    route_path = Path(__file__).parents[1] / "src/text_to_bi/superset_semantic_layer/modules/catalog/route.py"
-    module = ast.parse(route_path.read_text(encoding="utf-8"))
-    migration = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "_migrate_dictionary_tables")
-    namespace = _migration_namespace()
-    exec(compile(ast.Module(body=[migration], type_ignores=[]), str(route_path), "exec"), namespace)  # noqa: S102
+    namespace = compile_into(_migration_namespace(), module_function("_migrate_dictionary_tables"))
 
     namespace["_migrate_dictionary_tables"]()
     namespace["_migrate_dictionary_tables"]()
@@ -84,11 +77,7 @@ def test_glossary_bootstrap_creates_parent_tables_before_children_with_checkfirs
 
 
 def test_expert_rule_bootstrap_creates_parent_tables_before_children_with_checkfirst():
-    route_path = Path(__file__).parents[1] / "src/text_to_bi/superset_semantic_layer/modules/catalog/route.py"
-    module = ast.parse(route_path.read_text(encoding="utf-8"))
-    migration = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "_migrate_dictionary_tables")
-    namespace = _migration_namespace()
-    exec(compile(ast.Module(body=[migration], type_ignores=[]), str(route_path), "exec"), namespace)  # noqa: S102
+    namespace = compile_into(_migration_namespace(), module_function("_migrate_dictionary_tables"))
 
     namespace["_migrate_dictionary_tables"]()
 

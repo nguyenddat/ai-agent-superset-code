@@ -1,11 +1,3 @@
-"""Reads the governed business content the Semantic Layer extension publishes for consumers, and runs its metrics.
-
-The agent calls the Semantic Layer's consumer endpoints as the asking user, by forwarding that user's session cookie
-(and, to run a metric, their CSRF token), so it only ever sees and runs approved metrics, glossary terms and expert
-rules on datasets the user may access. Nothing here reads the Semantic Layer's tables or the warehouse directly.
-"""
-
-import os
 import threading
 import time
 from collections.abc import Callable
@@ -14,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+
+from ...core.config import settings
 
 SEMANTIC_LAYER_API = "/extensions/text-to-bi/superset-semantic-layer/semantic-layer"
 EXPERT_RULES_API = "/extensions/text-to-bi/superset-semantic-layer/expert-rules/expert-rules"
@@ -62,7 +56,7 @@ class SemanticCatalog:
 
 def internal_superset_url() -> str:
     """Superset as seen from inside its own container; the Compose service listens on 8088."""
-    return os.getenv("TEXT_TO_BI_SUPERSET_INTERNAL_URL", "http://127.0.0.1:8088").rstrip("/")
+    return settings.TEXT_TO_BI_SUPERSET_INTERNAL_URL.rstrip("/")
 
 
 def _get_json(path: str, cookie_header: str) -> dict[str, Any]:

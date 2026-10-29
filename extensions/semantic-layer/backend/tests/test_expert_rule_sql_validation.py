@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.expert_rules.sql_validation import contains_sql_or_control
+from text_to_bi.superset_semantic_layer.modules.expert_rules.services.sql_validation import contains_sql_or_control
 
-CASES = json.loads((Path(__file__).parent / "fixtures" / "expert_rule_validation_cases.json").read_text(encoding="utf-8"))
+CASES = json.loads(
+    (Path(__file__).parent / "fixtures" / "expert_rule_validation_cases.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("text", CASES["benign_prose"])

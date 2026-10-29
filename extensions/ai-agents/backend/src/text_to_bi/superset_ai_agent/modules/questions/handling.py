@@ -1,5 +1,3 @@
-"""Rules for how an administrator handles a question the agent could not fully resolve."""
-
 from typing import Any
 
 # `pending` is the absence of a handling row; it is accepted on write so an administrator can undo a decision.

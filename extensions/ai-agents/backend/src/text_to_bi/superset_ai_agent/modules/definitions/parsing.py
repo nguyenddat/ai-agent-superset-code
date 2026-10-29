@@ -1,5 +1,3 @@
-"""Validation of the definitions a user confirms for a glossary term or a qualitative concept."""
-
 from typing import Any
 
 DEFINITION_KINDS = ("glossary", "expert_rule")

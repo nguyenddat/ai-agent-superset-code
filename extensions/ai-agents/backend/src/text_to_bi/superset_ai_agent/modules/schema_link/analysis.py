@@ -1,9 +1,3 @@
-"""One schema link analysis, told as the four stages the AI Agent page draws: goal, nodes, graph, chosen path.
-
-Each stage records its status, how long it took, and what it found, so a run that stops (a reference the graph lacks,
-no path, a table mixing grains, a join that would repeat rows) still shows how far it got and why it stopped.
-"""
-
 import time
 from typing import Any
 

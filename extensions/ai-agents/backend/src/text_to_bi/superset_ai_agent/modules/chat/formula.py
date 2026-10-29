@@ -1,11 +1,3 @@
-"""A metric formula told in plain Vietnamese, so an asker can check how a provisional figure was computed.
-
-The sentence is a list of parts: plain text, or a column with its business label. The page shows the labels and can
-switch to the physical column names, so the same sentence serves a business user and someone checking the data.
-Only the contract grammar is told (`AGG(column)` or `AGG(CASE WHEN condition THEN column-or-number END)`); any other
-formula gives None and the page shows the expression as it is.
-"""
-
 from typing import Any
 
 import sqlglot

@@ -13,7 +13,12 @@ line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
+extend-select = ["E501"]
 ignore = ["D100"]
+
+[tool.ruff.lint.per-file-ignores]
+# Prompt text is sent to the model as written, so its lines are not wrapped.
+"src/text_to_bi/superset_semantic_layer/agent_package/prompts/*.py" = ["E501"]
 
 [tool.apache_superset_extensions.build]
 include = [

@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.exceptions import ApprovedMetricContractRequiredError
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import (
     build_metric_chart_payload,
     execute_approved_chart_query,
     metric_contract_hash,
@@ -47,7 +48,9 @@ def test_tablecolumn_shaped_columns_use_only_real_capability_fields():
     dataset = _dataset()
     dataset.columns[0].groupby = False
     with pytest.raises(ValueError, match="not available"):
-        build_metric_chart_payload(dataset, SimpleNamespace(metric_name="average_temperature"), {"dimensions": ["city"]}, 1000)
+        build_metric_chart_payload(
+            dataset, SimpleNamespace(metric_name="average_temperature"), {"dimensions": ["city"]}, 1000
+        )
 
 
 @pytest.mark.parametrize(
@@ -62,7 +65,10 @@ def test_tablecolumn_shaped_columns_use_only_real_capability_fields():
 def test_chart_payload_requires_operator_compatible_non_null_filter_values(filter_):
     with pytest.raises(ValueError):
         build_metric_chart_payload(
-            _dataset(), SimpleNamespace(metric_name="average_temperature"), {"dimensions": [], "filters": [filter_]}, 1000
+            _dataset(),
+            SimpleNamespace(metric_name="average_temperature"),
+            {"dimensions": [], "filters": [filter_]},
+            1000,
         )
 
 
@@ -82,7 +88,9 @@ def test_chart_payload_rejects_calculated_columns_in_dimensions_and_filters():
     dataset.columns[0].expression = "UPPER(city)"
 
     with pytest.raises(ValueError, match="calculated"):
-        build_metric_chart_payload(dataset, SimpleNamespace(metric_name="average_temperature"), {"dimensions": ["city"]}, 1000)
+        build_metric_chart_payload(
+            dataset, SimpleNamespace(metric_name="average_temperature"), {"dimensions": ["city"]}, 1000
+        )
     with pytest.raises(ValueError, match="calculated"):
         build_metric_chart_payload(
             dataset,
@@ -121,7 +129,7 @@ def test_unapproved_or_stale_contract_never_calls_chartdata_runner(status, stale
     )
     calls = []
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(ApprovedMetricContractRequiredError):
         execute_approved_chart_query(contract, dataset, metric, {"dimensions": []}, 1000, calls.append)
     assert calls == []
 
@@ -139,7 +147,9 @@ def test_only_the_supplied_chartdata_runner_validates_and_runs_after_approval():
     )
     calls = []
 
-    result = execute_approved_chart_query(contract, dataset, metric, {"dimensions": []}, 1000, lambda payload: calls.append(payload) or "ran")
+    result = execute_approved_chart_query(
+        contract, dataset, metric, {"dimensions": []}, 1000, lambda payload: calls.append(payload) or "ran"
+    )
     assert result == "ran"
     assert calls[0]["queries"][0]["row_limit"] == 1001
 
@@ -162,11 +172,11 @@ def test_candidate_preview_runs_only_when_granted_and_unchanged(status, stale, a
     def run(payload):
         return "ran"
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(ApprovedMetricContractRequiredError):
         execute_approved_chart_query(contract, dataset, metric, {"dimensions": []}, 1000, run)
     query = {"dimensions": []}
     if allowed:
         assert execute_approved_chart_query(contract, dataset, metric, query, 1000, run, allow_candidate=True) == "ran"
     else:
-        with pytest.raises(PermissionError):
+        with pytest.raises(ApprovedMetricContractRequiredError):
             execute_approved_chart_query(contract, dataset, metric, query, 1000, run, allow_candidate=True)

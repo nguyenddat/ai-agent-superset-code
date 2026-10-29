@@ -1,10 +1,3 @@
-"""The SQL a goal and its join tree make, built as a sqlglot tree rather than written as text.
-
-Every table and column comes from the schema graph and is quoted by the dialect; every filter value is a literal, so
-nothing a user types becomes SQL. A date filter on a timestamp column covers the whole day, as for metric queries.
-The query is read-only by construction: one SELECT with a LIMIT.
-"""
-
 from typing import Any
 
 from sqlglot import exp

@@ -1,5 +1,3 @@
-"""Register saved Superset metrics and calculated columns on the warehouse fact datasets."""
-
 from __future__ import annotations
 
 import json

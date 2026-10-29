@@ -59,9 +59,24 @@ semantic-layer/
 │   ├── pyproject.toml
 │   └── src/text_to_bi/superset_semantic_layer/
 │       ├── entrypoint.py
-│       ├── modules/catalog/route.py
-│       ├── modules/catalog/view.py
-│       └── services/
+│       ├── api_support.py              # review helpers: second reviewer rule, user display names
+│       ├── core/config.py              # environment settings: OpenRouter key, base URL and model
+│       ├── core/security.py            # admin role, Superset dataset permission, CSRF, access errors
+│       ├── core/database.py            # create/upgrade tables, seed the dictionary, dataset lookups, rollback
+│       ├── agent_package/              # AutoFill agent and its chat model (chat_models.py)
+│       ├── common/base_model.py        # BaseModel / AuditedModel: Superset's declarative base, table names from class
+│       ├── common/base_repo.py         # BaseRepository: get, list, add, update, delete
+│       ├── common/exceptions/          # abstract ValidationError, ConflictError, SelfApprovalError
+│       ├── common/utils/type_formatter.py  # ISO dates and moments, JSON texts, SSE events
+│       ├── modules/<module>/           # data_dictionary, business_model, glossary, expert_rules,
+│       │   │                           # semantic_query, agent_ladder; each one holds:
+│       │   ├── models/                 # its tables in Superset's metadata database
+│       │   ├── repositories/           # one repository per model: every query on those tables
+│       │   ├── dependencies.py         # repository factories bound to the request's session
+│       │   ├── services/               # business rules, no request handling
+│       │   └── routes/                 # route mixins (ExpertRuleAPI for expert_rules), one per business area
+│       └── modules/catalog/routes/     # semantic_layer.py: SemanticLayerAPI assembled from the module
+│                                       # mixins; view.py: the Semantic Layer page
 └── frontend/
     ├── src/integration/installSemanticLayer.tsx
     ├── src/features/semantic-layer/

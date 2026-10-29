@@ -1,11 +1,3 @@
-"""Turns a user's own definition of a qualitative concept into conditions on a dataset, once, when they confirm it.
-
-A definition is the user's words ("tốc độ gió tối đa trong ngày từ 45 km/h"). Read again by the model at every
-question, the same words could become a different threshold; stored as checked conditions, they are added to every
-later query as they are, like an approved expert rule's. A definition no filter can express keeps no conditions, and
-the agent goes on reading its words.
-"""
-
 import json
 import logging
 from collections.abc import Callable, Sequence

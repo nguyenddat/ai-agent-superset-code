@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.relationships import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationships import (
     RelationshipEnd,
     relationship_cardinality,
     relationship_contract_hash,
@@ -32,8 +32,14 @@ def _ends():
         columns=[SimpleNamespace(column_name="id", is_active=True, expression=None, type="INTEGER")],
     )
     return (
-        RelationshipEnd(source, SimpleNamespace(column_name="city_id", data_type="INTEGER", is_fk=True, is_pk=False, is_unique=False), 0),
-        RelationshipEnd(target, SimpleNamespace(column_name="id", data_type="INTEGER", is_fk=False, is_pk=True, is_unique=False), 1),
+        RelationshipEnd(
+            source,
+            SimpleNamespace(column_name="city_id", data_type="INTEGER", is_fk=True, is_pk=False, is_unique=False),
+            0,
+        ),
+        RelationshipEnd(
+            target, SimpleNamespace(column_name="id", data_type="INTEGER", is_fk=False, is_pk=True, is_unique=False), 1
+        ),
     )
 
 

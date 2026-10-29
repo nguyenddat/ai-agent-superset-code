@@ -7,7 +7,7 @@ from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from ..core.chat_models import get_chat_model
+from .chat_models import get_chat_model
 from .prompts.prompt_column_dictionary import system_prompt
 from .prompts.prompt_dataset_dictionary import dataset_system_prompt
 
@@ -71,7 +71,9 @@ def suggest_dataset_dictionary(dataset: dict[str, Any]) -> dict[str, Any]:
     raw = result.get("structured_response") if isinstance(result, dict) else None
     if raw is None:
         raise RuntimeError("Agent không trả về structured response cho dataset.")
-    suggestion = raw if isinstance(raw, DatasetDictionarySuggestion) else DatasetDictionarySuggestion.model_validate(raw)
+    suggestion = (
+        raw if isinstance(raw, DatasetDictionarySuggestion) else DatasetDictionarySuggestion.model_validate(raw)
+    )
     suggestion.display_name = suggestion.display_name.strip()
     if not suggestion.display_name or len(suggestion.display_name) > 255:
         raise ValueError("Agent trả display_name dataset không hợp lệ.")
@@ -90,9 +92,7 @@ def suggest_dataset_dictionary(dataset: dict[str, Any]) -> dict[str, Any]:
 def _suggest_column_batch(dataset: dict[str, Any]) -> list[dict[str, Any]]:
     """Generate only display name, unit, and business term suggestions for one batch."""
     agent = _get_agent()
-    result = agent.invoke({
-        "messages": [HumanMessage(content=json.dumps(dataset, ensure_ascii=False, indent=2))]
-    })
+    result = agent.invoke({"messages": [HumanMessage(content=json.dumps(dataset, ensure_ascii=False, indent=2))]})
     raw = result.get("structured_response") if isinstance(result, dict) else None
     if raw is None:
         raise RuntimeError("Agent không trả về structured response.")
@@ -114,9 +114,7 @@ def _suggest_column_batch(dataset: dict[str, Any]) -> list[dict[str, Any]]:
     return [suggestion.model_dump(mode="json") for suggestion in suggestions]
 
 
-def suggest_column_dictionary_batches(
-    dataset: dict[str, Any], batch_size: int = 4
-) -> Iterator[list[dict[str, Any]]]:
+def suggest_column_dictionary_batches(dataset: dict[str, Any], batch_size: int = 4) -> Iterator[list[dict[str, Any]]]:
     """Generate suggestions in small independent batches for incremental streaming."""
     columns = dataset.get("columns")
     if not isinstance(columns, list):

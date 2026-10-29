@@ -1,7 +1,7 @@
 from datetime import date
 from types import SimpleNamespace
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.members import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.members import (
     MAX_MEMBERS,
     build_members_payload,
     build_time_range_payload,

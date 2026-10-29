@@ -1,12 +1,14 @@
+import inspect
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from text_to_bi.superset_semantic_layer.modules.expert_rules import service
+from text_to_bi.superset_semantic_layer.modules.expert_rules.services import expert_rule as service
 
 
 def _payload(**overrides):
@@ -14,7 +16,9 @@ def _payload(**overrides):
         "name": "Exclude provisional observations",
         "dataset_id": 7,
         "schema_version": 2,
-        "conditions": [{"field_ref": {"column_dictionary_id": 70}, "operator": "equals", "value_type": "string", "value": "final"}],
+        "conditions": [
+            {"field_ref": {"column_dictionary_id": 70}, "operator": "equals", "value_type": "string", "value": "final"}
+        ],
         "exceptions": [{"when": "station is under maintenance", "outcome": "review manually"}],
         "examples": [{"question": "What is the final average temperature?", "intent": "aggregate"}],
         "glossary_term_ids": [3],
@@ -31,31 +35,59 @@ def test_normalize_payload_accepts_declarative_rule_only():
 
 
 def test_v2_conditions_are_typed_and_v1_adapter_requires_exact_same_dataset_column():
-    column = lambda reference: ([SimpleNamespace(id=70, dataset_id=7, column_name="observation_status")] if reference == "observation_status" else SimpleNamespace(id=70, dataset_id=7, column_name="observation_status") if reference == 70 else None)
+    column = lambda reference: (
+        [SimpleNamespace(id=70, dataset_id=7, column_name="observation_status")]
+        if reference == "observation_status"
+        else SimpleNamespace(id=70, dataset_id=7, column_name="observation_status")
+        if reference == 70
+        else None
+    )
     normalized = service.normalize_rule_payload(_payload(), column)
     assert normalized["schema_version"] == 2
     assert normalized["conditions"][0]["field_ref"]["column_dictionary_id"] == 70
-    legacy = _payload(schema_version=1, conditions=[{"field": "observation_status", "operator": "equals", "value": "final"}])
+    legacy = _payload(
+        schema_version=1, conditions=[{"field": "observation_status", "operator": "equals", "value": "final"}]
+    )
     assert service.normalize_rule_payload(legacy, column)["conditions"] == normalized["conditions"]
     with pytest.raises(service.ExpertRuleValidationError):
-        service.normalize_rule_payload(_payload(conditions=[{"field_ref": {"column_dictionary_id": 8}, "operator": "equals", "value_type": "string", "value": "x", "sql": "SELECT 1"}]), column)
+        service.normalize_rule_payload(
+            _payload(
+                conditions=[
+                    {
+                        "field_ref": {"column_dictionary_id": 8},
+                        "operator": "equals",
+                        "value_type": "string",
+                        "value": "x",
+                        "sql": "SELECT 1",
+                    }
+                ]
+            ),
+            column,
+        )
     with pytest.raises(service.ExpertRuleValidationError):
-        service.normalize_rule_payload(_payload(), lambda _: SimpleNamespace(id=70, dataset_id=8, column_name="observation_status"))
+        service.normalize_rule_payload(
+            _payload(), lambda _: SimpleNamespace(id=70, dataset_id=8, column_name="observation_status")
+        )
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        "lọc các giao dịch cuối cùng", "tổng doanh thu theo tháng", "beginning balance",
-        "Update the monthly report", "with seasonal adjustments", "set priorities for the team",
-        "please set priorities for the team", "review with context", "do not include provisional records",
-        "show monthly revenue", "set expectations",
+        "lọc các giao dịch cuối cùng",
+        "tổng doanh thu theo tháng",
+        "beginning balance",
+        "Update the monthly report",
+        "with seasonal adjustments",
+        "set priorities for the team",
+        "please set priorities for the team",
+        "review with context",
+        "do not include provisional records",
+        "show monthly revenue",
+        "set expectations",
     ],
 )
 def test_normalize_payload_accepts_natural_language(text):
-    normalized = service.normalize_rule_payload(
-        _payload(exceptions=[{"when": text, "outcome": "review manually"}])
-    )
+    normalized = service.normalize_rule_payload(_payload(exceptions=[{"when": text, "outcome": "review manually"}]))
     assert normalized["exceptions"][0]["when"] == text
 
 
@@ -123,11 +155,31 @@ def test_normalize_payload_rejects_embedded_sql_grammar(text):
 @pytest.mark.parametrize(
     "command",
     [
-        "BEGIN", "BEGIN\nTRANSACTION", "START\tTRANSACTION", "COMMIT", "ROLLBACK", "SAVEPOINT point",
-        "SET TRANSACTION READ ONLY", "LOCK TABLE records", "DECLARE cursor", "DO $$", "EXEC task",
-        "EXECUTE task", "CALL task()", "COPY records", "LOAD DATA", "CREATE TABLE x (id int)",
-        "INSERT INTO records VALUES (1)", "UPDATE records SET x = 1", "DELETE FROM records", "SELECT * FROM records",
-        "WITH items AS (SELECT 1) SELECT * FROM items", "-- comment", "# comment", "/* comment */", "statement; next",
+        "BEGIN",
+        "BEGIN\nTRANSACTION",
+        "START\tTRANSACTION",
+        "COMMIT",
+        "ROLLBACK",
+        "SAVEPOINT point",
+        "SET TRANSACTION READ ONLY",
+        "LOCK TABLE records",
+        "DECLARE cursor",
+        "DO $$",
+        "EXEC task",
+        "EXECUTE task",
+        "CALL task()",
+        "COPY records",
+        "LOAD DATA",
+        "CREATE TABLE x (id int)",
+        "INSERT INTO records VALUES (1)",
+        "UPDATE records SET x = 1",
+        "DELETE FROM records",
+        "SELECT * FROM records",
+        "WITH items AS (SELECT 1) SELECT * FROM items",
+        "-- comment",
+        "# comment",
+        "/* comment */",
+        "statement; next",
     ],
 )
 def test_normalize_payload_rejects_sql_control_syntax(command):
@@ -138,11 +190,26 @@ def test_normalize_payload_rejects_sql_control_syntax(command):
 @pytest.mark.parametrize(
     "command",
     [
-        "BEGIN TRANSACTION", "START TRANSACTION", "COMMIT now", "ROLLBACK WORK", "SAVEPOINT retry_point",
-        "SET TRANSACTION READ ONLY", "SET ROLE administrator", "SET search_path TO private", "LOCK TABLE records",
-        "DECLARE result_cursor", "DO LANGUAGE plpgsql", "EXECUTE scheduled_task", "CALL refresh_weather()",
-        "PRAGMA database_list", "VACUUM", "COPY records", "LOAD DATA", "ALTER SYSTEM SET work_mem = '1MB'",
-        "REINDEX DATABASE analytics", "DEALLOCATE PREPARE prepared_rule",
+        "BEGIN TRANSACTION",
+        "START TRANSACTION",
+        "COMMIT now",
+        "ROLLBACK WORK",
+        "SAVEPOINT retry_point",
+        "SET TRANSACTION READ ONLY",
+        "SET ROLE administrator",
+        "SET search_path TO private",
+        "LOCK TABLE records",
+        "DECLARE result_cursor",
+        "DO LANGUAGE plpgsql",
+        "EXECUTE scheduled_task",
+        "CALL refresh_weather()",
+        "PRAGMA database_list",
+        "VACUUM",
+        "COPY records",
+        "LOAD DATA",
+        "ALTER SYSTEM SET work_mem = '1MB'",
+        "REINDEX DATABASE analytics",
+        "DEALLOCATE PREPARE prepared_rule",
     ],
 )
 def test_normalize_payload_rejects_prose_prefixed_control_commands(command):
@@ -154,13 +221,31 @@ def test_normalize_payload_rejects_prose_prefixed_control_commands(command):
 @pytest.mark.parametrize(
     "command",
     [
-        "BEGIN", "SELECT 1", "SELECT a + b FROM records", "CREATE TEMPORARY TABLE scratch (id int)",
-        "DROP MATERIALIZED VIEW monthly_rollup", "TRUNCATE records", "COPY (SELECT 1)", "SHOW DATABASES",
-        "DESCRIBE records", "EXPLAIN SELECT 1", "ANALYZE records",
-        "SELECT count(*) FROM records", "SELECT COALESCE(a, b) FROM records", "SELECT a::text FROM records",
-        "SELECT now()", "SELECT current_user", "SELECT count(*)", "SELECT CAST(1 AS text)", "SELECT pg_sleep(1)",
-        "CREATE UNIQUE INDEX x ON y(z)", "DROP IF EXISTS TABLE foo", "SHOW ALL", "SHOW search_path",
-        "VALUES (1)", "LOAD file",
+        "BEGIN",
+        "SELECT 1",
+        "SELECT a + b FROM records",
+        "CREATE TEMPORARY TABLE scratch (id int)",
+        "DROP MATERIALIZED VIEW monthly_rollup",
+        "TRUNCATE records",
+        "COPY (SELECT 1)",
+        "SHOW DATABASES",
+        "DESCRIBE records",
+        "EXPLAIN SELECT 1",
+        "ANALYZE records",
+        "SELECT count(*) FROM records",
+        "SELECT COALESCE(a, b) FROM records",
+        "SELECT a::text FROM records",
+        "SELECT now()",
+        "SELECT current_user",
+        "SELECT count(*)",
+        "SELECT CAST(1 AS text)",
+        "SELECT pg_sleep(1)",
+        "CREATE UNIQUE INDEX x ON y(z)",
+        "DROP IF EXISTS TABLE foo",
+        "SHOW ALL",
+        "SHOW search_path",
+        "VALUES (1)",
+        "LOAD file",
     ],
 )
 def test_normalize_payload_rejects_prose_prefixed_sql_statement_grammar(command):
@@ -178,7 +263,9 @@ def test_normalize_payload_rejects_dialect_commands_without_optional_parser(comm
 
 def test_normalize_payload_constrains_condition_operator_to_enum():
     with pytest.raises(service.ExpertRuleValidationError):
-        service.normalize_rule_payload(_payload(conditions=[{"field": "status", "operator": "arbitrary", "value": "final"}]))
+        service.normalize_rule_payload(
+            _payload(conditions=[{"field": "status", "operator": "arbitrary", "value": "final"}])
+        )
 
 
 @pytest.mark.parametrize("field", ["name", "conditions", "exceptions", "examples"])
@@ -188,7 +275,9 @@ def test_normalize_payload_accepts_sql_words_when_they_are_ordinary_prose(field)
     if field == "name":
         payload["name"] = text
     elif field == "conditions":
-        payload["conditions"] = [{"field_ref": {"column_dictionary_id": 70}, "operator": "equals", "value_type": "string", "value": text}]
+        payload["conditions"] = [
+            {"field_ref": {"column_dictionary_id": 70}, "operator": "equals", "value_type": "string", "value": text}
+        ]
     elif field == "exceptions":
         payload["exceptions"] = [{"when": text, "outcome": "set expectations"}]
     else:
@@ -199,14 +288,20 @@ def test_normalize_payload_accepts_sql_words_when_they_are_ordinary_prose(field)
 def test_validate_links_requires_approved_same_dataset_objects():
     payload = service.normalize_rule_payload(_payload())
     resolver = lambda dataset_id: SimpleNamespace(id=dataset_id) if dataset_id == 7 else None
-    glossary = lambda term_id: SimpleNamespace(status="approved", is_current=True, dataset_id=7) if term_id == 3 else None
-    metric = lambda metric_id: SimpleNamespace(id=metric_id, dataset_id=7, status="approved", is_current=True) if metric_id == 9 else None
+    glossary = lambda term_id: (
+        SimpleNamespace(status="approved", is_current=True, dataset_id=7) if term_id == 3 else None
+    )
+    metric = lambda metric_id: (
+        SimpleNamespace(id=metric_id, dataset_id=7, status="approved", is_current=True) if metric_id == 9 else None
+    )
     service.validate_semantic_links(payload, resolver, glossary, metric)
 
     with pytest.raises(service.ExpertRuleValidationError):
         service.validate_semantic_links(payload, resolver, lambda _: None, metric)
     with pytest.raises(service.ExpertRuleValidationError):
-        service.validate_semantic_links(payload, resolver, glossary, lambda _: SimpleNamespace(dataset_id=8, status="approved", is_current=True))
+        service.validate_semantic_links(
+            payload, resolver, glossary, lambda _: SimpleNamespace(dataset_id=8, status="approved", is_current=True)
+        )
 
 
 def test_validate_links_selects_a_matching_current_glossary_link_from_multiple_links():
@@ -234,10 +329,12 @@ def test_discoverability_needs_approved_current_and_live_links():
 
 
 def test_mutations_use_row_lock_and_expected_revision():
-    source = __import__("inspect").getsource(service)
-    assert "with_for_update()" in source
+    repositories = Path(service.__file__).parents[1] / "repositories"
+    for repository in ("expert_rule.py", "expert_rule_revision.py"):
+        assert "with_for_update()" in (repositories / repository).read_text(encoding="utf-8")
+    assert ".lock(" in inspect.getsource(service._lock) and "lock_current(" in inspect.getsource(service._lock)
     for name in ("update_draft", "approve_rule", "revoke_rule"):
-        assert "expected_revision" in __import__("inspect").getsource(getattr(service, name))
+        assert "expected_revision" in inspect.getsource(getattr(service, name))
 
 
 def _lifecycle_session(monkeypatch):
@@ -291,10 +388,13 @@ def _lifecycle_session(monkeypatch):
 
     engine = create_engine("sqlite:///:memory:")
     base.metadata.create_all(engine)
-    module = types.ModuleType("text_to_bi.superset_semantic_layer.models.expert_rule")
+    module = types.ModuleType("text_to_bi.superset_semantic_layer.modules.expert_rules.models")
     module.ExpertRule, module.ExpertRuleRevision = Rule, Revision
     module.ExpertRuleLink, module.ExpertRuleAuditEvent = Link, Audit
     monkeypatch.setitem(sys.modules, module.__name__, module)
+    # A repository binds its model when imported, so import the repositories again with these tables.
+    for name in [name for name in sys.modules if name.startswith(f"{service.__package__[:-9]}.repositories.")]:
+        monkeypatch.delitem(sys.modules, name)
     return sessionmaker(bind=engine)(), Rule, Revision, Audit
 
 
@@ -313,7 +413,9 @@ def test_sqlite_lifecycle_create_update_approve_revoke_audit_conflict_and_rollba
     session.rollback()
     assert session.query(rule_model).count() == 1
 
-    updated = service.update_draft(session, created, _payload(name="Exclude provisional records"), 1, 12, dataset, glossary, metric, fingerprint)
+    updated = service.update_draft(
+        session, created, _payload(name="Exclude provisional records"), 1, 12, dataset, glossary, metric, fingerprint
+    )
     session.commit()
     assert updated.revision_number == updated.lifecycle_version == 2
     assert session.query(revision_model).filter_by(revision_number=1).one().is_current is False
@@ -336,7 +438,10 @@ def test_sqlite_lifecycle_create_update_approve_revoke_audit_conflict_and_rollba
     # A revoked rule stays current so it can be corrected and reviewed again; discovery skips it by status.
     assert updated.status == "revoked" and updated.is_current is True and updated.lifecycle_version == 4
     assert [event.event_type for event in session.query(audit_model).order_by(audit_model.id)] == [
-        "created", "updated", "approved", "revoked"
+        "created",
+        "updated",
+        "approved",
+        "revoked",
     ]
     assert [event.lifecycle_version for event in session.query(audit_model).order_by(audit_model.id)] == [1, 2, 3, 4]
 
@@ -396,8 +501,13 @@ def test_a_revoked_rule_can_be_corrected_into_a_new_draft(monkeypatch):
 @pytest.mark.parametrize(
     "reason",
     [
-        "https://user:secret@example.test", "Bearer private-token", "BEGIN TRANSACTION", "Please SET ROLE administrator",
-        "Please ALTER SYSTEM SET work_mem = '1MB'", "Please DEALLOCATE PREPARE prepared_rule", "x" * 513,
+        "https://user:secret@example.test",
+        "Bearer private-token",
+        "BEGIN TRANSACTION",
+        "Please SET ROLE administrator",
+        "Please ALTER SYSTEM SET work_mem = '1MB'",
+        "Please DEALLOCATE PREPARE prepared_rule",
+        "x" * 513,
     ],
 )
 def test_transition_rejects_unsafe_reason_before_audit_or_status_mutation(monkeypatch, reason):
@@ -418,15 +528,30 @@ def test_transition_rejects_unsafe_reason_before_audit_or_status_mutation(monkey
 @pytest.mark.parametrize(
     "reason",
     [
-        "Please BEGIN", "Please SELECT 1", "Please SELECT a + b FROM records",
-        "Please CREATE TEMPORARY TABLE scratch (id int)", "Please DROP MATERIALIZED VIEW monthly_rollup",
-        "Please TRUNCATE records", "Please COPY (SELECT 1)", "Please SHOW DATABASES", "Please DESCRIBE records",
-        "Please EXPLAIN SELECT 1", "Please ANALYZE records",
-        "Please SELECT count(*) FROM records", "Please SELECT COALESCE(a, b) FROM records",
-        "Please SELECT a::text FROM records", "Please CREATE UNIQUE INDEX x ON y(z)",
-        "Please SELECT now()", "Please SELECT current_user", "Please SELECT count(*)",
-        "Please SELECT CAST(1 AS text)", "Please SELECT pg_sleep(1)",
-        "Please DROP IF EXISTS TABLE foo", "Please SHOW ALL", "Please SHOW search_path", "Please VALUES (1)",
+        "Please BEGIN",
+        "Please SELECT 1",
+        "Please SELECT a + b FROM records",
+        "Please CREATE TEMPORARY TABLE scratch (id int)",
+        "Please DROP MATERIALIZED VIEW monthly_rollup",
+        "Please TRUNCATE records",
+        "Please COPY (SELECT 1)",
+        "Please SHOW DATABASES",
+        "Please DESCRIBE records",
+        "Please EXPLAIN SELECT 1",
+        "Please ANALYZE records",
+        "Please SELECT count(*) FROM records",
+        "Please SELECT COALESCE(a, b) FROM records",
+        "Please SELECT a::text FROM records",
+        "Please CREATE UNIQUE INDEX x ON y(z)",
+        "Please SELECT now()",
+        "Please SELECT current_user",
+        "Please SELECT count(*)",
+        "Please SELECT CAST(1 AS text)",
+        "Please SELECT pg_sleep(1)",
+        "Please DROP IF EXISTS TABLE foo",
+        "Please SHOW ALL",
+        "Please SHOW search_path",
+        "Please VALUES (1)",
         "Please LOAD file",
     ],
 )
@@ -477,5 +602,7 @@ def test_a_rule_must_build_on_at_least_one_glossary_term():
     with pytest.raises(service.ExpertRuleValidationError, match="glossary term"):
         service.validate_semantic_links(
             service.normalize_rule_payload(_payload(glossary_term_ids=[], metric_ids=[])),
-            lambda _: object(), lambda _: None, lambda _: None,
+            lambda _: object(),
+            lambda _: None,
+            lambda _: None,
         )

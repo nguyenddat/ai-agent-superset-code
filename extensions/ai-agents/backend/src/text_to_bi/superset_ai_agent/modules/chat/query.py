@@ -1,15 +1,3 @@
-"""Turns the model's query plan into governed metric queries, and their answers into one result table.
-
-The model proposes the dataset, metrics, dimensions, filters, an order, a row limit and a period to compare with;
-nothing it proposes is trusted as is. Columns and operators are checked against the catalog. A threshold that is
-already structured is never re-typed by the model: an approved expert rule's filters come from the rule's own
-conditions, and a user's own definition from the conditions stored when they confirmed it. Only a definition without
-stored conditions is written as filters by the model, and checked like any other.
-
-The Semantic Layer runs each metric with dimensions and filters only, so ordering, the row limit and the comparison
-with another period are applied here, on the rows it returned.
-"""
-
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal

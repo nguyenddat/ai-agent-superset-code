@@ -1,14 +1,3 @@
-"""The goal of a query over base tables: what to measure, what to group by, what to filter on, which kind of rows.
-
-A goal names tables by dataset ID and columns by name, as the schema graph lists them; nothing else is trusted. An
-indicator measure names an indicator code instead, such as `nhiet_do_c`: it becomes the value column of the table
-keeping one value per indicator, filtered on the catalog's code, aggregated as the catalog says (`TRUNG_BINH` → AVG).
-
-Each part records why it is there (`source`), which the analysis view shows. Until linking from a question exists, an
-administrator writes the goal by hand, so every reference is checked against the graph with a message saying what is
-wrong.
-"""
-
 from dataclasses import dataclass, field
 from typing import Any
 

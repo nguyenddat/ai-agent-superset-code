@@ -1,22 +1,3 @@
-"""The agent flow: understand the question against the governed catalog, query the approved metrics, answer.
-
-One model call (`understand_question`) rewrites a follow-up into a standalone question, names the glossary terms,
-metrics and expert rules it is about, and plans the metric query: its dimensions, and filters for time, place, the
-user's own definitions and thresholds the asker gave. The plan is checked against the catalog and an approved rule's
-filters are taken from the rule itself before the Semantic Layer runs each metric (`query_metrics`).
-
-Expert rules are only required for a qualitative question: one worded by perception with a vague threshold (lớn,
-nhỏ, đông, vắng), which someone has to pin down; a quantitative question needs defined concepts and metrics only.
-What a concept means is often the asker's own sense, so a missing glossary term or expert rule becomes a question to
-the user (`clarifications`) instead of a query; what the user confirms is kept for them on that dashboard and is used
-in their later questions, unless an approved business term or rule covers the concept. A missing metric is proposed
-to an administrator instead (`suggestions`).
-
-`run_agent` is a generator of `(event_name, data)` pairs that the route streams as Server-Sent Events. Each step is
-reported as a tool call (`tool_start`, then `tool_end` with its result), the final answer streams as `token`
-events, and the generator returns an `AgentOutcome` for the question log.
-"""
-
 import json
 import time
 from collections.abc import Callable, Iterator, Sequence

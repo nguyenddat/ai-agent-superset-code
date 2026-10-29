@@ -1,5 +1,3 @@
-"""Checks every AI Agent route shares: whether the signed-in user is an administrator, and the request's CSRF token."""
-
 from flask import request
 from flask_login import current_user
 

@@ -1,4 +1,4 @@
-from text_to_bi.superset_semantic_layer.modules.business_model.metric_columns import metric_columns
+from text_to_bi.superset_semantic_layer.modules.business_model.services.metric_columns import metric_columns
 
 COLUMNS = ["loai_quan_sat", "nhiet_do_c", "tong_luong_mua_mm", "thanh_pho_id", "Nhiet Do"]
 
@@ -37,7 +37,10 @@ def test_a_column_used_both_ways_is_a_measure():
 
 
 def test_unknown_names_are_dropped_and_names_match_ignoring_case():
-    assert roles('SUM(NHIET_DO_C) + SUM(not_a_column) + AVG("Nhiet Do")') == {"nhiet_do_c": "measure", "Nhiet Do": "measure"}
+    assert roles('SUM(NHIET_DO_C) + SUM(not_a_column) + AVG("Nhiet Do")') == {
+        "nhiet_do_c": "measure",
+        "Nhiet Do": "measure",
+    }
 
 
 def test_count_star_uses_no_column_and_templating_cannot_be_parsed():

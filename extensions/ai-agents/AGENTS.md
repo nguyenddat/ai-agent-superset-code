@@ -178,7 +178,8 @@ extensions/ai-agents/
 ├── backend/
 │   ├── src/text_to_bi/superset_ai_agent/
 │   │   ├── entrypoint.py
-│   │   ├── core/chat_models.py           # OpenRouter model, key from the root .env
+│   │   ├── core/config.py                # environment settings: OpenRouter, internal Superset URL
+│   │   ├── core/chat_models.py           # OpenRouter model built from core/config.py
 │   │   ├── models/question_log.py        # question log, handling, chat session and user definition tables
 │   │   └── modules/
 │   │       ├── chat/                     # pipeline, prompts, catalog reader, query planner, /chat/stream

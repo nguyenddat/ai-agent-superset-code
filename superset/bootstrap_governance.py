@@ -1,11 +1,3 @@
-"""Create the AI Agent overview dashboard on read-only reporting views of Superset's metadata database.
-
-The AI Agent logs each question in `text_to_bi_agent_question`, a table in Superset's metadata database. Superset
-charts need a database connection, but a connection to the metadata database as its owner would expose every
-metadata table, `ab_user` included. So this script publishes only views in the `text_to_bi_reporting` schema and
-connects Superset to them as a login role that may read that schema and nothing else.
-"""
-
 from __future__ import annotations
 
 import json

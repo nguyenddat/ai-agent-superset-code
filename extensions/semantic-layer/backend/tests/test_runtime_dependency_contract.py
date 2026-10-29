@@ -1,5 +1,3 @@
-"""Static contract for the Semantic Layer's Superset runtime prerequisite."""
-
 import json
 import shlex
 from pathlib import Path

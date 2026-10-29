@@ -3,12 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.data_dictionary.column_semantics import (
+from text_to_bi.superset_semantic_layer.common.utils.type_formatter import json_list
+from text_to_bi.superset_semantic_layer.modules.data_dictionary.services.column_semantics import (
     checked_column_semantics,
     default_semantic_role,
-    json_list,
 )
-from text_to_bi.superset_semantic_layer.modules.data_dictionary.indicators import (
+from text_to_bi.superset_semantic_layer.modules.data_dictionary.services.indicators import (
     MAX_INDICATORS,
     build_indicators_payload,
     checked_indicator_model,
@@ -49,7 +49,10 @@ def test_semantic_fields_are_stored_as_json_and_blank_text_as_null():
     assert values == {"semantic_role": "measure", "aggregations": '["AVG", "MAX"]', "synonyms": '["nhiệt độ"]',
                       "description": None}
     assert json_list(values["aggregations"]) == ["AVG", "MAX"] and json_list("oops") == []
-    assert checked_column_semantics({"aggregations": [], "synonyms": []}, 0, None) == {"aggregations": None, "synonyms": None}
+    assert checked_column_semantics({"aggregations": [], "synonyms": []}, 0, None) == {
+        "aggregations": None,
+        "synonyms": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -74,12 +77,19 @@ def test_aggregations_are_kept_when_the_stored_role_is_checked_by_the_caller():
 
 def test_a_values_table_and_a_catalog_are_declared_against_their_columns():
     values = checked_indicator_model(
-        {"kind": "values", "indicator_column": "chi_so_id", "value_columns": {"SO": "gia_tri_so", "CHU": "gia_tri_chu"}},
+        {
+            "kind": "values",
+            "indicator_column": "chi_so_id",
+            "value_columns": {"SO": "gia_tri_so", "CHU": "gia_tri_chu"},
+        },
         VALUE_COLUMNS,
     )
 
-    assert values == {"kind": "values", "indicator_column": "chi_so_id",
-                      "value_columns": {"SO": "gia_tri_so", "CHU": "gia_tri_chu"}}
+    assert values == {
+        "kind": "values",
+        "indicator_column": "chi_so_id",
+        "value_columns": {"SO": "gia_tri_so", "CHU": "gia_tri_chu"},
+    }
     assert checked_indicator_model(CATALOG, CATALOG_COLUMNS) == CATALOG
     assert checked_indicator_model(None, VALUE_COLUMNS) is None
     assert stored_indicator_model(json.dumps(CATALOG)) == CATALOG and stored_indicator_model("{}") is None
@@ -107,19 +117,39 @@ def test_indicator_declarations_that_do_not_fit_are_refused(model):
 
 def test_the_indicator_list_maps_aggregations_and_lists_the_codes_found():
     rows = [
-        {"chi_so_id": 2, "ma_chi_so": "luong_mua_mm", "ten_chi_so": "Luong mua", "ten_don_vi": "Milimet",
-         "kieu_du_lieu": "SO", "cach_tong_hop": "TONG"},
-        {"chi_so_id": 1, "ma_chi_so": "nhiet_do_c", "ten_chi_so": "Nhiet do", "ten_don_vi": "Do C",
-         "kieu_du_lieu": "SO", "cach_tong_hop": "TRUNG_BINH"},
-        {"chi_so_id": 3, "ma_chi_so": "la_ban_ngay", "ten_chi_so": "Ban ngay", "ten_don_vi": "Dung/Sai",
-         "kieu_du_lieu": "DUNG_SAI", "cach_tong_hop": "BAT_KY"},
+        {
+            "chi_so_id": 2,
+            "ma_chi_so": "luong_mua_mm",
+            "ten_chi_so": "Luong mua",
+            "ten_don_vi": "Milimet",
+            "kieu_du_lieu": "SO",
+            "cach_tong_hop": "TONG",
+        },
+        {
+            "chi_so_id": 1,
+            "ma_chi_so": "nhiet_do_c",
+            "ten_chi_so": "Nhiet do",
+            "ten_don_vi": "Do C",
+            "kieu_du_lieu": "SO",
+            "cach_tong_hop": "TRUNG_BINH",
+        },
+        {
+            "chi_so_id": 3,
+            "ma_chi_so": "la_ban_ngay",
+            "ten_chi_so": "Ban ngay",
+            "ten_don_vi": "Dung/Sai",
+            "kieu_du_lieu": "DUNG_SAI",
+            "cach_tong_hop": "BAT_KY",
+        },
         {"chi_so_id": None, "ma_chi_so": "bo_qua"},
     ]
 
     result = indicators_from_rows(rows, CATALOG)
 
     assert [(item["code"], item["aggregation"]) for item in result["indicators"]] == [
-        ("la_ban_ngay", None), ("luong_mua_mm", "SUM"), ("nhiet_do_c", "AVG"),
+        ("la_ban_ngay", None),
+        ("luong_mua_mm", "SUM"),
+        ("nhiet_do_c", "AVG"),
     ]
     assert result["aggregation_codes"] == ["BAT_KY", "TONG", "TRUNG_BINH"]
     assert result["too_many"] is False

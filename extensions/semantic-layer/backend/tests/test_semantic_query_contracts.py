@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import build_preview_contract
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import build_preview_contract
 
 
 def _dataset(*, expression: str = 'AVG("temperature_c")'):

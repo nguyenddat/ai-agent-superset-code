@@ -1,5 +1,3 @@
-"""Superset extension backend entrypoint."""
-
 from .modules.chat.route import TextToBIAgentAPI  # noqa: F401
 from .modules.definitions.route import AgentUserDefinitionAPI  # noqa: F401
 from .modules.questions.route import AgentQuestionReviewAPI  # noqa: F401

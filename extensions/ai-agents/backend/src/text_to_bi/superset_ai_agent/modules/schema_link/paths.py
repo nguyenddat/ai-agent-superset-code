@@ -1,15 +1,3 @@
-"""Join paths: the smallest tree of approved relationships that reaches every table a query needs from its root.
-
-The root is the table holding the measured rows. First, Dijkstra from the root walks only steps that repeat no row
-(many to one, and one to one either way); in a snowflake of catalogs and business tables the union of the shortest
-paths to every needed table is then already a tree, and most questions end there. When some table cannot be reached
-that way, the search falls back to a directed Steiner tree over every step, fan-out steps costing `FANOUT_COST`:
-Dreyfus–Wagner, exact, up to `EXACT_TERMINALS` tables to reach, and the Takahashi–Matsuyama heuristic beyond.
-
-Paths are directed because direction decides whether a join repeats rows, so the undirected Kou–Markowsky–Berman
-approximation would not tell a safe join from a fanning-out one.
-"""
-
 import heapq
 from dataclasses import dataclass, field
 from itertools import count

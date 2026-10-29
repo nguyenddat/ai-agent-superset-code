@@ -1,5 +1,3 @@
-"""Shared paths and helpers for the Semantic Layer development scripts."""
-
 import hashlib
 import json
 import os

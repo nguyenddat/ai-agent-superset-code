@@ -1,7 +1,7 @@
-"""Route policy tests that avoid importing Superset's runtime dependencies."""
-
 import ast
+import functools
 import importlib.util
+import logging
 import sys
 import types
 from datetime import datetime, timezone
@@ -10,7 +10,27 @@ from types import SimpleNamespace
 
 from flask import Flask
 
-ROUTE_PATH = Path(__file__).parents[1] / "src" / "text_to_bi" / "superset_semantic_layer" / "modules" / "expert_rules" / "route.py"
+# The repositories import flask_appbuilder's Model; import it before the route loader stubs flask_appbuilder.api.
+import text_to_bi.superset_semantic_layer.common.base_repo  # noqa: F401
+from text_to_bi.superset_semantic_layer.common import exceptions as common_exceptions
+from text_to_bi.superset_semantic_layer.core import exceptions as core_exceptions
+from text_to_bi.superset_semantic_layer.modules.expert_rules.exceptions import (
+    ExpertRuleConflictError,
+    ExpertRuleSelfApprovalError,
+)
+
+ROUTE_PATH = (
+    Path(__file__).parents[1]
+    / "src"
+    / "text_to_bi"
+    / "superset_semantic_layer"
+    / "modules"
+    / "expert_rules"
+    / "routes"
+    / "expert_rules.py"
+)
+DATABASE_PATH = Path(__file__).parents[1] / "src" / "text_to_bi" / "superset_semantic_layer" / "core" / "database.py"
+DATABASE_FUNCTIONS = {"get_dataset", "require_dataset", "rollback_on_error", "handle_errors"}
 ENDPOINTS = {
     "create_rule": ("/expert-rules", "POST"),
     "update_rule": ("/expert-rules/<int:rule_id>/draft", "PUT"),
@@ -41,16 +61,19 @@ def test_routes_are_registered_and_mutations_are_admin_csrf_protected():
         assert next(k.value.elts[0].value for k in expose.keywords if k.arg == "methods") == verb
         assert "protect" in decorators and "safe" in decorators
         text = ast.unparse(method)
+        assert decorators[-1] == "handle_errors"
         if verb != "GET":
-            assert "_csrf_protected" in decorators and "self._is_admin()" in text
+            assert "csrf_protected" in decorators and "require_admin()" in text
         if name == "discover":
-            assert "can_access_datasource" in text and "redact" in text
+            assert "can_access_dataset" in text and "redact" in text
 
 
 def test_route_has_rollback_and_conflict_handling_without_raw_sql_execution():
     source = ROUTE_PATH.read_text(encoding="utf-8")
-    assert "db.session.rollback()" in source
-    assert "response(409" in source
+    database_tree = ast.parse(DATABASE_PATH.read_text(encoding="utf-8"))
+    handle_errors = next(node for node in database_tree.body if getattr(node, "name", None) == "handle_errors")
+    assert "db.session.rollback()" in ast.unparse(handle_errors)
+    assert "@handle_errors" in source and ExpertRuleConflictError.status == 409
     assert "execute(" not in source
     assert "text(" not in source
     assert "__table__.create" not in source
@@ -71,7 +94,11 @@ class _Query:
         return self
 
     def all(self):
-        return [value for value in self.values if all(getattr(value, key, None) == item for key, item in self.filters.items())]
+        return [
+            value
+            for value in self.values
+            if all(getattr(value, key, None) == item for key, item in self.filters.items())
+        ]
 
     def one_or_none(self):
         values = self.all()
@@ -80,7 +107,7 @@ class _Query:
 
 def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     """Load route.py with local stubs; no Superset package or metadata DB is used."""
-    package = "text_to_bi.superset_semantic_layer.modules.expert_rules"
+    package = "text_to_bi.superset_semantic_layer.modules.expert_rules.routes"
     route_name = f"{package}.route_isolated"
     current_user = SimpleNamespace(id=42, is_authenticated=True, roles=[SimpleNamespace(name="Admin")])
     session = SimpleNamespace(commit_calls=0, rollback_calls=0)
@@ -108,7 +135,9 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     superset_module.db = db
     reviewer = SimpleNamespace(username="reviewer", get_full_name=lambda: "Bao Reviewer")
     superset_module.security_manager = SimpleNamespace(
-        raise_for_access=lambda datasource: None if datasource.id in allowed_datasets else (_ for _ in ()).throw(Exception()),
+        raise_for_access=lambda datasource: (
+            None if datasource.id in allowed_datasets else (_ for _ in ()).throw(Exception())
+        ),
         get_user_by_id=lambda user_id: reviewer if user_id == 42 else None,
     )
     sqla_module = types.ModuleType("superset.connectors.sqla.models")
@@ -118,39 +147,75 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     rest_api_module = types.ModuleType("superset_core.rest_api.api")
 
     class RestApi:
-        def response(self, status, **payload): return status, payload
-        def response_400(self, **payload): return 400, payload
-        def response_500(self, **payload): return 500, payload
+        def response(self, status, **payload):
+            return status, payload
+
+        def response_400(self, **payload):
+            return 400, payload
+
+        def response_500(self, **payload):
+            return 500, payload
 
     rest_api_module.RestApi = RestApi
     rest_decorators = types.ModuleType("superset_core.rest_api.decorators")
     rest_decorators.api = identity_decorator
-    models = types.ModuleType("text_to_bi.superset_semantic_layer.models.expert_rule")
+    models = types.ModuleType("text_to_bi.superset_semantic_layer.modules.expert_rules.models")
     models.ExpertRule = type("ExpertRule", (), {})
     models.ExpertRuleRevision = type("ExpertRuleRevision", (), {})
     models.ExpertRuleLink = type("ExpertRuleLink", (), {})
     models.ExpertRuleAuditEvent = type("ExpertRuleAuditEvent", (), {"id": object()})
-    column_dictionary = types.ModuleType("text_to_bi.superset_semantic_layer.models.column_dictionary")
-    column_dictionary.ColumnDictionary = type("ColumnDictionary", (), {})
-    dataset_dictionary = types.ModuleType("text_to_bi.superset_semantic_layer.models.dataset_dictionary")
-    dataset_dictionary.DatasetDictionary = type("DatasetDictionary", (), {})
-    glossary = types.ModuleType("text_to_bi.superset_semantic_layer.models.glossary_term")
+    dictionary = types.ModuleType("text_to_bi.superset_semantic_layer.modules.data_dictionary.models")
+    dictionary.ColumnDictionary = type("ColumnDictionary", (), {})
+    dictionary.DatasetDictionary = type("DatasetDictionary", (), {})
+    dictionary.DatasetGrain = type("DatasetGrain", (), {})
+    glossary = types.ModuleType("text_to_bi.superset_semantic_layer.modules.glossary.models")
     glossary.GlossaryTermLink = type("GlossaryTermLink", (), {})
     glossary.GlossaryTerm = type("GlossaryTerm", (), {})
     glossary.GlossaryTermRevision = type("GlossaryTermRevision", (), {})
-    metric = types.ModuleType("text_to_bi.superset_semantic_layer.models.metric_contract")
-    metric.MetricContract = type("MetricContract", (), {})
-    contracts = types.ModuleType("text_to_bi.superset_semantic_layer.modules.semantic_query.contracts")
+    glossary.GlossaryTermAuditEvent = type("GlossaryTermAuditEvent", (), {})
+    metric = types.ModuleType("text_to_bi.superset_semantic_layer.modules.semantic_query.models")
+    for name in ("MetricContract", "MetricContractEvent", "MetricDefinition", "RelationshipContract"):
+        setattr(metric, name, type(name, (), {}))
+    contracts = types.ModuleType("text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts")
     contracts.contract_is_approved_current = lambda *_: True
     contracts.metric_contract_hash = lambda *_: "live"
+    # core.database imports every model; take only the dataset lookups and the error wrappers, bound to the fake db.
+    database = types.ModuleType("text_to_bi.superset_semantic_layer.core.database")
+    database.__dict__.update(db=db, SqlaTable=sqla_module.SqlaTable, wraps=functools.wraps, logger=logging.getLogger())
+    for exceptions in (common_exceptions, core_exceptions):
+        database.__dict__.update({name: value for name, value in vars(exceptions).items() if name.endswith("Error")})
+    database_tree = ast.parse(DATABASE_PATH.read_text(encoding="utf-8"))
+    database_functions = [
+        node
+        for node in database_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in DATABASE_FUNCTIONS
+    ]
+    exec(compile(ast.Module(body=database_functions, type_ignores=[]), str(DATABASE_PATH), "exec"), database.__dict__)  # noqa: S102
     for name, module in {
-        "flask_appbuilder.api": api_module, "flask_login": login_module, "flask_wtf.csrf": csrf_module, "wtforms": wtforms_module,
-        "superset": superset_module, "superset.connectors.sqla.models": sqla_module, "superset.exceptions": exception_module,
-        "superset_core.rest_api.api": rest_api_module, "superset_core.rest_api.decorators": rest_decorators,
-        models.__name__: models, column_dictionary.__name__: column_dictionary, dataset_dictionary.__name__: dataset_dictionary,
-        glossary.__name__: glossary, metric.__name__: metric, contracts.__name__: contracts,
+        database.__name__: database,
+        "flask_appbuilder.api": api_module,
+        "flask_login": login_module,
+        "flask_wtf.csrf": csrf_module,
+        "wtforms": wtforms_module,
+        "superset": superset_module,
+        "superset.connectors.sqla.models": sqla_module,
+        "superset.exceptions": exception_module,
+        "superset_core.rest_api.api": rest_api_module,
+        "superset_core.rest_api.decorators": rest_decorators,
+        models.__name__: models,
+        dictionary.__name__: dictionary,
+        glossary.__name__: glossary,
+        metric.__name__: metric,
+        contracts.__name__: contracts,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
+    # The shared checks bind flask_login, CSRF and Superset when imported, so import them again with these stubs.
+    monkeypatch.delitem(sys.modules, "text_to_bi.superset_semantic_layer.api_support", raising=False)
+    monkeypatch.delitem(sys.modules, "text_to_bi.superset_semantic_layer.core.security", raising=False)
+    # Repositories bind their models when imported, so import them and their factories again with these stubs.
+    for name in [name for name in sys.modules if ".repositories." in name or name.endswith(".dependencies")]:
+        if name.startswith("text_to_bi.superset_semantic_layer.modules."):
+            monkeypatch.delitem(sys.modules, name)
     spec = importlib.util.spec_from_file_location(route_name, ROUTE_PATH)
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, route_name, module)
@@ -173,6 +238,7 @@ def test_mutation_route_enforces_csrf_admin_and_rolls_back_validation_errors(mon
     user.is_authenticated = True
     user.roles = [SimpleNamespace(name="Admin")]
     route.create_draft = lambda *_: (_ for _ in ()).throw(route.ExpertRuleValidationError("invalid"))
+    session.rollback_calls = 0
     with app.test_request_context("/", method="POST", json={}):
         assert api.create_rule()[0] == 400
     assert session.rollback_calls == 1
@@ -185,24 +251,65 @@ def test_mutation_route_enforces_csrf_admin_and_rolls_back_validation_errors(mon
 def test_discovery_keeps_rule_when_only_unrelated_glossary_link_is_denied_and_omits_stale_or_cross_dataset(monkeypatch):
     app = Flask(__name__)
     route, _, session = _load_route(monkeypatch, allowed_datasets={7})
-    revision = SimpleNamespace(id=1, rule_id=1, revision_number=2, lifecycle_version=3, status="approved", is_current=True, name="Final only", conditions=[], exceptions=[], examples=[])
-    stale = SimpleNamespace(id=2, rule_id=1, revision_number=3, lifecycle_version=4, status="approved", is_current=True, name="Stale", conditions=[], exceptions=[], examples=[])
-    denied = SimpleNamespace(id=3, rule_id=2, revision_number=1, lifecycle_version=1, status="approved", is_current=True, name="Denied", conditions=[], exceptions=[], examples=[])
+    revision = SimpleNamespace(
+        id=1,
+        rule_id=1,
+        revision_number=2,
+        lifecycle_version=3,
+        status="approved",
+        is_current=True,
+        name="Final only",
+        conditions=[],
+        exceptions=[],
+        examples=[],
+    )
+    stale = SimpleNamespace(
+        id=2,
+        rule_id=1,
+        revision_number=3,
+        lifecycle_version=4,
+        status="approved",
+        is_current=True,
+        name="Stale",
+        conditions=[],
+        exceptions=[],
+        examples=[],
+    )
+    denied = SimpleNamespace(
+        id=3,
+        rule_id=2,
+        revision_number=1,
+        lifecycle_version=1,
+        status="approved",
+        is_current=True,
+        name="Denied",
+        conditions=[],
+        exceptions=[],
+        examples=[],
+    )
     rules = {1: SimpleNamespace(dataset_id=7), 2: SimpleNamespace(dataset_id=8)}
     links = {
-        1: [SimpleNamespace(kind="dataset", target_id=7, dataset_id=7, fingerprint="dataset"), SimpleNamespace(kind="glossary", target_id=3, dataset_id=7, fingerprint="glossary")],
+        1: [
+            SimpleNamespace(kind="dataset", target_id=7, dataset_id=7, fingerprint="dataset"),
+            SimpleNamespace(kind="glossary", target_id=3, dataset_id=7, fingerprint="glossary"),
+        ],
         2: [SimpleNamespace(kind="dataset", target_id=7, dataset_id=7, fingerprint="old")],
         3: [SimpleNamespace(kind="dataset", target_id=8, dataset_id=8, fingerprint="dataset")],
     }
-    session.query = lambda model: _Query([revision, stale, denied] if model is route.ExpertRuleRevision else links.get(0, []))
+    session.query = lambda model: _Query(
+        [revision, stale, denied] if model is route.ExpertRuleRevision else links.get(0, [])
+    )
+
     def query(model):
         query_values = [revision, stale, denied] if model is route.ExpertRuleRevision else []
         result = _Query(query_values)
         if model is route.ExpertRuleLink:
             result.all = lambda: links.get(result.filters.get("revision_id"), [])
         return result
+
     session.query = query
-    session.get = lambda model, key: rules[key] if model is route.ExpertRule else None
+    rule_model = sys.modules["text_to_bi.superset_semantic_layer.modules.expert_rules.models"].ExpertRule
+    session.get = lambda model, key: rules[key] if model is rule_model else None
     api = route.ExpertRuleAPI()
     api._dataset = lambda dataset_id: SimpleNamespace(id=dataset_id)
     api._glossary = lambda _: [SimpleNamespace(dataset_id=7), SimpleNamespace(dataset_id=8)]
@@ -213,17 +320,33 @@ def test_discovery_keeps_rule_when_only_unrelated_glossary_link_is_denied_and_om
     assert [item["name"] for item in body["rules"]] == ["Final only"]
     assert body["rules"][0]["lifecycle_version"] == 3
     # Discovery names what the rule links to, so a consumer can join it to catalog metrics and glossary terms.
-    assert (body["rules"][0]["dataset_id"], body["rules"][0]["glossary_term_ids"], body["rules"][0]["metric_ids"]) == (7, [3], [])
+    assert (body["rules"][0]["dataset_id"], body["rules"][0]["glossary_term_ids"], body["rules"][0]["metric_ids"]) == (
+        7,
+        [3],
+        [],
+    )
 
 
 def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):
     app = Flask(__name__)
     route, _, session = _load_route(monkeypatch)
     revision = SimpleNamespace(
-        rule_id=1, revision_number=2, lifecycle_version=3, status="approved", name="Final only", conditions=[], exceptions=[], examples=[]
+        rule_id=1,
+        revision_number=2,
+        lifecycle_version=3,
+        status="approved",
+        name="Final only",
+        conditions=[],
+        exceptions=[],
+        examples=[],
     )
     event = SimpleNamespace(
-        rule_id=1, event_type="approved", revision_number=2, lifecycle_version=3, actor_id=42, reason="Đã đối chiếu",
+        rule_id=1,
+        event_type="approved",
+        revision_number=2,
+        lifecycle_version=3,
+        actor_id=42,
+        reason="Đã đối chiếu",
         occurred_at=datetime.now(timezone.utc),
     )
     session.query = lambda _: _Query([event])
@@ -233,10 +356,17 @@ def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):
     with app.test_request_context("/", method="GET"):
         status, body = api.audit(1)
     assert status == 200
-    assert body["audit"] == [{
-        "action": "approved", "revision": 2, "lifecycle_version": 3, "actor_id": 42, "actor_name": "Bao Reviewer",
-        "reason": "Đã đối chiếu", "occurred_at": event.occurred_at.isoformat(),
-    }]
+    assert body["audit"] == [
+        {
+            "action": "approved",
+            "revision": 2,
+            "lifecycle_version": 3,
+            "actor_id": 42,
+            "actor_name": "Bao Reviewer",
+            "reason": "Đã đối chiếu",
+            "occurred_at": event.occurred_at.isoformat(),
+        }
+    ]
 
 
 def test_self_approval_is_refused_with_403_and_rolled_back(monkeypatch):
@@ -248,7 +378,7 @@ def test_self_approval_is_refused_with_403_and_rolled_back(monkeypatch):
 
     def refuse(*_, require_second_reviewer):
         received["require_second_reviewer"] = require_second_reviewer
-        raise route.ExpertRuleSelfApprovalError("Người soạn rule không thể tự duyệt")
+        raise ExpertRuleSelfApprovalError("Người soạn rule không thể tự duyệt")
 
     route.approve_rule = refuse
     app.config["TEXT_TO_BI_REQUIRE_SECOND_REVIEWER"] = True

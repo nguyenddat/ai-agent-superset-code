@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import (
     METRIC_CONTRACT_RULE,
     _safe_connection_identity,
     contract_is_approved_current,
@@ -142,7 +142,9 @@ def test_metric_contract_state_covers_every_review_stage():
     dataset, metric = _objects()
     assert metric_contract_state(None, dataset, metric) == "not_started"
     expression_hash = metric_contract_hash(dataset, metric)
-    contract = SimpleNamespace(dataset_id=dataset.id, metric_id=metric.id, status="candidate", expression_hash=expression_hash)
+    contract = SimpleNamespace(
+        dataset_id=dataset.id, metric_id=metric.id, status="candidate", expression_hash=expression_hash
+    )
     assert metric_contract_state(contract, dataset, metric) == "candidate"
     contract.status = "approved"
     assert metric_contract_state(contract, dataset, metric) == "approved"

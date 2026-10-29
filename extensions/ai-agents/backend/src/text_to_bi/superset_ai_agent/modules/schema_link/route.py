@@ -1,10 +1,3 @@
-"""Schema link endpoints: the admin analysis lab, run on the schema graph read as the signed-in user.
-
-Until linking from a question exists, an administrator writes the goal by hand and sees how it becomes a join tree and
-SQL. The graph comes from the Semantic Layer's `/schema-graph` with the user's session cookie, so it holds only the
-base tables they may read in full; nothing here runs the SQL it builds.
-"""
-
 from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user

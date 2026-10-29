@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.agent_ladder.service import (
+from text_to_bi.superset_semantic_layer.modules.agent_ladder.services.agent_ladder import (
     DerivedColumnKeys,
     checked_dataset_proposal,
     checked_dataset_sql,
@@ -13,7 +13,7 @@ from text_to_bi.superset_semantic_layer.modules.agent_ladder.service import (
     source_metric,
     unique_metric_name,
 )
-from text_to_bi.superset_semantic_layer.modules.semantic_query.members import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.members import (
     MAX_CODED_VALUES,
     build_values_payload,
     coded_value_columns,
@@ -153,7 +153,8 @@ def test_a_code_column_lists_its_stored_values_so_a_formula_spells_them_exactly(
     rows = [{"trang_thai": "THAT_BAI"}, {"trang_thai": "THANH_CONG"}, {"trang_thai": None}]
     assert coded_values_from_rows(rows, "trang_thai") == ["THANH_CONG", "THAT_BAI"]
     assert coded_values_from_rows([{"ghi_chu": str(index)} for index in range(MAX_CODED_VALUES + 1)], "ghi_chu") is None
-    assert coded_values_from_rows([{"loi": "503 Server Error: Service Unavailable for url: " + "x" * 40}], "loi") is None
+    error_rows = [{"loi": "503 Server Error: Service Unavailable for url: " + "x" * 40}]
+    assert coded_values_from_rows(error_rows, "loi") is None
 
     columns = source_columns(loads, {}, {}, {"trang_thai": ["THANH_CONG", "THAT_BAI"]})
     assert next(column for column in columns if column["name"] == "trang_thai")["values"] == ["THANH_CONG", "THAT_BAI"]
@@ -184,11 +185,14 @@ def test_a_proposed_dataset_keeps_the_keys_of_the_base_columns_it_reads_and_refe
     assert "loai_quan_sat" not in keys and "ma_chu" not in keys
 
 
-@pytest.mark.parametrize("sql", [
-    "SELECT quan_sat_id FROM tb_quan_sat_thoi_tiet GROUP BY quan_sat_id",
-    "SELECT DISTINCT quan_sat_id FROM tb_quan_sat_thoi_tiet",
-    "SELECT o.quan_sat_id FROM tb_quan_sat_thoi_tiet o JOIN dm_thanh_pho c ON c.ten_thanh_pho = o.loai_quan_sat",
-])
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT quan_sat_id FROM tb_quan_sat_thoi_tiet GROUP BY quan_sat_id",
+        "SELECT DISTINCT quan_sat_id FROM tb_quan_sat_thoi_tiet",
+        "SELECT o.quan_sat_id FROM tb_quan_sat_thoi_tiet o JOIN dm_thanh_pho c ON c.ten_thanh_pho = o.loai_quan_sat",
+    ],
+)
 def test_a_query_that_can_repeat_or_merge_rows_keeps_the_reference_but_not_the_primary_key(sql):
     keys = derived_column_keys(sql, [OBSERVATIONS, CITIES], KEY_ENTRIES)
     assert keys["quan_sat_id"] == DerivedColumnKeys(is_pk=False, is_unique=False, referenced=(7, "quan_sat_id"))

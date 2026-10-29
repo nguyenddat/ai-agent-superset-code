@@ -1,5 +1,3 @@
-"""Nap Open-Meteo vao lop tb_ nghiep vu va lam moi bang dashboard."""
-
 from __future__ import annotations
 
 import logging

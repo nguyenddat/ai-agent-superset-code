@@ -1,26 +1,20 @@
-"""Isolated behavioural coverage for the security-critical route bodies.
-
-Superset itself is intentionally not installed in the local extension toolchain.
-The harness compiles relevant methods from ``route.py`` with small fakes, so
-these tests exercise the real handler source without a Superset runtime.
-"""
-
-import ast
+import importlib
 import json
 import sys
 import types
 from datetime import UTC, datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from catalog_source import SOURCE_PATHS, api_class, compile_into, module_function
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.compiler import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.exceptions import RelationshipValidationError
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.compiler import (
     SemanticQueryError,
     compile_semantic_query,
 )
-from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import (
     METRIC_CONTRACT_RULE,
     build_metric_chart_payload,
     contract_is_approved_current,
@@ -30,17 +24,15 @@ from text_to_bi.superset_semantic_layer.modules.semantic_query.contracts import 
     metric_is_eligible_for_contract,
     parse_contract_metric,
 )
-from text_to_bi.superset_semantic_layer.modules.semantic_query.relationship_discovery import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationship_discovery import (
     SOURCES,
     stored_verification,
 )
-from text_to_bi.superset_semantic_layer.modules.semantic_query.relationships import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationships import (
     RelationshipEnd,
     relationship_cardinality,
     relationship_contract_hash,
 )
-
-ROUTE_PATH = Path(__file__).parents[1] / "src" / "text_to_bi" / "superset_semantic_layer" / "modules" / "catalog" / "route.py"
 
 
 class _ResponseAPI:
@@ -134,49 +126,73 @@ def _dataset():
 
 
 def _route_api(datasets):
-    tree = ast.parse(ROUTE_PATH.read_text(encoding="utf-8"))
     wanted = {
-        "_is_admin", "_can_preview_semantic_query", "_dataset_metric", "_serialize_metric_contract",
+        "_dataset_metric", "_serialize_metric_contract",
         "_serialize_relationship_contract", "create_metric_contract_candidate", "approve_metric_contract",
         "revoke_metric_contract", "execute_metric_contract", "create_relationship_contract_candidate",
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
-        "list_metric_contracts", "_user_names", "_active_users", "_metric_definition", "_serialize_metric_definition",
+        "list_metric_contracts", "_active_users", "_metric_definition", "_serialize_metric_definition",
         "_review_reason", "_record_metric_event", "save_metric_definition", "list_metric_contract_events",
-        "_second_reviewer_required", "create_agent_metric", "_agent_metric",
-        "_relationship_contract_fields", "_snapshot_relationship_candidate",
+        "create_agent_metric", "_agent_metric", "_relationship_contract_fields", "_snapshot_relationship_candidate",
     }
-    class_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SemanticLayerAPI")
-    class_node.decorator_list = []
-    class_node.body = [node for node in class_node.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
-    for node in class_node.body:
-        node.decorator_list = [item for item in node.decorator_list if isinstance(item, ast.Name) and item.id == "staticmethod"]
-    cap_node = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_semantic_query_row_cap")
+    shared = [
+        module_function(name)
+        for name in (
+            "is_admin",
+            "user_names",
+            "second_reviewer_required",
+            "can_access_dataset",
+            "semantic_query_row_cap",
+        )
+    ]
     namespace = {
-        "RestApi": _ResponseAPI, "staticmethod": staticmethod,
-        "SqlaTable": _CatalogDataset, "ColumnDictionary": object, "Any": Any, "datetime": datetime, "timezone": timezone,
+        "RestApi": _ResponseAPI,
+        "staticmethod": staticmethod,
+        "SqlaTable": _CatalogDataset,
+        "ColumnDictionary": object,
+        "Any": Any,
+        "datetime": datetime,
+        "timezone": timezone,
         "current_user": SimpleNamespace(is_authenticated=True, id=3, roles=[SimpleNamespace(name="Admin")]),
         "security_manager": SimpleNamespace(raise_for_access=lambda **_: None),
-        "SupersetSecurityException": type("SupersetSecurityException", (Exception,), {}), "MetricContract": _MetricContract,
-        "RelationshipContract": _RelationshipContract, "db": SimpleNamespace(session=_Session(datasets)),
-        "request": SimpleNamespace(get_json=lambda silent=True: {"dimensions": [], "filters": []}, args=SimpleNamespace(get=lambda *_args, **_kwargs: None)),
-        "current_app": SimpleNamespace(config={}), "_ensure_dictionary_tables": lambda: None,
-        "_label_dimensions": len,
+        "SupersetSecurityException": type("SupersetSecurityException", (Exception,), {}),
+        "MetricContract": _MetricContract,
+        "RelationshipContract": _RelationshipContract,
+        "db": SimpleNamespace(session=_Session(datasets)),
+        "request": SimpleNamespace(
+            get_json=lambda silent=True: {"dimensions": [], "filters": []},
+            args=SimpleNamespace(get=lambda *_args, **_kwargs: None),
+        ),
+        "current_app": SimpleNamespace(config={}),
+        "ensure_dictionary_tables": lambda: None,
+        "label_dimensions": len,
         "AGENT_ORIGIN": "ai_agent",
-        "metric_is_eligible_for_contract": metric_is_eligible_for_contract, "metric_contract_hash": metric_contract_hash,
-        "metric_contract_ineligibility": metric_contract_ineligibility, "metric_contract_state": metric_contract_state,
+        "metric_is_eligible_for_contract": metric_is_eligible_for_contract,
+        "metric_contract_hash": metric_contract_hash,
+        "metric_contract_ineligibility": metric_contract_ineligibility,
+        "metric_contract_state": metric_contract_state,
         "parse_contract_metric": parse_contract_metric,
-        "contract_is_approved_current": contract_is_approved_current, "execute_approved_chart_query": None,
-        "relationship_cardinality": relationship_cardinality, "relationship_contract_hash": relationship_contract_hash,
+        "contract_is_approved_current": contract_is_approved_current,
+        "execute_approved_chart_query": None,
+        "relationship_cardinality": relationship_cardinality,
+        "relationship_contract_hash": relationship_contract_hash,
         "relationship_is_approved_current": lambda contract, *_: contract.status == "approved",
-        "RelationshipEnd": RelationshipEnd, "build_semantic_catalog": None,
-        "_is_superset_access_error": lambda error: "access" in type(error).__name__.lower(),
-        "logger": SimpleNamespace(exception=lambda *args, **kwargs: None), "SEMANTIC_QUERY_MAX_ROWS": 1000,
-        "MetricContractEvent": _MetricContractEvent, "MetricDefinition": _MetricDefinition,
-        "SOURCES": SOURCES, "stored_verification": stored_verification,
-        "METRIC_REVIEW_REASON_MAX_LENGTH": 2000, "METRIC_DEFINITION_MAX_LENGTH": 4000, "METRIC_UNIT_MAX_LENGTH": 64,
+        "RelationshipEnd": RelationshipEnd,
+        "build_semantic_catalog": None,
+        "is_superset_access_error": lambda error: "access" in type(error).__name__.lower(),
+        "logger": SimpleNamespace(exception=lambda *args, **kwargs: None),
+        "SEMANTIC_QUERY_MAX_ROWS": 1000,
+        "MetricContractEvent": _MetricContractEvent,
+        "MetricDefinition": _MetricDefinition,
+        "SOURCES": SOURCES,
+        "stored_verification": stored_verification,
+        "METRIC_REVIEW_REASON_MAX_LENGTH": 2000,
+        "METRIC_DEFINITION_MAX_LENGTH": 4000,
+        "METRIC_UNIT_MAX_LENGTH": 64,
     }
-    module = ast.Module(body=[cap_node, class_node], type_ignores=[])
-    exec(compile(ast.fix_missing_locations(module), str(ROUTE_PATH), "exec"), namespace)  # noqa: S102
+    compile_into(namespace, *shared, api_class(wanted))
+    # A relationship contract's static serializer names the mixin it lives in.
+    namespace["RelationshipRoutes"] = namespace["SemanticLayerAPI"]
     api = namespace["SemanticLayerAPI"]()
     # Proposing needs a business definition; tests about other rules start from a metric that has one.
     api._metric_definition = lambda *_: SimpleNamespace(business_definition="Average air temperature.")
@@ -225,7 +241,7 @@ def test_new_candidates_carry_their_hash_before_joining_the_session():
     assert snapshots[0]["owner_id"] == 3
 
     source, target = _relationship_context()
-    api._relationship_contract_context = lambda *_: (source, target, None)
+    api._relationship_contract_context = lambda *_: (source, target)
     api._relationship_contract_for = lambda *_: None
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 201
     assert snapshots[1]["contract_hash"] and snapshots[1]["to_dataset_id"] == target.dataset.id
@@ -251,13 +267,16 @@ def test_metric_contract_approve_and_revoke_lifecycle():
 
 
 def test_csrf_wrapper_rejects_before_the_handler():
-    source = ast.parse(ROUTE_PATH.read_text(encoding="utf-8"))
-    node = next(item for item in source.body if isinstance(item, ast.FunctionDef) and item.name == "_csrf_protected")
-    namespace = {"wraps": lambda method: lambda wrapper: wrapper, "request": SimpleNamespace(headers={}), "ValidationError": ValueError}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[])), str(ROUTE_PATH), "exec"), namespace)  # noqa: S102
+    node = module_function("csrf_protected")
+    namespace = {
+        "wraps": lambda method: lambda wrapper: wrapper,
+        "request": SimpleNamespace(headers={}),
+        "ValidationError": ValueError,
+    }
+    compile_into(namespace, node)
     namespace["validate_csrf"] = lambda _: (_ for _ in ()).throw(ValueError())
     called = []
-    wrapped = namespace["_csrf_protected"](lambda self: called.append(True))
+    wrapped = namespace["csrf_protected"](lambda self: called.append(True))
     assert wrapped(SimpleNamespace(response=lambda status, **payload: (status, payload)))[0] == 403
     assert called == []
 
@@ -268,9 +287,9 @@ def test_execute_denial_security_error_and_truncation_are_mapped(monkeypatch):
     metric, contract = dataset.metrics[0], _MetricContract(dataset.id, 4)
     contract.status, contract.expression_hash = "approved", metric_contract_hash(dataset, metric)
     api._contract_for = lambda *_: contract
-    api._can_access_semantic_query_dataset = lambda _: False
+    namespace["can_access_dataset"] = lambda _: False
     assert api.execute_metric_contract(dataset.id, metric.id)[0] == 403
-    api._can_access_semantic_query_dataset = lambda _: True
+    namespace["can_access_dataset"] = lambda _: True
     _install_chartdata_stubs(monkeypatch)
     access_denied = type("AccessDenied", (Exception,), {})
     namespace["execute_approved_chart_query"] = lambda *args, **kwargs: (_ for _ in ()).throw(access_denied())
@@ -288,7 +307,7 @@ def test_execute_returns_the_superset_sql_to_administrators_only(monkeypatch):
     metric, contract = dataset.metrics[0], _MetricContract(dataset.id, 4)
     contract.status, contract.expression_hash = "approved", metric_contract_hash(dataset, metric)
     api._contract_for = lambda *_: contract
-    api._can_access_semantic_query_dataset = lambda _: True
+    namespace["can_access_dataset"] = lambda _: True
     _install_chartdata_stubs(monkeypatch)
     executed_sql = "SELECT city, AVG(temperature) FROM weather WHERE tenant_id = 7 GROUP BY city"
     chart_result = {"colnames": ["city"], "data": [], "query": executed_sql}
@@ -303,7 +322,8 @@ def test_preview_compiler_and_execute_payload_reject_joins():
         compile_semantic_query(
             {"name": "weather", "table": "weather", "dialect": "postgresql"},
             [{"name": "m", "dataset": "weather", "column": "temperature", "aggregation": "avg", "approved": True}],
-            [], {"metric": "m", "joins": [{"dataset": "other"}]},
+            [],
+            {"metric": "m", "joins": [{"dataset": "other"}]},
         )
     with pytest.raises(ValueError, match="joins are not supported"):
         build_metric_chart_payload(_dataset(), SimpleNamespace(metric_name="m"), {"joins": []}, 1000)
@@ -313,12 +333,19 @@ def _relationship_context():
     source_dataset = _dataset()
     target_column = SimpleNamespace(column_name="id", is_active=True, expression=None, type="INT")
     target_dataset = SimpleNamespace(
-        id=8, columns=[target_column], sql=None, catalog=None, schema=None, table_name="stations",
+        id=8,
+        columns=[target_column],
+        sql=None,
+        catalog=None,
+        schema=None,
+        table_name="stations",
         database=source_dataset.database,
     )
     source_entry = SimpleNamespace(column_name="station_id", is_fk=True, is_pk=False, is_unique=False, data_type="INT")
     target_entry = SimpleNamespace(column_name="id", is_fk=False, is_pk=True, is_unique=True, data_type="INT")
-    source_dataset.columns.append(SimpleNamespace(column_name="station_id", is_active=True, expression=None, type="INT"))
+    source_dataset.columns.append(
+        SimpleNamespace(column_name="station_id", is_active=True, expression=None, type="INT")
+    )
     return RelationshipEnd(source_dataset, source_entry, 0), RelationshipEnd(target_dataset, target_entry, 1)
 
 
@@ -326,7 +353,7 @@ def test_relationship_handlers_cover_candidate_approval_and_audit_reset():
     source, target = _relationship_context()
     api, namespace = _route_api({source.dataset.id: source.dataset})
     holder = {}
-    api._relationship_contract_context = lambda *_: (source, target, None)
+    api._relationship_contract_context = lambda *_: (source, target)
     api._relationship_contract_for = lambda *_: holder.get("contract")
     namespace["RelationshipContract"] = _RelationshipContract
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 201
@@ -340,14 +367,20 @@ def test_relationship_handlers_cover_candidate_approval_and_audit_reset():
     assert api.approve_relationship_contract(source.dataset.id, 23)[0] == 200
     assert contract.status == "approved" and contract.approver_id == 3
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 409
-    api._relationship_contract_context = lambda *_: (None, None, (400, {"message": "invalid relationship"}))
+    invalid = RelationshipValidationError("invalid relationship")
+    api._relationship_contract_context = lambda *_: (_ for _ in ()).throw(invalid)
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 400
-    api._relationship_contract_context = lambda *_: (source, target, None)
+    api._relationship_contract_context = lambda *_: (source, target)
     contract.revoker_id, contract.revoked_at = 9, datetime.now(UTC)
     contract.status = "revoked"
     assert api.create_relationship_contract_candidate(source.dataset.id, 23)[0] == 201
     assert contract.status == "candidate"
-    assert (contract.approver_id, contract.approved_at, contract.revoker_id, contract.revoked_at) == (None, None, None, None)
+    assert (contract.approver_id, contract.approved_at, contract.revoker_id, contract.revoked_at) == (
+        None,
+        None,
+        None,
+        None,
+    )
     assert (contract.verification, contract.verified_hash) == (None, None)
     contract.contract_hash = "changed"
     assert api.approve_relationship_contract(source.dataset.id, 23)[0] == 400
@@ -372,9 +405,7 @@ def test_relationship_revoke_binds_explicit_contract_id_to_path_relationship():
     namespace["db"].session.get = lambda model, identifier: contracts.get(identifier)
 
     def revoke_with(contract_id):
-        namespace["request"].args = SimpleNamespace(
-            get=lambda *_args, **_kwargs: contract_id
-        )
+        namespace["request"].args = SimpleNamespace(get=lambda *_args, **_kwargs: contract_id)
         return api.revoke_relationship_contract(source.dataset.id, 23)
 
     session = namespace["db"].session
@@ -432,10 +463,10 @@ def test_semantic_catalog_hides_denied_dataset():
             return []
 
     namespace["db"].session.query = lambda model: Query(model)
-    namespace["build_semantic_catalog"] = __import__(
-        "text_to_bi.superset_semantic_layer.modules.semantic_query.catalog", fromlist=["build_semantic_catalog"]
+    namespace["build_semantic_catalog"] = importlib.import_module(
+        "text_to_bi.superset_semantic_layer.modules.semantic_query.services.catalog"
     ).build_semantic_catalog
-    api._can_access_semantic_query_dataset = lambda _: False
+    namespace["can_access_dataset"] = lambda _: False
     api._catalog_metric_details = lambda _dataset_ids: None
     status, payload = api.semantic_catalog()
     assert status == 200 and payload["datasets"] == [] and payload["relationships"] == []
@@ -582,7 +613,10 @@ def test_metric_definition_is_validated_saved_and_logged():
     status, payload = api.save_metric_definition(dataset.id, 4)
     assert status == 200
     assert payload["definition"] == {
-        "business_definition": "Average air temperature.", "unit": "°C", "steward_id": 9, "steward_name": "Bao Steward",
+        "business_definition": "Average air temperature.",
+        "unit": "°C",
+        "steward_id": 9,
+        "steward_name": "Bao Steward",
     }
     assert namespace["db"].session.added[-1].action == "definition"
     namespace["current_user"].roles = []
@@ -621,7 +655,8 @@ def test_metric_events_are_listed_newest_first_with_actor_names():
     status, payload = api.list_metric_contract_events(dataset.id, 4)
     assert status == 200
     assert [(event["action"], event["actor_name"]) for event in payload["events"]] == [
-        ("approve", "Bao Reviewer"), ("candidate", "Ada Admin"),
+        ("approve", "Bao Reviewer"),
+        ("candidate", "Ada Admin"),
     ]
     assert payload["events"][0]["created_at"] == "2026-10-25T09:30:00+00:00"
 
@@ -631,7 +666,7 @@ def test_only_administrators_may_preview_a_candidate(monkeypatch):
     api, namespace = _route_api({dataset.id: dataset})
     contract = _proposed_contract(dataset)
     api._contract_for = lambda *_: contract
-    api._can_access_semantic_query_dataset = lambda _: True
+    namespace["can_access_dataset"] = lambda _: True
     _install_chartdata_stubs(monkeypatch)
     grants = []
 
@@ -652,7 +687,7 @@ def test_only_administrators_may_preview_a_candidate(monkeypatch):
 
 
 def test_route_source_has_no_sqllab_or_raw_execution_path():
-    source = ROUTE_PATH.read_text(encoding="utf-8").lower()
+    source = "\n".join(path.read_text(encoding="utf-8") for path in SOURCE_PATHS).lower()
     assert "sqllab" not in source and ".engine.execute" not in source
 
 
@@ -667,7 +702,7 @@ class _AgentMetric:
 
 
 def _agent_metric_api(contract=None, dataset_type="aggregate"):
-    from text_to_bi.superset_semantic_layer.modules.agent_ladder import service
+    from text_to_bi.superset_semantic_layer.modules.agent_ladder.services import agent_ladder as service
 
     dataset = _dataset()
     dataset.metrics[0].verbose_name = dataset.metrics[0].description = dataset.metrics[0].d3format = None
@@ -677,26 +712,40 @@ def _agent_metric_api(contract=None, dataset_type="aggregate"):
     session.get = lambda model, identifier: dictionary if model == "DatasetDictionary" else dataset
     session.flush = lambda: None
     session.query = lambda model: SimpleNamespace(filter=lambda *_: SimpleNamespace(count=lambda: 0))
-    namespace.update({
-        "DatasetDictionary": "DatasetDictionary", "SqlMetric": _AgentMetric, "_is_internal_dataset": lambda _: False,
-        "AGGREGATE_DATASET": "aggregate", "MAX_PENDING_AGENT_METRICS": 50,
-        "checked_metric_draft": service.checked_metric_draft, "asked_question": service.asked_question,
-        "matching_metric": service.matching_metric, "unique_metric_name": service.unique_metric_name,
-    })
+    namespace.update(
+        {
+            "DatasetDictionary": "DatasetDictionary",
+            "SqlMetric": _AgentMetric,
+            "is_internal_dataset": lambda _: False,
+            "AGGREGATE_DATASET": "aggregate",
+            "MAX_PENDING_AGENT_METRICS": 50,
+            "checked_metric_draft": service.checked_metric_draft,
+            "asked_question": service.asked_question,
+            "matching_metric": service.matching_metric,
+            "unique_metric_name": service.unique_metric_name,
+        }
+    )
     api._metric_definition = lambda *_: None
     api._contract_for = lambda *_: contract
-    api._can_access_semantic_query_dataset = lambda _: True
+    namespace["can_access_dataset"] = lambda _: True
     return api, namespace, dataset
 
 
 def test_the_agent_builds_a_provisional_candidate_on_an_aggregate_dataset():
     api, namespace, dataset = _agent_metric_api()
     namespace["current_user"].roles = []
-    _use_request_body(namespace, {
-        "dataset_id": dataset.id, "metric_name": "nhiet_do_cao_nhat", "label": "Nhiệt độ cao nhất",
-        "expression": "MAX(temperature)", "definition": "Nhiệt độ cao nhất trong kỳ.", "unit": "°C",
-        "question": "Tuần trước nóng nhất bao nhiêu độ?",
-    })
+    _use_request_body(
+        namespace,
+        {
+            "dataset_id": dataset.id,
+            "metric_name": "nhiet_do_cao_nhat",
+            "label": "Nhiệt độ cao nhất",
+            "expression": "MAX(temperature)",
+            "definition": "Nhiệt độ cao nhất trong kỳ.",
+            "unit": "°C",
+            "question": "Tuần trước nóng nhất bao nhiêu độ?",
+        },
+    )
 
     status, payload = api.create_agent_metric()
 
@@ -724,12 +773,15 @@ def test_the_agent_reuses_a_metric_with_the_same_formula_and_respects_its_review
     assert api.create_agent_metric()[1]["provisional"] is True
 
 
-@pytest.mark.parametrize(("dataset_type", "changes"), [
-    ("base", {}),
-    ("aggregate", {"expression": "MAX(temperature) + 1"}),
-    ("aggregate", {"expression": "MAX(rainfall)"}),
-    ("aggregate", {"metric_name": "Nhiệt độ"}),
-])
+@pytest.mark.parametrize(
+    ("dataset_type", "changes"),
+    [
+        ("base", {}),
+        ("aggregate", {"expression": "MAX(temperature) + 1"}),
+        ("aggregate", {"expression": "MAX(rainfall)"}),
+        ("aggregate", {"metric_name": "Nhiệt độ"}),
+    ],
+)
 def test_the_agent_only_builds_contract_formulas_on_aggregate_datasets(dataset_type, changes):
     api, namespace, dataset = _agent_metric_api(dataset_type=dataset_type)
     body = {"metric_name": "x", "label": "X", "expression": "MAX(temperature)", "definition": "x", **changes}

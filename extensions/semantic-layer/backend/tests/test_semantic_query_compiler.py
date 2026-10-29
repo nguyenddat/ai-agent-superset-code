@@ -1,6 +1,6 @@
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.compiler import (
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.compiler import (
     SemanticQueryError,
     compile_semantic_query,
 )
@@ -55,7 +55,9 @@ def test_requires_an_approved_metric():
 
     unapproved_metrics = [{**METRICS[0], "approved": False}]
     with pytest.raises(SemanticQueryError, match="approved metric"):
-        compile_semantic_query(DATASET, unapproved_metrics, DIMENSIONS, {"metric": "average_temperature", "dimensions": []})
+        compile_semantic_query(
+            DATASET, unapproved_metrics, DIMENSIONS, {"metric": "average_temperature", "dimensions": []}
+        )
 
 
 def test_indexes_only_approved_definitions_for_the_requested_dataset():

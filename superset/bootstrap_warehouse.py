@@ -1,5 +1,3 @@
-"""Create the warehouse connection and register every public table in Superset."""
-
 from __future__ import annotations
 
 import json

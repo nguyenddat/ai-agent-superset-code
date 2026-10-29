@@ -1,11 +1,3 @@
-"""The Semantic Layer's schema graph, read into the shape the join path search walks.
-
-A node is a base table, an edge an approved relationship from a foreign key column to the key it references. Walking
-an edge the way the key points (many rows to one) keeps the measured rows as they are; walking it back (one to many)
-repeats each row once per match, so its cost is high and the walk is flagged as fanning out. A one-to-one edge repeats
-nothing either way.
-"""
-
 from dataclasses import dataclass, field
 from typing import Any
 

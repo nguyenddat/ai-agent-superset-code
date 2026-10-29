@@ -1,11 +1,12 @@
 import inspect
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_semantic_layer.modules.glossary import service
-from text_to_bi.superset_semantic_layer.modules.glossary.service import (
+from text_to_bi.superset_semantic_layer.modules.glossary.services import glossary as service
+from text_to_bi.superset_semantic_layer.modules.glossary.services.glossary import (
     GlossaryConflictError,
     GlossarySelfApprovalError,
     GlossaryValidationError,
@@ -196,9 +197,10 @@ def test_normalize_payload_requires_exact_hex_source_hash(source_hash):
 
 
 def test_lifecycle_mutations_request_current_revision_row_lock():
-    source = inspect.getsource(service)
-
-    assert "with_for_update()" in source
+    repositories = Path(service.__file__).parents[1] / "repositories"
+    for repository in ("glossary_term.py", "glossary_term_revision.py"):
+        assert "with_for_update()" in (repositories / repository).read_text(encoding="utf-8")
+    assert "lock_current(" in inspect.getsource(service._lock_current_revision)
     for function in (service.update_draft, service.approve_revision, service.revoke_revision):
         assert "_lock_current_revision" in inspect.getsource(function)
 
@@ -206,7 +208,7 @@ def test_lifecycle_mutations_request_current_revision_row_lock():
 def test_approval_rejects_stale_revision_after_locked_reread(monkeypatch):
     locked_current = SimpleNamespace(revision_number=3, status="draft", is_current=True)
     monkeypatch.setattr(service, "_lock_current_revision", lambda *_: locked_current)
-    models = ModuleType("text_to_bi.superset_semantic_layer.models.glossary_term")
+    models = ModuleType("text_to_bi.superset_semantic_layer.modules.glossary.models")
     models.GlossaryTermAuditEvent = SimpleNamespace
     monkeypatch.setitem(sys.modules, models.__name__, models)
 
@@ -215,7 +217,7 @@ def test_approval_rejects_stale_revision_after_locked_reread(monkeypatch):
 
 
 def _audit_models(monkeypatch):
-    models = ModuleType("text_to_bi.superset_semantic_layer.models.glossary_term")
+    models = ModuleType("text_to_bi.superset_semantic_layer.modules.glossary.models")
     models.GlossaryTermAuditEvent = SimpleNamespace
     monkeypatch.setitem(sys.modules, models.__name__, models)
 
