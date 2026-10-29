@@ -12,10 +12,10 @@ wrong.
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..chat.query import OPERATORS
 from .graph import SchemaGraph
 
 AGGREGATIONS = ("SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT")
-OPERATORS = ("==", "!=", "<", "<=", ">", ">=", "IN", "NOT IN")
 TIME_GRAINS = ("hour", "day", "week", "month", "quarter", "year")
 # From finest to coarsest; a query may group a kind of row at its own grain or coarser, and `instant` rows at any.
 GRAIN_ORDER = ("instant", "hour", "day", "week", "month", "quarter", "year")
@@ -97,30 +97,33 @@ def _column(graph: SchemaGraph, table: int, name: Any, what: str) -> dict[str, A
     return column
 
 
+def _values_table(graph: SchemaGraph, catalog_id: int, key_column: str) -> tuple[int, dict[str, Any]] | None:
+    """The table keeping one value per indicator whose indicator column has an approved relationship to the catalog."""
+    for edge in graph.edges:
+        if edge.to_table != catalog_id or edge.to_column != key_column:
+            continue
+        model = graph.tables[edge.from_table].get("indicator_model") or {}
+        if model.get("kind") == "values" and model.get("indicator_column") == edge.from_column:
+            return edge.from_table, model
+    return None
+
+
 def _indicator_measure(graph: SchemaGraph, raw: dict[str, Any]) -> tuple[Measure, Filter]:
     code = raw["indicator"]
     for catalog_id, catalog in graph.tables.items():
         model = catalog.get("indicator_model") or {}
         if model.get("kind") != "catalog":
             continue
-        indicator = next(
-            (item for item in (catalog.get("indicators") or {}).get("indicators", []) if item.get("code") == code), None,
-        )
+        listed = (catalog.get("indicators") or {}).get("indicators", [])
+        indicator = next((item for item in listed if item.get("code") == code), None)
         if indicator is None:
             continue
-        # The values table is the one whose indicator column has an approved relationship to this catalog's key.
-        values_id, values_model = next(
-            (
-                (edge.from_table, graph.tables[edge.from_table]["indicator_model"])
-                for edge in graph.edges
-                if edge.to_table == catalog_id and edge.to_column == model["key_column"]
-                and (graph.tables[edge.from_table].get("indicator_model") or {}).get("kind") == "values"
-                and graph.tables[edge.from_table]["indicator_model"]["indicator_column"] == edge.from_column
-            ),
-            (None, None),
-        )
-        if values_id is None:
-            raise GoalError(f"Chỉ số {code}: chưa có bảng giá trị nào nối tới {catalog['table']} bằng quan hệ đã duyệt.")
+        values_table = _values_table(graph, catalog_id, model["key_column"])
+        if values_table is None:
+            raise GoalError(
+                f"Chỉ số {code}: chưa có bảng giá trị nào nối tới {catalog['table']} bằng quan hệ đã duyệt."
+            )
+        values_id, values_model = values_table
         value_column = values_model["value_columns"].get(str(indicator.get("value_kind")))
         if value_column is None:
             raise GoalError(f"Chỉ số {code}: bảng giá trị chưa khai báo cột cho kiểu {indicator.get('value_kind')}.")
@@ -130,12 +133,14 @@ def _indicator_measure(graph: SchemaGraph, raw: dict[str, Any]) -> tuple[Measure
         if aggregation not in AGGREGATIONS:
             raise GoalError(f"Chỉ số {code}: phép gộp {aggregation!r} không hợp lệ.")
         label = raw.get("label") or indicator.get("name") or code
-        measure = Measure(
-            values_id, value_column, aggregation, label,
-            "chỉ số " + ("(phép gộp chọn tay)" if raw.get("aggregation") else f"(phép gộp theo danh mục: {indicator.get('aggregation_code')})"),
-            {"code": code, "name": indicator.get("name"), "unit": indicator.get("unit"), "catalog": catalog_id},
-        )
-        code_filter = Filter(catalog_id, model["code_column"], "==", code, f"Chỉ số = {indicator.get('name') or code}", "chỉ số")
+        if raw.get("aggregation"):
+            source = "chỉ số (phép gộp chọn tay)"
+        else:
+            source = f"chỉ số (phép gộp theo danh mục: {indicator.get('aggregation_code')})"
+        details = {"code": code, "name": indicator.get("name"), "unit": indicator.get("unit"), "catalog": catalog_id}
+        measure = Measure(values_id, value_column, aggregation, label, source, details)
+        code_label = f"Chỉ số = {indicator.get('name') or code}"
+        code_filter = Filter(catalog_id, model["code_column"], "==", code, code_label, "chỉ số")
         return measure, code_filter
     raise GoalError(f"Chỉ số {code!r} không có trong danh mục chỉ số nào.")
 
@@ -191,7 +196,8 @@ def resolve_goal(raw: dict[str, Any], graph: SchemaGraph) -> Goal:
         operator, value = item.get("operator"), item.get("value")
         if operator not in OPERATORS or value is None or (operator in ("IN", "NOT IN")) != isinstance(value, list):
             raise GoalError(f"Lọc {column['name']}: toán tử hoặc giá trị không hợp lệ.")
-        filters.append(Filter(table, column["name"], operator, value, item.get("label") or f"{column['label']} {operator} {value}"))
+        label = item.get("label") or f"{column['label']} {operator} {value}"
+        filters.append(Filter(table, column["name"], operator, value, label))
 
     row_kinds = []
     for item in raw.get("row_kinds") or []:
@@ -200,7 +206,8 @@ def resolve_goal(raw: dict[str, Any], graph: SchemaGraph) -> Goal:
         kind = next((kind for kind in time.get("row_kinds", []) if kind["value"] == item.get("value")), None)
         if not time.get("row_kind_column") or kind is None:
             raise GoalError(f"Loại dòng {item.get('value')!r} không có ở bảng {graph.table_name(table)}.")
-        row_kinds.append(RowKind(table, time["row_kind_column"], kind["value"], kind.get("label") or kind["value"], kind["grain"]))
+        label = kind.get("label") or kind["value"]
+        row_kinds.append(RowKind(table, time["row_kind_column"], kind["value"], label, kind["grain"]))
 
     limit = raw.get("limit", DEFAULT_LIMIT)
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_LIMIT:

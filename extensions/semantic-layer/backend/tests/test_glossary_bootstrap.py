@@ -120,7 +120,7 @@ def _migration_namespace():
             return False
 
         def execute(self, *_args, **_kwargs):
-            return SimpleNamespace(scalars=list)
+            return SimpleNamespace(scalars=list, all=list)
 
     engine = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"), begin=lambda: Connection())
     db = SimpleNamespace(engine=engine)

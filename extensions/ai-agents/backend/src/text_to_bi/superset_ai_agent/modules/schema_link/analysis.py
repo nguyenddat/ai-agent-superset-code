@@ -25,7 +25,10 @@ def _goal_view(goal: Goal, graph: SchemaGraph) -> dict[str, Any]:
              "source": item.source, "indicator": item.indicator}
             for item in goal.measures
         ],
-        "group_by": [{**where(item.table, item.column), "label": item.label, "time_grain": item.time_grain} for item in goal.group_by],
+        "group_by": [
+            {**where(item.table, item.column), "label": item.label, "time_grain": item.time_grain}
+            for item in goal.group_by
+        ],
         "filters": [
             {**where(item.table, item.column), "label": item.label, "operator": item.operator, "value": item.value,
              "source": item.source}
@@ -37,12 +40,13 @@ def _goal_view(goal: Goal, graph: SchemaGraph) -> dict[str, Any]:
     }
 
 
-def _node_reasons(goal: Goal, graph: SchemaGraph) -> dict[int, list[str]]:
+def _node_reasons(goal: Goal) -> dict[int, list[str]]:
     reasons: dict[int, list[str]] = {}
     for item in goal.measures:
         reasons.setdefault(item.table, []).append(f"Đo {item.aggregation} {item.label}")
     for item in goal.group_by:
-        reasons.setdefault(item.table, []).append(f"Chia theo {item.label}" + (f" ({item.time_grain})" if item.time_grain else ""))
+        grain = f" ({item.time_grain})" if item.time_grain else ""
+        reasons.setdefault(item.table, []).append(f"Chia theo {item.label}{grain}")
     for item in goal.filters:
         reasons.setdefault(item.table, []).append(f"Lọc {item.label}")
     for item in goal.row_kinds:
@@ -50,7 +54,8 @@ def _node_reasons(goal: Goal, graph: SchemaGraph) -> dict[int, list[str]]:
     return reasons
 
 
-def _graph_view(graph: SchemaGraph) -> dict[str, Any]:
+def graph_view(graph: SchemaGraph) -> dict[str, Any]:
+    """The tables and edges the page draws, without the columns, coded values and indicators the search reads."""
     return {
         "tables": [
             {"dataset_id": table_id, "table": table["table"], "label": table.get("label"), "layer": table.get("layer")}
@@ -73,14 +78,15 @@ def _path_view(tree: JoinTree, graph: SchemaGraph) -> dict[str, Any]:
         "fanout": tree.fanout,
         "tables": tree.tables,
         "steps": [
-            {"edge": step.edge.id, "from": step.start, "to": step.end, "forward": step.forward, "fanout": step.fanout,
-             "cost": step.cost,
-             "on": f"{graph.table_name(step.start)}.{step.edge.from_column if step.forward else step.edge.to_column} = "
-                   f"{graph.table_name(step.end)}.{step.edge.to_column if step.forward else step.edge.from_column}"}
+            {
+                "edge": step.edge.id, "from": step.start, "to": step.end, "forward": step.forward,
+                "fanout": step.fanout, "cost": step.cost,
+                "on": f"{graph.table_name(step.start)}.{step.start_column} = "
+                      f"{graph.table_name(step.end)}.{step.end_column}",
+            }
             for step in tree.steps
         ],
         "alternatives": {str(table): options for table, options in tree.alternatives.items()},
-        "ambiguous": bool(tree.alternatives),
     }
 
 
@@ -108,17 +114,18 @@ def analyze(raw_goal: dict[str, Any], graph: SchemaGraph) -> dict[str, Any]:
 
     started = time.monotonic()
     stage("nodes", started, root=goal.root, terminals=goal.terminals,
-          reasons={str(table): reasons for table, reasons in _node_reasons(goal, graph).items()})
+          reasons={str(table): reasons for table, reasons in _node_reasons(goal).items()})
 
     started = time.monotonic()
-    stage("graph", started, **_graph_view(graph))
+    stage("graph", started, **graph_view(graph))
 
     started = time.monotonic()
     try:
         tree = join_tree(graph, goal.root, goal.terminals)
     except NoJoinPath as ex:
         names = ", ".join(graph.table_name(table) for table in ex.unreachable)
-        stage("path", started, "failed", error=f"Không có quan hệ đã duyệt nối tới: {names}.", unreachable=ex.unreachable)
+        error = f"Không có quan hệ đã duyệt nối tới: {names}."
+        stage("path", started, "failed", error=error, unreachable=ex.unreachable)
         return stop("no_path", f"Chưa nối được dữ liệu: không có quan hệ đã duyệt nào dẫn tới {names}.")
     path = _path_view(tree, graph)
     problems = grain_problems(goal, tree.tables, graph)

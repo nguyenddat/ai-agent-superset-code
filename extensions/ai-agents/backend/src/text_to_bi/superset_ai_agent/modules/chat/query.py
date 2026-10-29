@@ -61,12 +61,12 @@ class PlannedQuery:
             "filters": [
                 sent
                 for item in filters
-                for sent in _whole_day_filters(item, item["column"] in self.timestamp_columns)
+                for sent in whole_day_filters(item, item["column"] in self.timestamp_columns)
             ],
         }
 
 
-def _whole_day_filters(item: dict[str, Any], timestamp: bool) -> list[dict[str, Any]]:
+def whole_day_filters(item: dict[str, Any], timestamp: bool) -> list[dict[str, Any]]:
     """A filter as sent; on a timestamp column a date means the whole day, so "<= 25/10" keeps 25/10 23:00."""
     sent = {"column": item["column"], "operator": item["operator"], "value": item["value"]}
     day = _date_only(item["value"]) if timestamp else None

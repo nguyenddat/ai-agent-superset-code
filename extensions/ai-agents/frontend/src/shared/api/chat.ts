@@ -1,3 +1,5 @@
+import { getJson, sendJson } from './http';
+
 export type QuestionStatus = 'resolved' | 'needs_review' | 'failed';
 export type MissingKind = 'glossary' | 'metric' | 'expert_rule';
 
@@ -157,26 +159,6 @@ const AGENT_API = '/extensions/text-to-bi/superset-ai-agent';
 const CHAT_ENDPOINT = `${AGENT_API}/chat/stream`;
 const SESSIONS_ENDPOINT = `${AGENT_API}/sessions`;
 const DEFINITIONS_ENDPOINT = `${AGENT_API}/definitions`;
-
-async function getJson(path: string) {
-  const response = await fetch(path, { credentials: 'same-origin' });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error || body.message || `Request failed (${response.status})`);
-  return body.result ?? body;
-}
-
-async function sendJson(path: string, method: 'PUT' | 'DELETE', payload?: unknown) {
-  const csrf = await getJson('/api/v1/security/csrf_token/');
-  const response = await fetch(path, {
-    method,
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
-    body: payload === undefined ? undefined : JSON.stringify(payload),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || body.message || `Request failed (${response.status})`);
-  return body.result ?? body;
-}
 
 /** The signed-in user's conversations, most recently active first. */
 export function listSessions(): Promise<ChatSession[]> {

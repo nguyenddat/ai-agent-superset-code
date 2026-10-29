@@ -1,3 +1,5 @@
+import { getJson, sendJson } from './http';
+
 const SCHEMA_LINK_API = '/extensions/text-to-bi/superset-ai-agent/schema-link';
 
 export type GraphLayer = { id: number; name: string; level: number };
@@ -38,7 +40,9 @@ export type NodesStage = StageBase & { root?: number; terminals?: number[]; reas
 
 export type GraphStage = StageBase & Partial<GraphView>;
 
-export type PathStep = { edge: number; from: number; to: number; forward: boolean; fanout: boolean; cost: number; on: string };
+export type PathStep = {
+  edge: number; from: number; to: number; forward: boolean; fanout: boolean; cost: number; on: string;
+};
 
 export type PathStage = StageBase & {
   algorithm?: 'dijkstra' | 'steiner' | 'steiner_heuristic';
@@ -48,7 +52,6 @@ export type PathStage = StageBase & {
   tables?: number[];
   steps?: PathStep[];
   alternatives?: Record<string, number[][]>;
-  ambiguous?: boolean;
   unreachable?: number[];
   problems?: Array<{ table: number; kind: string; message: string; options: string[] }>;
 };
@@ -60,46 +63,20 @@ export type AnalysisTrace = {
   stages: { goal: GoalStage; nodes: NodesStage; graph: GraphStage; path: PathStage };
 };
 
-async function readJson<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.message || body.error || `Yêu cầu thất bại (${response.status}).`);
-  return body as T;
-}
-
 export async function canUseSchemaLinkLab(): Promise<boolean> {
   try {
-    const body = await readJson<{ can_use_lab: boolean }>(await fetch(`${SCHEMA_LINK_API}/access`, { credentials: 'same-origin' }));
+    const body = await getJson(`${SCHEMA_LINK_API}/access`);
     return body.can_use_lab === true;
   } catch {
     return false;
   }
 }
 
-export async function getSchemaGraph(databaseId: number): Promise<{ tables: unknown[]; edges: unknown[]; database: { name: string } }> {
-  return readJson(await fetch(`${SCHEMA_LINK_API}/graph?database_id=${encodeURIComponent(databaseId)}`, { credentials: 'same-origin' }));
+/** The tables and approved relationships the lab draws before any analysis. */
+export function getSchemaGraph(databaseId: number): Promise<GraphView> {
+  return getJson(`${SCHEMA_LINK_API}/graph?database_id=${encodeURIComponent(databaseId)}`);
 }
 
-export async function analyzeGoal(databaseId: number, goal: unknown): Promise<AnalysisTrace> {
-  const csrf = await readJson<{ result: string }>(await fetch('/api/v1/security/csrf_token/', { credentials: 'same-origin' }));
-  const response = await fetch(`${SCHEMA_LINK_API}/analyze`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf.result },
-    body: JSON.stringify({ database_id: databaseId, goal }),
-  });
-  return readJson<AnalysisTrace>(response);
-}
-
-/** The raw schema graph turned into the view the analysis trace draws, for drawing before any analysis. */
-export function graphViewOf(payload: { tables: any[]; edges: any[]; excluded?: any[] }): GraphView {
-  return {
-    tables: payload.tables.map(table => ({
-      dataset_id: table.dataset_id, table: table.table, label: table.label ?? null, layer: table.layer ?? null,
-    })),
-    edges: payload.edges.map(edge => ({
-      id: edge.id, from: edge.from.dataset_id, from_column: edge.from.column, to: edge.to.dataset_id,
-      to_column: edge.to.column, cardinality: edge.cardinality,
-    })),
-    excluded: payload.excluded ?? [],
-  };
+export function analyzeGoal(databaseId: number, goal: unknown): Promise<AnalysisTrace> {
+  return sendJson(`${SCHEMA_LINK_API}/analyze`, 'POST', { database_id: databaseId, goal });
 }

@@ -28,7 +28,10 @@ const clipped = (value: string, length: number) => (value.length > length ? `${v
  */
 function layout(view: GraphView) {
   const pointsTo = new Map<number, number[]>();
-  for (const edge of view.edges) pointsTo.set(edge.from, [...(pointsTo.get(edge.from) ?? []), edge.to]);
+  for (const edge of view.edges) {
+    if (!pointsTo.has(edge.from)) pointsTo.set(edge.from, []);
+    pointsTo.get(edge.from)!.push(edge.to);
+  }
   const rank = new Map<number, number>();
   const rankOf = (table: number, seen: Set<number>): number => {
     if (rank.has(table)) return rank.get(table)!;
@@ -40,12 +43,14 @@ function layout(view: GraphView) {
   };
   view.tables.forEach(table => rankOf(table.dataset_id, new Set()));
   const deepest = Math.max(0, ...rank.values());
+  const columnOf = (table: number) => deepest - (rank.get(table) ?? 0);
   const columns = new Map<number, number[]>();
   for (const table of view.tables) {
-    const column = deepest - (rank.get(table.dataset_id) ?? 0);
-    columns.set(column, [...(columns.get(column) ?? []), table.dataset_id]);
+    const column = columnOf(table.dataset_id);
+    if (!columns.has(column)) columns.set(column, []);
+    columns.get(column)!.push(table.dataset_id);
   }
-  const columnOf = (table: number) => deepest - (rank.get(table) ?? 0);
+  const tableById = new Map(view.tables.map(table => [table.dataset_id, table]));
   const longEdges = view.edges.filter(edge => Math.abs(columnOf(edge.to) - columnOf(edge.from)) > 1);
   const lanes = new Map(longEdges.map((edge, index) => [edge.id, PADDING + index * LANE_GAP]));
   const top = PADDING + (longEdges.length ? longEdges.length * LANE_GAP + 8 : 0);
@@ -53,12 +58,15 @@ function layout(view: GraphView) {
   let height = 0;
   for (const [column, tables] of columns) {
     tables.sort((left, right) => {
-      const leftTable = view.tables.find(item => item.dataset_id === left)!;
-      const rightTable = view.tables.find(item => item.dataset_id === right)!;
-      return (leftTable.layer?.level ?? 9) - (rightTable.layer?.level ?? 9) || leftTable.table.localeCompare(rightTable.table);
+      const leftTable = tableById.get(left)!;
+      const rightTable = tableById.get(right)!;
+      const byLayer = (leftTable.layer?.level ?? 9) - (rightTable.layer?.level ?? 9);
+      return byLayer || leftTable.table.localeCompare(rightTable.table);
     });
     tables.forEach((table, index) => {
-      position.set(table, { x: PADDING + column * (NODE_WIDTH + COLUMN_GAP), y: top + index * (NODE_HEIGHT + ROW_GAP) });
+      position.set(table, {
+        x: PADDING + column * (NODE_WIDTH + COLUMN_GAP), y: top + index * (NODE_HEIGHT + ROW_GAP),
+      });
     });
     height = Math.max(height, top + PADDING + tables.length * (NODE_HEIGHT + ROW_GAP) - ROW_GAP);
   }
@@ -84,7 +92,9 @@ function edgePath(start: { x: number; y: number }, end: { x: number; y: number }
   return `M${from.x},${from.y} C${middle},${from.y} ${middle},${to.y} ${to.x},${to.y}`;
 }
 
-export function SchemaGraphView({ view, highlight = {}, caption }: { view: GraphView; highlight?: GraphHighlight; caption?: string }) {
+export function SchemaGraphView(
+  { view, highlight = {}, caption }: { view: GraphView; highlight?: GraphHighlight; caption?: string },
+) {
   const { position, width, height, lanes } = useMemo(() => layout(view), [view]);
   const terminals = new Set(highlight.terminals ?? []);
   const pathEdges = new Set(highlight.pathEdges ?? []);
@@ -92,7 +102,9 @@ export function SchemaGraphView({ view, highlight = {}, caption }: { view: Graph
   const pathTables = new Set(highlight.pathTables ?? []);
   const missing = new Set(highlight.missing ?? []);
   const showingPath = pathEdges.size > 0 || pathTables.size > 0;
-  const focused = (table: number) => (showingPath ? pathTables.has(table) : terminals.size === 0 || terminals.has(table));
+  const focused = (table: number) => (
+    showingPath ? pathTables.has(table) : terminals.size === 0 || terminals.has(table)
+  );
 
   const edgeClass = (edge: GraphEdge) => {
     if (fanoutEdges.has(edge.id)) return 'is-fanout';
@@ -104,9 +116,14 @@ export function SchemaGraphView({ view, highlight = {}, caption }: { view: Graph
     <figure className="ai-schema-graph">
       {caption ? <figcaption>{caption}</figcaption> : null}
       <div className="ai-schema-graph-scroll">
-        <svg width={width} height={height} role="img" aria-label={`Đồ thị ${view.tables.length} bảng, ${view.edges.length} quan hệ`}>
+        <svg
+          width={width} height={height} role="img"
+          aria-label={`Đồ thị ${view.tables.length} bảng, ${view.edges.length} quan hệ`}
+        >
           <defs>
-            <marker id="ai-schema-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <marker
+              id="ai-schema-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"
+            >
               <path d="M0,0 L8,4 L0,8 z" className="ai-schema-arrowhead" />
             </marker>
           </defs>
@@ -121,7 +138,10 @@ export function SchemaGraphView({ view, highlight = {}, caption }: { view: Graph
                 d={edgePath(start, end, lanes.get(edge.id))}
                 markerEnd="url(#ai-schema-arrow)"
               >
-                <title>{`${edge.from_column} → ${edge.to_column} (${edge.cardinality === 'one_to_one' ? '1 : 1' : 'n : 1'})`}</title>
+                <title>
+                  {`${edge.from_column} → ${edge.to_column} `
+                    + `(${edge.cardinality === 'one_to_one' ? '1 : 1' : 'n : 1'})`}
+                </title>
               </path>
             );
           })}
@@ -140,7 +160,10 @@ export function SchemaGraphView({ view, highlight = {}, caption }: { view: Graph
                 <rect width={NODE_WIDTH} height={NODE_HEIGHT} rx={8} />
                 <text x={12} y={21} className="ai-schema-node-label">{clipped(table.label ?? table.table, 27)}</text>
                 <text x={12} y={40} className="ai-schema-node-table">{clipped(table.table, 22)}</text>
-                <text x={NODE_WIDTH - 10} y={40} textAnchor="end" className={highlight.root === table.dataset_id ? 'ai-schema-node-badge' : 'ai-schema-node-layer'}>
+                <text
+                  x={NODE_WIDTH - 10} y={40} textAnchor="end"
+                  className={highlight.root === table.dataset_id ? 'ai-schema-node-badge' : 'ai-schema-node-layer'}
+                >
                   {highlight.root === table.dataset_id ? 'bảng gốc' : table.layer?.name ?? ''}
                 </text>
               </g>

@@ -40,6 +40,14 @@ class Step:
         return self.edge.to_table if self.forward else self.edge.from_table
 
     @property
+    def start_column(self) -> str:
+        return self.edge.from_column if self.forward else self.edge.to_column
+
+    @property
+    def end_column(self) -> str:
+        return self.edge.to_column if self.forward else self.edge.from_column
+
+    @property
     def fanout(self) -> bool:
         return not self.forward and self.edge.cardinality != "one_to_one"
 
@@ -54,6 +62,18 @@ class SchemaGraph:
     tables: dict[int, dict[str, Any]]
     edges: list[Edge]
     excluded: list[dict[str, Any]] = field(default_factory=list)
+    # Every way each table's edges may be walked, cheapest first; built once, as path searches ask for it per table.
+    _steps: dict[int, list[Step]] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        steps: dict[int, list[Step]] = {}
+        for edge in self.edges:
+            steps.setdefault(edge.from_table, []).append(Step(edge, forward=True))
+            steps.setdefault(edge.to_table, []).append(Step(edge, forward=False))
+        self._steps = {
+            table: sorted(found, key=lambda step: (step.cost, step.edge.id, not step.forward))
+            for table, found in steps.items()
+        }
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "SchemaGraph":
@@ -71,15 +91,7 @@ class SchemaGraph:
 
     def steps_from(self, table_id: int, allow_fanout: bool) -> list[Step]:
         """The steps leaving a table, every way an edge may be walked; fan-out steps only when allowed."""
-        steps = []
-        for edge in self.edges:
-            if edge.from_table == table_id:
-                steps.append(Step(edge, forward=True))
-            if edge.to_table == table_id:
-                step = Step(edge, forward=False)
-                if allow_fanout or not step.fanout:
-                    steps.append(step)
-        return sorted(steps, key=lambda step: (step.cost, step.edge.id, not step.forward))
+        return [step for step in self._steps.get(table_id, []) if allow_fanout or not step.fanout]
 
     def column(self, table_id: int, name: str) -> dict[str, Any] | None:
         table = self.tables.get(table_id)

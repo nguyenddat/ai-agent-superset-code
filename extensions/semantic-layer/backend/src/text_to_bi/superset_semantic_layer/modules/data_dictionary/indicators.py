@@ -111,19 +111,17 @@ def build_indicators_payload(dataset: Any, model: dict[str, Any]) -> dict[str, A
 
 
 def indicators_from_rows(rows: list[dict[str, Any]], model: dict[str, Any]) -> dict[str, Any]:
-    """Each indicator with its aggregation mapped, the codes found that the map does not cover, and whether there were
-    more indicators than the list keeps."""
+    """Each indicator with its aggregation mapped, the aggregation codes found, and whether there were more indicators
+    than the list keeps."""
     def value(row: dict[str, Any], field: str) -> Any:
         return row.get(model[field]) if model.get(field) else None
 
     aggregation_map = model.get("aggregation_map") or {}
-    indicators, unmapped = [], set()
+    indicators = []
     for row in rows[:MAX_INDICATORS]:
         if value(row, "key_column") is None:
             continue
         code = value(row, "aggregation_column")
-        if code is not None and str(code) not in aggregation_map:
-            unmapped.add(str(code))
         indicators.append({
             "key": value(row, "key_column"),
             "code": value(row, "code_column"),
@@ -134,12 +132,8 @@ def indicators_from_rows(rows: list[dict[str, Any]], model: dict[str, Any]) -> d
             "aggregation": aggregation_map.get(str(code)) if code is not None else None,
         })
     indicators.sort(key=lambda item: str(item["code"] or item["key"]))
-    value_kinds = sorted({str(item["value_kind"]) for item in indicators if item["value_kind"] is not None})
-    aggregation_codes = sorted({str(item["aggregation_code"]) for item in indicators if item["aggregation_code"] is not None})
+    aggregation_codes = {str(item["aggregation_code"]) for item in indicators if item["aggregation_code"] is not None}
     return {
-        "indicators": indicators,
-        "value_kinds": value_kinds,
-        "aggregation_codes": aggregation_codes,
-        "unmapped_aggregation_codes": sorted(unmapped),
+        "indicators": indicators, "aggregation_codes": sorted(aggregation_codes),
         "too_many": len(rows) > MAX_INDICATORS,
     }

@@ -51,7 +51,8 @@ def test_a_table_node_keeps_physical_columns_with_their_semantics():
     grains = [SimpleNamespace(row_kind_value="DU_BAO_GIO", label="Dự báo theo giờ", grain="hour")]
     layer = SimpleNamespace(id=2, name="Nghiệp vụ", level=1)
 
-    node = table_node(dataset, dictionary, entries, grains, {"loai_quan_sat": ["DU_BAO_GIO", "HIEN_TAI"]}, None, layer)
+    coded_values = {"loai_quan_sat": ["DU_BAO_GIO", "HIEN_TAI"]}
+    node = table_node(dataset, dictionary, entries, grains, coded_values, None, None, layer)
 
     assert [column["name"] for column in node["columns"]] == ["quan_sat_id", "loai_quan_sat", "thoi_diem_quan_sat"]
     row_kind = node["columns"][1]
@@ -67,22 +68,14 @@ def test_an_indicator_table_carries_its_declaration_and_indicators():
                                  row_kind_column=None, indicator_model=json.dumps(model))
     dataset = SimpleNamespace(id=13, schema=None, table_name="tb_gia_tri_quan_sat", description=None, columns=[])
 
-    node = table_node(dataset, dictionary, {}, [], {}, {"indicators": []}, None)
+    node = table_node(dataset, dictionary, {}, [], {}, model, {"indicators": []}, None)
 
     assert node["indicator_model"] == model and node["indicators"] == {"indicators": []}
     assert node["label"] == "tb_gia_tri_quan_sat" and node["layer"] is None
 
 
-def test_edges_need_an_approved_current_contract_with_both_ends_visible():
-    relationships = [
-        (_contract(3, 15, 10), True),
-        (_contract(1, 13, 15), True),
-        (_contract(2, 15, 99), True),          # the target table is hidden from the caller
-        (_contract(4, 15, 8), False),          # approved but no longer matching the live columns
-        (_contract(5, 15, 7, "candidate"), True),
-    ]
-
-    edges = graph_edges(relationships, {10, 13, 15, 8, 7})
+def test_edges_follow_contract_order():
+    edges = graph_edges([_contract(3, 15, 10), _contract(1, 13, 15)])
 
     assert [edge["id"] for edge in edges] == [1, 3]
     assert edges[0] == {
@@ -92,15 +85,18 @@ def test_edges_need_an_approved_current_contract_with_both_ends_visible():
 
 
 class _Field:
+    def __init__(self, name):
+        self.name = name
+
     def __eq__(self, value):
-        return ("==", value)
+        return (self.name, lambda found: found == value)
 
     def in_(self, values):
-        return ("in", set(values))
+        return (self.name, lambda found: found in set(values))
 
 
 class _Contracts:
-    status = from_dataset_id = _Field()
+    status, from_dataset_id, to_dataset_id = _Field("status"), _Field("from_dataset_id"), _Field("to_dataset_id")
 
 
 def _schema_graph_api(datasets, access, rls, contracts):
@@ -119,8 +115,9 @@ def _schema_graph_api(datasets, access, rls, contracts):
             self.items = items
 
         def filter(self, *conditions):
-            wanted = next(values for kind, values in conditions if kind == "in")
-            return Query([item for item in self.items if item.status == "approved" and item.from_dataset_id in wanted])
+            return Query([
+                item for item in self.items if all(test(getattr(item, name)) for name, test in conditions)
+            ])
 
         def all(self):
             return self.items
@@ -140,7 +137,8 @@ def _schema_graph_api(datasets, access, rls, contracts):
         "ColumnDictionaryRepository": lambda _session: SimpleNamespace(
             get_for_dataset_column=lambda dataset_id, column: SimpleNamespace(dataset_id=dataset_id, column_name=column),
         ),
-        "relationship_is_approved_current": lambda contract, *_ends: True,
+        # Contract 5 is approved but no longer matches the live columns.
+        "relationship_is_approved_current": lambda contract, *_ends: contract.id != 5,
     }
     exec(compile(ast.Module(body=[api_class], type_ignores=[]), str(ROUTE_PATH), "exec"), namespace)  # noqa: S102
     api = namespace["SemanticLayerAPI"]()
@@ -157,7 +155,10 @@ def test_the_route_hides_unreadable_tables_and_tables_under_rls_with_their_edges
     datasets = [SimpleNamespace(id=dataset_id, table_name=name) for dataset_id, name in (
         (13, "tb_gia_tri_quan_sat"), (15, "tb_quan_sat_thoi_tiet"), (10, "dm_thanh_pho"), (6, "dm_chi_so_thoi_tiet"),
     )]
-    contracts = [_contract(1, 13, 15), _contract(2, 15, 10), _contract(3, 13, 6), _contract(4, 15, 10, "revoked")]
+    contracts = [
+        _contract(1, 13, 15), _contract(2, 15, 10), _contract(3, 13, 6), _contract(4, 15, 10, "revoked"),
+        _contract(5, 15, 13),
+    ]
     api = _schema_graph_api(
         datasets, access={13: True, 15: True, 10: False, 6: True}, rls={6: ["region = 'north'"]}, contracts=contracts,
     )

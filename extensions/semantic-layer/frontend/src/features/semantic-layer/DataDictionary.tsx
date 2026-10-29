@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi, supersetApi } from './api';
 import { layerLevels } from './datasets';
+import { OptionSelect } from './ExpertRuleEditor';
 import { IndicatorsPanel } from './IndicatorsPanel';
 import { ReferenceFields } from './ReferenceFields';
 import { RelationshipsPanel } from './RelationshipsPanel';
@@ -687,17 +688,14 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                       </th>
                       <td><Input aria-label={`Display name của ${column.column_name}`} disabled={disabled} value={column.display_name} onChange={event => updateColumn(column.column_name, 'display_name', event.target.value)} /></td>
                       <td>
-                        <Select items={roleItems} value={column.semantic_role} disabled={disabled} onValueChange={role => {
-                          updateColumn(column.column_name, 'semantic_role', role);
-                          if (role !== 'measure') updateColumn(column.column_name, 'aggregations', []);
-                        }}>
-                          <SelectTrigger aria-label={`Vai trò của ${column.column_name}`} className="w-full"><SelectValue placeholder="Chưa rõ" /></SelectTrigger>
-                          <SelectContent alignItemWithTrigger={false}>
-                            <SelectGroup>
-                              {roleItems.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        <OptionSelect
+                          label={`Vai trò của ${column.column_name}`} items={roleItems} value={column.semantic_role}
+                          placeholder="Chưa rõ" size="default" className="w-full" disabled={disabled}
+                          onChange={role => {
+                            updateColumn(column.column_name, 'semantic_role', role);
+                            if (role !== 'measure') updateColumn(column.column_name, 'aggregations', []);
+                          }}
+                        />
                       </td>
                       <td><Textarea aria-label={`Business term của ${column.column_name}`} className="min-h-8 max-h-24 resize-none py-1" disabled={disabled} value={column.business_term ?? ''} onChange={event => updateColumn(column.column_name, 'business_term', normalizeNullableText(event.target.value))} /></td>
                       <td>
@@ -725,11 +723,22 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                           <div className="sl-column-semantics">
                             <label className="sl-column-detail">
                               Mô tả
-                              <Textarea aria-label={`Mô tả của ${column.column_name}`} className="min-h-8 max-h-24 resize-none py-1" disabled={disabled} value={column.description ?? ''} onChange={event => updateColumn(column.column_name, 'description', normalizeNullableText(event.target.value))} />
+                              <Textarea
+                                aria-label={`Mô tả của ${column.column_name}`}
+                                className="min-h-8 max-h-24 resize-none py-1" disabled={disabled}
+                                value={column.description ?? ''}
+                                onChange={event => updateColumn(
+                                  column.column_name, 'description', normalizeNullableText(event.target.value),
+                                )}
+                              />
                             </label>
                             <label className="sl-column-detail">
                               Từ đồng nghĩa
-                              <SynonymsInput label={`Từ đồng nghĩa của ${column.column_name}`} value={column.synonyms ?? []} disabled={disabled} onChange={synonyms => updateColumn(column.column_name, 'synonyms', synonyms)} />
+                              <SynonymsInput
+                                label={`Từ đồng nghĩa của ${column.column_name}`} value={column.synonyms ?? []}
+                                disabled={disabled}
+                                onChange={synonyms => updateColumn(column.column_name, 'synonyms', synonyms)}
+                              />
                             </label>
                             {column.semantic_role === 'measure' ? (
                               <fieldset className="sl-column-detail sl-aggregations">
@@ -744,7 +753,8 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                                           type="checkbox"
                                           disabled={disabled}
                                           checked={checked}
-                                          onChange={event => updateColumn(column.column_name, 'aggregations', event.target.checked
+                                          onChange={event => updateColumn(
+                                            column.column_name, 'aggregations', event.target.checked
                                             ? [...selected, aggregation]
                                             : selected.filter(item => item !== aggregation))}
                                         />

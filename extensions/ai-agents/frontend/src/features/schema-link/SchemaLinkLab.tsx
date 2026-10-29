@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FlaskConical, LoaderCircle, Route } from 'lucide-react';
-import { AnalysisTrace as Trace, GraphView, analyzeGoal, getSchemaGraph, graphViewOf } from '../../shared/api/schemaLink';
+import { AnalysisTrace as Trace, GraphView, analyzeGoal, getSchemaGraph } from '../../shared/api/schemaLink';
 import { AnalysisTrace } from './AnalysisTrace';
 import { SchemaGraphView } from './SchemaGraphView';
 
@@ -69,10 +69,19 @@ export function SchemaLinkLab() {
     setGraph(null);
     setGraphError('');
     getSchemaGraph(databaseId)
-      .then(payload => { if (active) setGraph(graphViewOf(payload as never)); })
-      .catch(reason => { if (active) setGraphError(reason instanceof Error ? reason.message : 'Không đọc được đồ thị.'); });
+      .then(view => { if (active) setGraph(view); })
+      .catch(reason => {
+        if (active) setGraphError(reason instanceof Error ? reason.message : 'Không đọc được đồ thị.');
+      });
     return () => { active = false; };
   }, [databaseId]);
+
+  const choosePreset = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const preset = PRESETS[Number(event.target.value)];
+    if (!preset) return;
+    setGoalText(pretty(preset.goal));
+    setTrace(null);
+  };
 
   const run = async () => {
     setError('');
@@ -109,11 +118,14 @@ export function SchemaLinkLab() {
         <div className="ai-lab-controls">
           <label>
             Database ID
-            <input type="number" min={1} value={databaseId} onChange={event => setDatabaseId(Number(event.target.value) || 1)} />
+            <input
+              type="number" min={1} value={databaseId}
+              onChange={event => setDatabaseId(Number(event.target.value) || 1)}
+            />
           </label>
           <label className="ai-lab-preset">
             Mẫu
-            <select onChange={event => { const preset = PRESETS[Number(event.target.value)]; if (preset) { setGoalText(pretty(preset.goal)); setTrace(null); } }}>
+            <select onChange={choosePreset}>
               {PRESETS.map((preset, index) => <option key={preset.label} value={index}>{preset.label}</option>)}
             </select>
           </label>
@@ -122,13 +134,23 @@ export function SchemaLinkLab() {
             {running ? 'Đang phân tích…' : 'Phân tích'}
           </button>
         </div>
-        <textarea aria-label="Mục tiêu (JSON)" spellCheck={false} value={goalText} onChange={event => setGoalText(event.target.value)} />
-        {error ? <p className="ai-lab-error" role="alert">{error}</p> : null}
+        <textarea
+          aria-label="Mục tiêu (JSON)" spellCheck={false} value={goalText}
+          onChange={event => setGoalText(event.target.value)}
+        />
+        {error ? <p className="ai-page-state is-error" role="alert">{error}</p> : null}
       </div>
       {trace && graph ? <AnalysisTrace trace={trace} fallbackGraph={graph} /> : null}
-      {!trace && graph ? <SchemaGraphView view={graph} caption={`Đồ thị schema · ${graph.tables.length} base table, ${graph.edges.length} quan hệ đã duyệt`} /> : null}
-      {graphError ? <p className="ai-lab-error" role="alert">{graphError}</p> : null}
-      {!graph && !graphError ? <p className="ai-lab-note"><LoaderCircle className="ai-spin" aria-hidden="true" /> Đang đọc đồ thị…</p> : null}
+      {!trace && graph ? (
+        <SchemaGraphView
+          view={graph}
+          caption={`Đồ thị schema · ${graph.tables.length} base table, ${graph.edges.length} quan hệ đã duyệt`}
+        />
+      ) : null}
+      {graphError ? <p className="ai-page-state is-error" role="alert">{graphError}</p> : null}
+      {!graph && !graphError ? (
+        <p className="ai-page-state"><LoaderCircle className="ai-spin" aria-hidden="true" /> Đang đọc đồ thị…</p>
+      ) : null}
     </div>
   );
 }

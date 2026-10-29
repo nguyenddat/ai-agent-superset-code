@@ -298,9 +298,7 @@ export type Indicator = {
 
 export type IndicatorsResponse = {
   indicators: Indicator[];
-  value_kinds: string[];
   aggregation_codes: string[];
-  unmapped_aggregation_codes: string[];
   too_many: boolean;
 };
 

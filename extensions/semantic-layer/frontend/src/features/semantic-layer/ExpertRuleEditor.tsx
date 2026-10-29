@@ -53,22 +53,27 @@ function buildCondition(draft: ConditionDraft, column: ExpertRuleColumnOption): 
   return { field_ref: fieldRef, operator: draft.operator, value_type: kind, value };
 }
 
-export function OptionSelect({ label, items, value, placeholder, className = 'w-full min-w-0', onChange }: {
+/** A labelled select; an item whose value is null stands for "none". */
+export function OptionSelect<Value extends string | null = string>({
+  label, items, value, placeholder, className = 'w-full min-w-0', size = 'sm', disabled, onChange,
+}: {
   label: string;
-  items: OptionItem[];
-  value: string | null;
+  items: Array<{ value: Value; label: string }>;
+  value: Value | null;
   placeholder?: string;
   className?: string;
-  onChange: (value: string) => void;
+  size?: 'sm' | 'default';
+  disabled?: boolean;
+  onChange: (value: Value) => void;
 }) {
   return (
-    <Select items={items} value={value} onValueChange={selected => onChange(String(selected))}>
-      <SelectTrigger size="sm" aria-label={label} className={className}>
+    <Select items={items} value={value} disabled={disabled} onValueChange={selected => onChange(selected as Value)}>
+      <SelectTrigger size={size} aria-label={label} className={className}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent alignItemWithTrigger={false}>
         <SelectGroup>
-          {items.map(item => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          {items.map(item => <SelectItem key={item.value ?? 'none'} value={item.value}>{item.label}</SelectItem>)}
         </SelectGroup>
       </SelectContent>
     </Select>

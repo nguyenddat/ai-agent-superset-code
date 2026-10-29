@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, Circle, Play, X } from 'lucide-react';
 import type { AnalysisTrace as Trace, GraphView, StageStatus } from '../../shared/api/schemaLink';
 import { GraphHighlight, SchemaGraphView } from './SchemaGraphView';
@@ -48,11 +48,15 @@ function highlightFor(trace: Trace, stage: StageName): GraphHighlight {
 }
 
 export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallbackGraph: GraphView }) {
-  const view: GraphView = trace.stages.graph.tables
-    ? { tables: trace.stages.graph.tables, edges: trace.stages.graph.edges ?? [], excluded: trace.stages.graph.excluded ?? [] }
-    : fallbackGraph;
-  const lastReached = [...STAGES].reverse().find(stage => trace.stages[stage.name].status !== 'pending')?.name ?? 'goal';
+  // Kept the same object between renders, so the graph is laid out again only when the trace or graph changes.
+  const view = useMemo<GraphView>(() => {
+    const { tables, edges, excluded } = trace.stages.graph;
+    return tables ? { tables, edges: edges ?? [], excluded: excluded ?? [] } : fallbackGraph;
+  }, [trace, fallbackGraph]);
+  const lastReached = [...STAGES].reverse()
+    .find(stage => trace.stages[stage.name].status !== 'pending')?.name ?? 'goal';
   const [selected, setSelected] = useState<StageName>(lastReached);
+  const highlight = useMemo(() => highlightFor(trace, selected), [trace, selected]);
   const [playing, setPlaying] = useState(false);
   const timer = useRef<number | null>(null);
 
@@ -71,6 +75,7 @@ export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallback
   };
 
   const { goal, nodes, path } = trace.stages;
+  const ambiguousTables = Object.keys(path.alternatives ?? {}).map(id => tableName(view, Number(id)));
   const details: Record<StageName, React.ReactNode> = {
     goal: goal.error ? null : (
       <dl className="ai-trace-goal">
@@ -85,19 +90,22 @@ export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallback
         {goal.group_by?.length ? <dt>Chia theo</dt> : null}
         {goal.group_by?.map(item => (
           <dd key={`${item.dataset_id}.${item.column}`}>
-            <strong>{item.label}{item.time_grain ? ` (${item.time_grain})` : ''}</strong><code>{item.table}.{item.column}</code>
+            <strong>{item.label}{item.time_grain ? ` (${item.time_grain})` : ''}</strong>
+            <code>{item.table}.{item.column}</code>
           </dd>
         ))}
         {goal.filters?.length ? <dt>Lọc</dt> : null}
         {goal.filters?.map(item => (
           <dd key={`${item.dataset_id}.${item.column}.${item.operator}.${shownValue(item.value)}`}>
-            <strong>{item.label}</strong><code>{item.table}.{item.column} {item.operator} {shownValue(item.value)}</code><em>{item.source}</em>
+            <strong>{item.label}</strong>
+            <code>{item.table}.{item.column} {item.operator} {shownValue(item.value)}</code><em>{item.source}</em>
           </dd>
         ))}
         {goal.row_kinds?.length ? <dt>Loại dòng</dt> : null}
         {goal.row_kinds?.map(item => (
           <dd key={`${item.dataset_id}.${item.value}`}>
-            <strong>{item.label}</strong><code>{item.table}.{item.column} = {item.value}</code><em>grain {item.grain}</em>
+            <strong>{item.label}</strong>
+            <code>{item.table}.{item.column} = {item.value}</code><em>grain {item.grain}</em>
           </dd>
         ))}
       </dl>
@@ -106,7 +114,8 @@ export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallback
       <ul className="ai-trace-nodes">
         {nodes.terminals.map(table => (
           <li key={table} className={table === nodes.root ? 'is-root' : undefined}>
-            <code>{tableName(view, table)}</code>{table === nodes.root ? <span className="ai-trace-badge">bảng gốc</span> : null}
+            <code>{tableName(view, table)}</code>
+            {table === nodes.root ? <span className="ai-trace-badge">bảng gốc</span> : null}
             <span>{(nodes.reasons?.[String(table)] ?? []).join(' · ')}</span>
           </li>
         ))}
@@ -128,17 +137,21 @@ export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallback
           {path.steps.map(step => (
             <li key={step.edge} className={step.fanout ? 'is-fanout' : undefined}>
               <code>{step.on}</code>
-              <span>{step.forward ? 'nhiều → một' : 'ngược chiều'} · chi phí {step.cost}{step.fanout ? ' · nhân dòng' : ''}</span>
+              <span>
+                {step.forward ? 'nhiều → một' : 'ngược chiều'} · chi phí {step.cost}{step.fanout ? ' · nhân dòng' : ''}
+              </span>
             </li>
           ))}
         </ol>
-        {path.ambiguous ? (
+        {ambiguousTables.length ? (
           <p className="ai-trace-warning">
-            <AlertTriangle /> Có đường khác cùng chi phí tới {Object.keys(path.alternatives ?? {}).map(id => tableName(view, Number(id))).join(', ')};
+            <AlertTriangle /> Có đường khác cùng chi phí tới {ambiguousTables.join(', ')};
             schema link sẽ hỏi lại người dùng khi không chọn được theo cột.
           </p>
         ) : null}
-        {path.problems?.map(problem => <p key={problem.message} className="ai-trace-warning"><AlertTriangle /> {problem.message}</p>)}
+        {path.problems?.map(problem => (
+          <p key={problem.message} className="ai-trace-warning"><AlertTriangle /> {problem.message}</p>
+        ))}
       </div>
     ) : null,
   };
@@ -150,13 +163,18 @@ export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallback
           <span className={`ai-trace-status is-${trace.status === 'ok' ? 'ok' : 'stopped'}`}>
             {trace.status === 'ok' ? 'Dựng được truy vấn' : `Dừng: ${trace.message}`}
           </span>
-          <button type="button" className="ai-trace-play" disabled={playing} onClick={play}><Play aria-hidden="true" /> Phát lại</button>
+          <button type="button" className="ai-trace-play" disabled={playing} onClick={play}>
+            <Play aria-hidden="true" /> Phát lại
+          </button>
         </div>
         <ol>
           {STAGES.map((stage, index) => {
             const result = trace.stages[stage.name];
             return (
-              <li key={stage.name} className={`ai-trace-stage is-${result.status}${selected === stage.name ? ' is-selected' : ''}`}>
+              <li
+                key={stage.name}
+                className={`ai-trace-stage is-${result.status}${selected === stage.name ? ' is-selected' : ''}`}
+              >
                 <button type="button" onClick={() => setSelected(stage.name)} aria-pressed={selected === stage.name}>
                   <span className="ai-trace-stage-icon"><StatusIcon status={result.status} /></span>
                   <span className="ai-trace-stage-title">{index + 1}. {stage.title}</span>
@@ -173,7 +191,7 @@ export function AnalysisTrace({ trace, fallbackGraph }: { trace: Trace; fallback
       <div className="ai-trace-canvas">
         <SchemaGraphView
           view={view}
-          highlight={highlightFor(trace, selected)}
+          highlight={highlight}
           caption={STAGES.find(stage => stage.name === selected)?.title
             + (trace.stages.nodes.root !== undefined ? ` · bảng gốc ${tableName(view, trace.stages.nodes.root)}` : '')}
         />

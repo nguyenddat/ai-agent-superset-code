@@ -9,6 +9,7 @@ from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
 from ...models.question_log import AgentChatSession, AgentQuestion, AgentUserDefinition, ensure_question_tables
+from ..access import valid_csrf
 from ..definitions.conditions import conditions_for
 from ..definitions.parsing import DefinitionError, parse_definitions
 from ..definitions.route import serialize_definition, user_definitions
@@ -74,17 +75,6 @@ class AgentChatSessionAPI(RestApi):
         ensure_question_tables(db.engine)
         return db.session.query(AgentChatSession).filter_by(id=session_id, user_id=int(current_user.id)).one_or_none()
 
-    @staticmethod
-    def _valid_csrf() -> bool:
-        from flask_wtf.csrf import validate_csrf
-        from wtforms import ValidationError
-
-        try:
-            validate_csrf(request.headers.get("X-CSRFToken"))
-        except ValidationError:
-            return False
-        return True
-
     @expose("/", methods=("GET",))
     @protect()
     @safe
@@ -138,7 +128,7 @@ class AgentChatSessionAPI(RestApi):
         `{"state": "confirmed", "definitions": [...]}` keeps what the user chose for every conversation they have about
         the dashboard; `{"state": "dismissed"}` keeps nothing.
         """
-        if not self._valid_csrf():
+        if not valid_csrf():
             return self.response(403, message="CSRF token không hợp lệ.")
         chat_session = self._own_session(session_id)
         if chat_session is None:
@@ -187,7 +177,7 @@ class AgentChatSessionAPI(RestApi):
     @permission_name("write")
     def rename_session(self, session_id: int):
         """Rename a conversation."""
-        if not self._valid_csrf():
+        if not valid_csrf():
             return self.response(403, message="CSRF token không hợp lệ.")
         chat_session = self._own_session(session_id)
         if chat_session is None:
@@ -206,7 +196,7 @@ class AgentChatSessionAPI(RestApi):
     @permission_name("write")
     def delete_session(self, session_id: int):
         """Delete a conversation; its questions stay in the log, and the user's definitions stay for the dashboard."""
-        if not self._valid_csrf():
+        if not valid_csrf():
             return self.response(403, message="CSRF token không hợp lệ.")
         chat_session = self._own_session(session_id)
         if chat_session is None:

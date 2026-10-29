@@ -30,8 +30,6 @@
   background: var(--ai-surface-muted); border: 1px solid var(--ai-border); border-radius: 10px; color: var(--ai-text);
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; min-height: 190px; padding: 10px 12px; resize: vertical;
 }
-.ai-lab-error { color: #c03a3a; font-size: 13px; margin: 0; }
-.ai-lab-note { align-items: center; color: var(--ai-muted); display: flex; font-size: 13px; gap: 8px; margin: 0; }
 
 /* The graph: tables in columns by how far their keys point, edges as curves; the chosen path in the accent. */
 .ai-schema-graph { margin: 0; }

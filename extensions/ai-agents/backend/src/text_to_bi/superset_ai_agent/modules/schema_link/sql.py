@@ -5,18 +5,16 @@ nothing a user types becomes SQL. A date filter on a timestamp column covers the
 The query is read-only by construction: one SELECT with a LIMIT.
 """
 
-import re
-from datetime import date, timedelta
 from typing import Any
 
 from sqlglot import exp
 
-from .goal import Filter, Goal
+from ..chat.query import whole_day_filters
+from .goal import Goal
 from .graph import SchemaGraph
 from .paths import JoinTree
 
 DIALECTS = {"postgresql": "postgres", "postgres": "postgres", "mysql": "mysql", "sqlite": "sqlite"}
-_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _AGGREGATES = {"SUM": exp.Sum, "AVG": exp.Avg, "MIN": exp.Min, "MAX": exp.Max}
 _COMPARISONS = {"==": exp.EQ, "!=": exp.NEQ, "<": exp.LT, "<=": exp.LTE, ">": exp.GT, ">=": exp.GTE}
 
@@ -27,18 +25,6 @@ def _literal(value: Any) -> exp.Expression:
     if isinstance(value, (int, float)):
         return exp.Literal.number(value)
     return exp.Literal.string(str(value))
-
-
-def _whole_day(item: Filter, temporal_kind: str | None) -> list[tuple[str, Any]]:
-    """A date on a timestamp column means the whole day: "<= 25/10" keeps 25/10 23:00."""
-    if temporal_kind != "timestamp" or not isinstance(item.value, str) or not _DATE.match(item.value):
-        return [(item.operator, item.value)]
-    next_day = (date.fromisoformat(item.value) + timedelta(days=1)).isoformat()
-    return {
-        "==": [(">=", item.value), ("<", next_day)],
-        "<=": [("<", next_day)],
-        ">": [(">=", next_day)],
-    }.get(item.operator, [(item.operator, item.value)])
 
 
 def _condition(column: exp.Expression, operator: str, value: Any) -> exp.Expression:
@@ -69,9 +55,8 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
 
     query = exp.select().from_(table(tree.root))
     for step in tree.steps:
-        start_column = step.edge.from_column if step.forward else step.edge.to_column
-        end_column = step.edge.to_column if step.forward else step.edge.from_column
-        query = query.join(table(step.end), on=exp.EQ(this=column(step.start, start_column), expression=column(step.end, end_column)))
+        joined_on = exp.EQ(this=column(step.start, step.start_column), expression=column(step.end, step.end_column))
+        query = query.join(table(step.end), on=joined_on)
 
     taken: set[str] = set()
     groups = []
@@ -95,13 +80,15 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
 
     conditions = []
     for item in goal.filters:
-        temporal_kind = (graph.column(item.table, item.column) or {}).get("temporal_kind")
-        for operator, value in _whole_day(item, temporal_kind):
-            conditions.append(_condition(column(item.table, item.column), operator, value))
+        timestamp = (graph.column(item.table, item.column) or {}).get("temporal_kind") == "timestamp"
+        sent = {"column": item.column, "operator": item.operator, "value": item.value}
+        for part in whole_day_filters(sent, timestamp):
+            conditions.append(_condition(column(item.table, item.column), part["operator"], part["value"]))
     for item in goal.row_kinds:
         conditions.append(_condition(column(item.table, item.column), "==", item.value))
     if conditions:
         query = query.where(exp.and_(*conditions))
     if groups:
-        query = query.group_by(*[expression.copy() for expression in groups]).order_by(*[expression.copy() for expression in groups])
+        query = query.group_by(*[expression.copy() for expression in groups])
+        query = query.order_by(*[expression.copy() for expression in groups])
     return query.limit(goal.limit).sql(dialect=dialect, pretty=True)

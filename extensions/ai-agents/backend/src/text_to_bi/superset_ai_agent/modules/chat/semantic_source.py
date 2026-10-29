@@ -8,6 +8,7 @@ rules on datasets the user may access. Nothing here reads the Semantic Layer's t
 import os
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -206,17 +207,21 @@ _cache_lock = threading.Lock()
 _cached_catalogs: dict[int, tuple[float, SemanticCatalog]] = {}
 
 
-def cached_semantic_catalog(user_id: int, cookie_header: str) -> SemanticCatalog:
-    """The user's catalog, read again after `CATALOG_CACHE_SECONDS`; it is per user because access differs."""
+def _cached(store: dict, key: Any, load: Callable[[], Any]) -> Any:
+    """What `load` returns for `key`, read again after `CATALOG_CACHE_SECONDS`; keyed by user because access differs."""
     now = time.monotonic()
     with _cache_lock:
-        cached = _cached_catalogs.get(user_id)
+        cached = store.get(key)
     if cached and now - cached[0] < CATALOG_CACHE_SECONDS:
         return cached[1]
-    catalog = load_semantic_catalog(cookie_header)
+    value = load()
     with _cache_lock:
-        _cached_catalogs[user_id] = (now, catalog)
-    return catalog
+        store[key] = (now, value)
+    return value
+
+
+def cached_semantic_catalog(user_id: int, cookie_header: str) -> SemanticCatalog:
+    return _cached(_cached_catalogs, user_id, lambda: load_semantic_catalog(cookie_header))
 
 
 @dataclass
@@ -263,15 +268,16 @@ _cached_sources: dict[int, tuple[float, DataModelSources]] = {}
 
 
 def cached_data_model_sources(user_id: int, cookie_header: str) -> DataModelSources:
-    now = time.monotonic()
-    with _cache_lock:
-        cached = _cached_sources.get(user_id)
-    if cached and now - cached[0] < CATALOG_CACHE_SECONDS:
-        return cached[1]
-    sources = load_data_model_sources(cookie_header)
-    with _cache_lock:
-        _cached_sources[user_id] = (now, sources)
-    return sources
+    return _cached(_cached_sources, user_id, lambda: load_data_model_sources(cookie_header))
+
+
+_cached_schema_graphs: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
+
+
+def cached_schema_graph(user_id: int, database_id: int, cookie_header: str) -> dict[str, Any]:
+    """The base tables of one database the user may read in full, and the approved relationships between them."""
+    path = f"{SEMANTIC_LAYER_API}/schema-graph?database_id={database_id}"
+    return _cached(_cached_schema_graphs, (user_id, database_id), lambda: _get_json(path, cookie_header))
 
 
 def _post_json(path: str, body: dict[str, Any], cookie_header: str, csrf_token: str, failure: str) -> dict[str, Any]:

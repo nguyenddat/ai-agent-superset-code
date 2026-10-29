@@ -720,23 +720,34 @@ def _migrate_dictionary_tables():
             ("semantic_role", "VARCHAR(16)"), ("aggregations", "TEXT"), ("synonyms", "TEXT"), ("description", "TEXT"),
         ):
             if column_name not in dictionary_columns:
-                connection.execute(text(f"ALTER TABLE text_to_bi_column_dictionary ADD COLUMN {column_name} {column_type}"))
+                connection.execute(
+                    text(f"ALTER TABLE text_to_bi_column_dictionary ADD COLUMN {column_name} {column_type}")
+                )
                 added = True
         if added:
-            # Rows seeded before roles existed take the role default_semantic_role would give them.
-            connection.execute(
+            # Rows seeded before roles existed take the role default_semantic_role gives them.
+            unset = connection.execute(
                 text(
-                    "UPDATE text_to_bi_column_dictionary SET semantic_role = CASE "
-                    "WHEN is_pk OR is_fk THEN 'key' "
-                    "WHEN column_name = (SELECT dataset.row_kind_column FROM text_to_bi_dataset_dictionary dataset "
-                    "WHERE dataset.id = text_to_bi_column_dictionary.dataset_id) THEN 'row_kind' "
-                    "WHEN temporal_kind IS NOT NULL THEN 'time' "
-                    "WHEN UPPER(data_type) LIKE '%INT%' OR UPPER(data_type) LIKE '%NUMERIC%' "
-                    "OR UPPER(data_type) LIKE '%DECIMAL%' OR UPPER(data_type) LIKE '%FLOAT%' "
-                    "OR UPPER(data_type) LIKE '%DOUBLE%' OR UPPER(data_type) LIKE '%REAL%' THEN 'measure' "
-                    "ELSE 'dimension' END WHERE semantic_role IS NULL"
+                    "SELECT entry.id, entry.data_type, entry.temporal_kind, entry.is_pk OR entry.is_fk AS is_key, "
+                    "entry.column_name = dataset.row_kind_column AS is_row_kind "
+                    "FROM text_to_bi_column_dictionary entry "
+                    "LEFT JOIN text_to_bi_dataset_dictionary dataset ON dataset.id = entry.dataset_id "
+                    "WHERE entry.semantic_role IS NULL"
                 )
-            )
+            ).all()
+            if unset:
+                connection.execute(
+                    text("UPDATE text_to_bi_column_dictionary SET semantic_role = :role WHERE id = :id"),
+                    [
+                        {
+                            "id": row.id,
+                            "role": default_semantic_role(
+                                row.data_type, row.temporal_kind, bool(row.is_key), bool(row.is_row_kind),
+                            ),
+                        }
+                        for row in unset
+                    ],
+                )
 
     if postgres:
         with db.engine.begin() as connection:
@@ -2360,22 +2371,24 @@ class SemanticLayerAPI(RestApi):
                 continue
             nodes.append(self._schema_graph_node(dataset))
         node_ids = {node["dataset_id"] for node in nodes}
-        contracts = db.session.query(RelationshipContract).filter(
-            RelationshipContract.status == "approved", RelationshipContract.from_dataset_id.in_(node_ids),
+        approved = db.session.query(RelationshipContract).filter(
+            RelationshipContract.status == "approved",
+            RelationshipContract.from_dataset_id.in_(node_ids),
+            RelationshipContract.to_dataset_id.in_(node_ids),
         ).all() if node_ids else []
-        relationships = []
-        for contract in contracts:
-            entry = ColumnDictionaryRepository(db.session).get_for_dataset_column(
-                contract.from_dataset_id, contract.from_column,
-            )
+        column_repository = ColumnDictionaryRepository(db.session)
+        current = []
+        for contract in approved:
+            entry = column_repository.get_for_dataset_column(contract.from_dataset_id, contract.from_column)
             ends = self._relationship_ends(entry) if entry is not None else None
-            relationships.append((contract, bool(ends) and relationship_is_approved_current(contract, *ends)))
+            if ends and relationship_is_approved_current(contract, *ends):
+                current.append(contract)
         return self.response(
             200,
             version=GRAPH_VERSION,
             database={"id": database.id, "name": database.database_name, "dialect": database.backend},
             tables=nodes,
-            edges=graph_edges(relationships, node_ids),
+            edges=graph_edges(current),
             excluded=excluded,
         )
 
@@ -2396,7 +2409,8 @@ class SemanticLayerAPI(RestApi):
                 # The graph still serves the table; linking then cannot name its indicators.
                 logger.exception("Reading the indicators of %s for the schema graph failed", dataset.table_name)
         layer = db.session.get(DataLayer, dictionary.layer_id) if dictionary and dictionary.layer_id else None
-        return table_node(dataset, dictionary, entries, grains, self._coded_values(dataset, entries), indicators, layer)
+        coded_values = self._coded_values(dataset, entries)
+        return table_node(dataset, dictionary, entries, grains, coded_values, model, indicators, layer)
 
     def _catalog_metric_details(self, dataset_ids: set[int]) -> Any:
         """Business definition, unit, steward and discoverable glossary terms for each catalog metric."""
@@ -2654,7 +2668,9 @@ class SemanticLayerAPI(RestApi):
                 indicator_model = checked_indicator_model(dataset_updates.pop("indicator_model"), actual_column_names)
             except ValueError as ex:
                 return self.response_400(message=str(ex))
-            dataset_updates["indicator_model"] = json.dumps(indicator_model, ensure_ascii=False) if indicator_model else None
+            dataset_updates["indicator_model"] = (
+                json.dumps(indicator_model, ensure_ascii=False) if indicator_model else None
+            )
         for field in ("time_column", "row_kind_column"):
             if time_updates.get(field) == "":
                 time_updates[field] = None

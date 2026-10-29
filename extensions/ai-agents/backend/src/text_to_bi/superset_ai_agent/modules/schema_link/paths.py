@@ -138,18 +138,24 @@ def steiner_tree(graph: SchemaGraph, root: int, terminals: list[int]) -> JoinTre
     """A directed Steiner tree from the root over every step, fan-out ones included. Raises NoJoinPath."""
     targets = [table for table in dict.fromkeys(terminals) if table != root]
     tables = sorted(graph.tables)
-    searches = {table: _shortest_paths(graph, table, allow_fanout=True) for table in tables}
-    unreachable = [table for table in targets if table not in searches[root][0]]
+    searches: dict[int, tuple] = {}
+
+    def search(start: int) -> tuple:
+        if start not in searches:
+            searches[start] = _shortest_paths(graph, start, allow_fanout=True)
+        return searches[start]
+
+    unreachable = [table for table in targets if table not in search(root)[0]]
     if unreachable:
         raise NoJoinPath(unreachable)
     if not targets:
         return JoinTree(root, [], "steiner")
 
     def distance(start: int, end: int) -> float:
-        return searches[start][0].get(end, INFINITY)
+        return search(start)[0].get(end, INFINITY)
 
     def path(start: int, end: int) -> list[Step]:
-        return _path_to(searches[start][1], start, end)
+        return _path_to(search(start)[1], start, end)
 
     if len(targets) > EXACT_TERMINALS:
         return JoinTree(root, _ordered(root, _takahashi_matsuyama(root, targets, distance, path)), "steiner_heuristic")
@@ -170,12 +176,12 @@ def _dreyfus_wagner(root, targets, tables, distance, path) -> list[Step]:
                 merged_split[table] = None
                 continue
             merged[table], merged_split[table] = INFINITY, None
-            sub = (mask - 1) & mask
-            while sub:
-                candidate = best[sub][table] + best[mask ^ sub][table]
+            subset = (mask - 1) & mask
+            while subset:
+                candidate = best[subset][table] + best[mask ^ subset][table]
                 if candidate < merged[table]:
-                    merged[table], merged_split[table] = candidate, sub
-                sub = (sub - 1) & mask
+                    merged[table], merged_split[table] = candidate, subset
+                subset = (subset - 1) & mask
         best[mask], split[mask], move[mask] = {}, merged_split, {}
         for table in tables:
             options = [(distance(table, other) + merged[other], other) for other in tables]
@@ -201,7 +207,9 @@ def _takahashi_matsuyama(root, targets, distance, path) -> list[Step]:
     """Heuristic: grow the tree by the cheapest path from any table in it to a target not reached yet."""
     in_tree, remaining, steps = {root}, set(targets), []
     while remaining:
-        _cost, start, target = min((distance(start, target), start, target) for start in in_tree for target in remaining)
+        _cost, start, target = min(
+            (distance(start, target), start, target) for start in in_tree for target in remaining
+        )
         new_steps = path(start, target)
         steps.extend(new_steps)
         in_tree.update(step.end for step in new_steps)

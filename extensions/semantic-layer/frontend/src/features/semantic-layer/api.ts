@@ -35,7 +35,8 @@ export const semanticLayerApi = {
     return `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/grain-profile?${query}`;
   },
   indicators: (datasetId: number, model: unknown) => (
-    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/indicators?model=${encodeURIComponent(JSON.stringify(model))}`
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/indicators`
+    + `?model=${encodeURIComponent(JSON.stringify(model))}`
   ),
   relationships: (datasetId: number, suggest = false) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/relationships${suggest ? '?suggest=1' : ''}`

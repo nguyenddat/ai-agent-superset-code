@@ -10,6 +10,7 @@ from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
 from ...models.question_log import AgentQuestion, AgentUserDefinition, ensure_question_tables
+from ..access import is_admin, valid_csrf
 from .conditions import conditions_for
 from .parsing import DefinitionError, parse_definition
 
@@ -22,23 +23,6 @@ MAX_REVIEW_IDS = 200
 
 def _isoformat(value) -> str | None:
     return value.isoformat() if value else None
-
-
-def _is_admin() -> bool:
-    return bool(current_user and current_user.is_authenticated and any(
-        role.name == "Admin" for role in getattr(current_user, "roles", [])
-    ))
-
-
-def _valid_csrf() -> bool:
-    from flask_wtf.csrf import validate_csrf
-    from wtforms import ValidationError
-
-    try:
-        validate_csrf(request.headers.get("X-CSRFToken"))
-    except ValidationError:
-        return False
-    return True
 
 
 def user_definitions(user_id: int, dashboard_id: int) -> list[AgentUserDefinition]:
@@ -122,7 +106,7 @@ class AgentUserDefinitionAPI(RestApi):
     @permission_name("write")
     def update_own(self, definition_id: int):
         """Change what the user's definition says; administrators see it again as not yet reviewed."""
-        if not _valid_csrf():
+        if not valid_csrf():
             return self.response(403, message="CSRF token không hợp lệ.")
         definition = self._own_definition(definition_id)
         if definition is None:
@@ -151,7 +135,7 @@ class AgentUserDefinitionAPI(RestApi):
     @permission_name("write")
     def delete_own(self, definition_id: int):
         """Forget the user's definition; the agent asks about the concept again."""
-        if not _valid_csrf():
+        if not valid_csrf():
             return self.response(403, message="CSRF token không hợp lệ.")
         definition = self._own_definition(definition_id)
         if definition is None:
@@ -166,7 +150,7 @@ class AgentUserDefinitionAPI(RestApi):
     @permission_name("read")
     def list_review(self):
         """Every user's definitions, most recently changed first (admin only)."""
-        if not _is_admin():
+        if not is_admin():
             return self.response(403, message="Admin access required.")
         ensure_question_tables(db.engine)
         definitions = (
@@ -197,9 +181,9 @@ class AgentUserDefinitionAPI(RestApi):
     @permission_name("write")
     def set_review(self):
         """Record `{ids, status}`: a shared term or rule now covers the concept, it stays personal, or is reopened."""
-        if not _is_admin():
+        if not is_admin():
             return self.response(403, message="Admin access required.")
-        if not _valid_csrf():
+        if not valid_csrf():
             return self.response(403, message="CSRF token không hợp lệ.")
         body = request.get_json(silent=True) or {}
         ids, status = body.get("ids"), body.get("status")

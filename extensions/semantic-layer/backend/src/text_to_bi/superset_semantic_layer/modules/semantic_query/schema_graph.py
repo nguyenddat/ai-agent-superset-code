@@ -2,7 +2,7 @@
 
 Only physical datasets classified as base are nodes, and only those the caller may read without a row-level security
 rule; schema link writes its own SQL, which Superset's dataset RLS would not filter. An edge is a current approved
-relationship contract whose both ends are nodes, so a hidden table takes its edges with it.
+relationship contract whose both ends are nodes, so a hidden table takes its edges with it; the route picks those.
 
 Each node carries what linking needs to find data in it: column roles, aggregations, synonyms, coded values, the time
 column and grain of each kind of row, the indicators of an indicator catalog, and the table's data layer for drawing.
@@ -12,7 +12,6 @@ The graph holds metadata only; building it runs no query of the caller's data be
 from typing import Any
 
 from ..data_dictionary.column_semantics import json_list
-from ..data_dictionary.indicators import stored_indicator_model
 
 GRAPH_VERSION = 1
 
@@ -47,10 +46,11 @@ def table_node(
     entries: dict[str, Any],
     grains: list[Any],
     coded_values: dict[str, list[str]],
+    indicator_model: dict[str, Any] | None,
     indicators: dict[str, Any] | None,
     layer: Any | None,
 ) -> dict[str, Any]:
-    """A base table with its columns, time, grains, indicators and layer.
+    """A base table with its columns, time, grains, indicators and layer; `indicator_model` as already read.
 
     Calculated and inactive columns are left out: schema link joins and filters physical columns only.
     """
@@ -58,7 +58,6 @@ def table_node(
         column for column in getattr(dataset, "columns", [])
         if getattr(column, "is_active", None) is True and not getattr(column, "expression", None)
     ]
-    model = stored_indicator_model(getattr(dictionary, "indicator_model", None))
     return {
         "dataset_id": dataset.id,
         "schema": getattr(dataset, "schema", None),
@@ -78,23 +77,19 @@ def table_node(
             column_node(column, entries.get(str(column.column_name)), coded_values.get(str(column.column_name)))
             for column in live_columns
         ],
-        "indicator_model": model,
+        "indicator_model": indicator_model,
         "indicators": indicators,
     }
 
 
-def graph_edges(relationships: list[tuple[Any, bool]], node_ids: set[int]) -> list[dict[str, Any]]:
-    """Edges for `(contract, current)` pairs: approved, still current, and with both ends among the nodes."""
-    edges = []
-    for contract, current in relationships:
-        if getattr(contract, "status", None) != "approved" or not current:
-            continue
-        if contract.from_dataset_id not in node_ids or contract.to_dataset_id not in node_ids:
-            continue
-        edges.append({
+def graph_edges(contracts: list[Any]) -> list[dict[str, Any]]:
+    """The edges of approved, current contracts between nodes, in contract order."""
+    return [
+        {
             "id": contract.id,
             "from": {"dataset_id": contract.from_dataset_id, "column": contract.from_column},
             "to": {"dataset_id": contract.to_dataset_id, "column": contract.to_column},
             "cardinality": contract.cardinality,
-        })
-    return sorted(edges, key=lambda edge: edge["id"])
+        }
+        for contract in sorted(contracts, key=lambda contract: contract.id)
+    ]

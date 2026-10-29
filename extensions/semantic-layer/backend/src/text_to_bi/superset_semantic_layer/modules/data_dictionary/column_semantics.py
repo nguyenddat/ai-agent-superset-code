@@ -9,15 +9,15 @@ A new column takes a role from its keys, its temporal kind and its type; the adm
 """
 
 import json
-import re
 from typing import Any
+
+from ..semantic_query.relationship_discovery import type_family
 
 ROLES = ("key", "measure", "dimension", "label", "time", "row_kind", "attribute")
 AGGREGATIONS = ("SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT")
 MAX_SYNONYMS = 20
 MAX_SYNONYM_LENGTH = 100
 MAX_DESCRIPTION_LENGTH = 2000
-_NUMERIC_TYPE = re.compile(r"INT|NUMERIC|DECIMAL|FLOAT|DOUBLE|REAL", re.IGNORECASE)
 
 
 def default_semantic_role(
@@ -30,7 +30,7 @@ def default_semantic_role(
         return "row_kind"
     if temporal_kind:
         return "time"
-    if _NUMERIC_TYPE.search(str(data_type or "")):
+    if type_family(data_type) == "number":
         return "measure"
     return "dimension"
 
@@ -79,6 +79,8 @@ def checked_column_semantics(item: dict[str, Any], index: int, role_after_save: 
     if "description" in item:
         description = item["description"]
         if description is not None and (not isinstance(description, str) or len(description) > MAX_DESCRIPTION_LENGTH):
-            raise ValueError(f"columns[{index}].description must be a string of at most {MAX_DESCRIPTION_LENGTH} characters.")
+            raise ValueError(
+                f"columns[{index}].description must be a string of at most {MAX_DESCRIPTION_LENGTH} characters."
+            )
         values["description"] = description.strip() if isinstance(description, str) and description.strip() else None
     return values

@@ -10,6 +10,7 @@ from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
 from ...models.question_log import AgentQuestion, AgentQuestionHandling, ensure_question_tables
+from ..access import is_admin
 from .handling import HANDLING_STATUSES, HandlingError, count_by_handling, parse_handling
 
 REVIEW_LIST_LIMIT = 200
@@ -53,12 +54,6 @@ class AgentQuestionReviewAPI(RestApi):
     openapi_spec_tag = "Superset AI Agent"
     class_permission_name = "text_to_bi_chat_api"
 
-    @staticmethod
-    def _is_admin() -> bool:
-        return bool(current_user and current_user.is_authenticated and any(
-            role.name == "Admin" for role in getattr(current_user, "roles", [])
-        ))
-
     def _users(self, user_ids: set[int | None]) -> dict[int, User]:
         known_ids = [user_id for user_id in user_ids if user_id is not None]
         if not known_ids:
@@ -74,7 +69,7 @@ class AgentQuestionReviewAPI(RestApi):
 
         `?handling=` narrows to one handling status and `?missing=metric` to the questions missing that kind.
         """
-        if not self._is_admin():
+        if not is_admin():
             return self.response(403, message="Admin access required.")
         handling_filter = request.args.get("handling", "all")
         if handling_filter not in ("all", *HANDLING_STATUSES):
@@ -115,7 +110,7 @@ class AgentQuestionReviewAPI(RestApi):
         from flask_wtf.csrf import validate_csrf
         from wtforms import ValidationError
 
-        if not self._is_admin():
+        if not is_admin():
             return self.response(403, message="Admin access required.")
         try:
             validate_csrf(request.headers.get("X-CSRFToken"))

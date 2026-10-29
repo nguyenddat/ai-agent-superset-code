@@ -105,7 +105,7 @@ def test_indicator_declarations_that_do_not_fit_are_refused(model):
         checked_indicator_model(model, columns)
 
 
-def test_the_indicator_list_maps_aggregations_and_reports_codes_left_unmapped():
+def test_the_indicator_list_maps_aggregations_and_lists_the_codes_found():
     rows = [
         {"chi_so_id": 2, "ma_chi_so": "luong_mua_mm", "ten_chi_so": "Luong mua", "ten_don_vi": "Milimet",
          "kieu_du_lieu": "SO", "cach_tong_hop": "TONG"},
@@ -121,7 +121,7 @@ def test_the_indicator_list_maps_aggregations_and_reports_codes_left_unmapped():
     assert [(item["code"], item["aggregation"]) for item in result["indicators"]] == [
         ("la_ban_ngay", None), ("luong_mua_mm", "SUM"), ("nhiet_do_c", "AVG"),
     ]
-    assert result["unmapped_aggregation_codes"] == ["BAT_KY"] and result["value_kinds"] == ["DUNG_SAI", "SO"]
+    assert result["aggregation_codes"] == ["BAT_KY", "TONG", "TRUNG_BINH"]
     assert result["too_many"] is False
 
 

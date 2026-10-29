@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUp, BookMarked, FlaskConical, LayoutDashboard, LoaderCircle, MessageSquare, Pencil, Plus, Search, Sparkles, Square, Trash2,
+  ArrowUp, BookMarked, FlaskConical, LayoutDashboard, LoaderCircle, MessageSquare, Pencil, Plus, Search, Sparkles,
+  Square, Trash2,
 } from 'lucide-react';
 import {
   ChatSession, ChatStreamEvent, DashboardOption, UserDefinition, answerClarification,
@@ -471,9 +472,13 @@ export function AgentPage() {
       <main className="ai-page-main">
         {labOpen ? (
           <div className="ai-page-lab-scroll">
-            {canUseLab === null ? <p className="ai-page-state"><LoaderCircle className="ai-spin" aria-hidden="true" /> Đang tải…</p> : null}
+            {canUseLab === null ? (
+              <p className="ai-page-state"><LoaderCircle className="ai-spin" aria-hidden="true" /> Đang tải…</p>
+            ) : null}
             {canUseLab === true ? <SchemaLinkLab /> : null}
-            {canUseLab === false ? <p className="ai-page-state">Chỉ quản trị viên dùng được phòng thử phân tích.</p> : null}
+            {canUseLab === false ? (
+              <p className="ai-page-state">Chỉ quản trị viên dùng được phòng thử phân tích.</p>
+            ) : null}
           </div>
         ) : activeSessionId === null ? (
           <div className="ai-page-start">
