@@ -5,7 +5,7 @@ from typing import Any
 from superset.connectors.sqla.models import SqlaTable
 
 from ....common.utils.type_formatter import json_list
-from ....core.database import get_dataset, get_datasets
+from ...superset.services.datasets import get_dataset, get_datasets
 from ..dependencies import column_dictionary_repository, dataset_grain_repository
 from ..exceptions import DataDictionaryValidationError
 from ..models import ColumnDictionary, DatasetDictionary

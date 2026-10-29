@@ -1,7 +1,7 @@
 from functools import wraps
 from typing import Any
 
-from flask import request
+from flask import current_app, request
 from flask_login import current_user
 from flask_wtf.csrf import validate_csrf
 from superset import security_manager
@@ -54,3 +54,14 @@ def csrf_protected(method):
 
 def is_superset_access_error(error: Exception) -> bool:
     return any(word in error.__class__.__name__.lower() for word in ("access", "forbidden", "permission", "security"))
+
+
+def second_reviewer_required() -> bool:
+    """Whether a proposal's author must leave its approval to another administrator.
+
+    Off by default so a single administrator can approve their own work; a deployment with several reviewers
+    sets TEXT_TO_BI_REQUIRE_SECOND_REVIEWER = True in superset_config.
+    """
+    return bool(current_app.config.get("TEXT_TO_BI_REQUIRE_SECOND_REVIEWER", False))
+
+

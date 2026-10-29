@@ -11,19 +11,15 @@ from superset import db
 from superset.connectors.sqla.models import SqlaTable
 
 from ....common.utils.type_formatter import iso_datetime
-from ....core.database import (
-    ensure_dictionary_tables,
-    get_dataset,
-    handle_errors,
-    require_dataset,
-    rollback_on_error,
-    seed_dictionary,
-)
-from ....core.exceptions import DatasetNotFoundError
+from ....core.database import handle_errors, rollback_on_error
 from ....core.security import csrf_protected, require_admin
+from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.services.agent_ladder import BASE_DATASET
 from ...data_dictionary.dependencies import column_dictionary_repository, dataset_dictionary_repository
 from ...data_dictionary.models import ColumnDictionary
+from ...data_dictionary.services.seeding import seed_dictionary
+from ...superset.exceptions import DatasetNotFoundError
+from ...superset.services.datasets import get_dataset, require_dataset
 from ..dependencies import relationship_contract_repository
 from ..exceptions import (
     ApprovedContractExistsError,
@@ -45,6 +41,7 @@ from ..services.relationship_discovery import (
     verification_queries,
     verification_result,
 )
+from ..services.relationship_lookup import base_tables, relationship_ends
 from ..services.relationships import (
     RelationshipEnd,
     relationship_cardinality,
@@ -61,27 +58,6 @@ class RelationshipRoutes:
     @staticmethod
     def _fk_entry(dataset_id: int, column_id: int) -> ColumnDictionary | None:
         return column_dictionary_repository().get_in_dataset(dataset_id, column_id)
-
-    @staticmethod
-    def _relationship_ends(fk_entry: ColumnDictionary) -> tuple[RelationshipEnd, RelationshipEnd] | None:
-        """Resolve a dictionary FK to live datasets, retaining composite-key information."""
-        if not fk_entry.referenced_column:
-            return None
-        column_repository = column_dictionary_repository()
-        target_entry = column_repository.get(fk_entry.referenced_column)
-        if target_entry is None:
-            return None
-        source = get_dataset(fk_entry.dataset_id)
-        target = get_dataset(target_entry.dataset_id)
-        if source is None or target is None:
-            return None
-
-        def end(dataset: SqlaTable, entry: ColumnDictionary) -> RelationshipEnd:
-            live_names = {str(column.column_name) for column in dataset.columns}
-            pk_count = sum(1 for row in column_repository.primary_keys(dataset.id) if row.column_name in live_names)
-            return RelationshipEnd(dataset=dataset, entry=entry, pk_count=pk_count)
-
-        return end(source, fk_entry), end(target, target_entry)
 
     @staticmethod
     def _relationship_contract_for(from_dataset_id: int, from_column: str) -> RelationshipContract | None:
@@ -125,7 +101,7 @@ class RelationshipRoutes:
         entry = self._fk_entry(dataset_id, column_id)
         if entry is None:
             raise ForeignKeyColumnNotFoundError()
-        ends = self._relationship_ends(entry)
+        ends = relationship_ends(entry)
         if ends is None:
             raise RelationshipValidationError("The referenced dictionary column or dataset no longer exists.")
         relationship_cardinality(*ends)
@@ -251,7 +227,7 @@ class RelationshipRoutes:
         contract.revoker_id = current_user.id
         contract.revoked_at = datetime.now(timezone.utc)
         db.session.commit()
-        ends = self._relationship_ends(entry) if entry is not None else None
+        ends = relationship_ends(entry) if entry is not None else None
         if ends is None:
             return self.response(
                 200,
@@ -276,14 +252,8 @@ class RelationshipRoutes:
         unique = {row.column_name for row in entries if row.is_unique} | (set(primary) if len(primary) == 1 else set())
         return TableKeys(dataset.id, dataset.schema, dataset.table_name, live, frozenset(unique))
 
-    @staticmethod
-    def _base_tables(database_id: int) -> list[SqlaTable]:
-        """Physical datasets classified as base on one database: the tables schema link may join."""
-        rows = dataset_dictionary_repository().datasets_of_type(database_id, BASE_DATASET)
-        return [dataset for dataset, _dictionary in rows if not dataset.sql]
-
     def _relationship_row(self, entry: ColumnDictionary) -> dict[str, Any] | None:
-        ends = self._relationship_ends(entry)
+        ends = relationship_ends(entry)
         if ends is None:
             return None
         source, target = ends
@@ -335,7 +305,7 @@ class RelationshipRoutes:
     def _relationship_suggestions(self, dataset: SqlaTable, outgoing: list[dict[str, Any]]) -> dict[str, Any]:
         from superset.sql.parse import Table
 
-        tables = self._base_tables(dataset.database_id)
+        tables = base_tables(dataset.database_id)
         for table_dataset in tables:
             seed_dictionary(table_dataset)
         keys = [self._table_keys(table_dataset) for table_dataset in tables]
@@ -387,7 +357,7 @@ class RelationshipRoutes:
             if isinstance(payload.get("to_dataset_id"), int)
             else None
         )
-        base_ids = {item.id for item in self._base_tables(dataset.database_id)}
+        base_ids = {item.id for item in base_tables(dataset.database_id)}
         if dataset_id not in base_ids or target_dataset is None or target_dataset.id not in base_ids:
             raise RelationshipValidationError("Both ends must be base tables on the same database.")
         seed_dictionary(dataset)
@@ -405,7 +375,7 @@ class RelationshipRoutes:
         source_entry.is_fk = True
         source_entry.referenced_column = target_entry.id
         repository.flush()
-        ends = self._relationship_ends(source_entry)
+        ends = relationship_ends(source_entry)
         contract = self._snapshot_relationship_candidate(*ends, payload["source"]) if ends else None
         if contract is None:
             raise ApprovedContractExistsError("Revoke the current approved contract before declaring another target.")

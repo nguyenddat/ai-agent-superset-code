@@ -136,3 +136,16 @@ def indicators_from_rows(rows: list[dict[str, Any]], model: dict[str, Any]) -> d
         "indicators": indicators, "aggregation_codes": sorted(aggregation_codes),
         "too_many": len(rows) > MAX_INDICATORS,
     }
+
+
+def read_indicators(dataset: Any, model: dict[str, Any]) -> dict[str, Any]:
+    """The indicators a catalog table names, read through ChartData as the caller. Raises on a failed query."""
+    from superset.charts.schemas import ChartDataQueryContextSchema
+    from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+    command = ChartDataCommand(ChartDataQueryContextSchema().load(build_indicators_payload(dataset, model)))
+    command.validate()
+    result = command.run()["queries"][0]
+    if result.get("error"):
+        raise RuntimeError(result["error"])
+    return indicators_from_rows(result.get("data", []), model)

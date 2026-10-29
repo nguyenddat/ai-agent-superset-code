@@ -58,23 +58,26 @@ semantic-layer/
 ├── backend/
 │   ├── pyproject.toml
 │   └── src/text_to_bi/superset_semantic_layer/
-│       ├── entrypoint.py
-│       ├── api_support.py              # review helpers: second reviewer rule, user display names
+│       ├── entrypoint.py               # registers SemanticLayerAPI, SemanticLayerView and ExpertRuleAPI
+│       ├── migrations.py               # creates and upgrades every module's tables, once per process
 │       ├── core/config.py              # environment settings: OpenRouter key, base URL and model
-│       ├── core/security.py            # admin role, Superset dataset permission, CSRF, access errors
-│       ├── core/database.py            # create/upgrade tables, seed the dictionary, dataset lookups, rollback
-│       ├── agent_package/              # AutoFill agent and its chat model (chat_models.py)
+│       ├── core/security.py            # admin role, dataset permission, CSRF, second reviewer rule
+│       ├── core/database.py            # handle_errors and rollback_on_error: errors to responses, rollback
+│       ├── core/exceptions.py          # errors of the shared checks (admin, access, CSRF, request body)
 │       ├── common/base_model.py        # BaseModel / AuditedModel: Superset's declarative base, table names from class
 │       ├── common/base_repo.py         # BaseRepository: get, list, add, update, delete
-│       ├── common/exceptions/          # abstract ValidationError, ConflictError, SelfApprovalError
+│       ├── common/exceptions/          # abstract app errors carrying a status and a default message
 │       ├── common/utils/type_formatter.py  # ISO dates and moments, JSON texts, SSE events
-│       ├── modules/<module>/           # data_dictionary, business_model, glossary, expert_rules,
-│       │   │                           # semantic_query, agent_ladder; each one holds:
+│       ├── modules/<module>/           # one business area each: data_dictionary, business_model, glossary,
+│       │   │                           # expert_rules, semantic_query, agent_ladder, superset; each holds:
 │       │   ├── models/                 # its tables in Superset's metadata database
 │       │   ├── repositories/           # one repository per model: every query on those tables
 │       │   ├── dependencies.py         # repository factories bound to the request's session
-│       │   ├── services/               # business rules, no request handling
+│       │   ├── exceptions.py           # its errors, derived from common/exceptions
+│       │   ├── services/               # business rules and the helpers other modules call
 │       │   └── routes/                 # route mixins (ExpertRuleAPI for expert_rules), one per business area
+│       ├── modules/superset/           # Superset's own datasets, databases and users: lookups, no tables of its own
+│       ├── modules/data_dictionary/autofill/  # the AI AutoFill agent, its chat model and prompts
 │       └── modules/catalog/routes/     # semantic_layer.py: SemanticLayerAPI assembled from the module
 │                                       # mixins; view.py: the Semantic Layer page
 └── frontend/

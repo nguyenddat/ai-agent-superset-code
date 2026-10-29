@@ -6,17 +6,10 @@ from flask_appbuilder.api import expose, permission_name, protect, safe
 from superset import security_manager
 from superset.connectors.sqla.models import SqlaTable
 
-from ....api_support import user_names
-from ....core.database import (
-    ensure_dictionary_tables,
-    get_datasets,
-    handle_errors,
-    require_database,
-    require_dataset,
-    seed_dictionary,
-)
+from ....core.database import handle_errors
 from ....core.exceptions import DatabaseIdRequiredError
 from ....core.security import can_access_dataset, is_superset_access_error, require_dataset_access
+from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.services.agent_ladder import AGGREGATE_DATASET
 from ...business_model.dependencies import data_layer_repository
 from ...data_dictionary.dependencies import (
@@ -24,24 +17,26 @@ from ...data_dictionary.dependencies import (
     dataset_dictionary_repository,
     dataset_grain_repository,
 )
-from ...data_dictionary.models import ColumnDictionary
-from ...data_dictionary.services.indicators import stored_indicator_model
+from ...data_dictionary.services.indicators import read_indicators, stored_indicator_model
+from ...data_dictionary.services.seeding import seed_dictionary
+from ...glossary.services.discovery import discoverable_glossary_terms
+from ...superset.services.datasets import get_datasets, require_database, require_dataset
+from ...superset.services.users import user_names
 from ..dependencies import metric_contract_repository, metric_definition_repository, relationship_contract_repository
 from ..exceptions import ApprovedMetricDatasetRequiredError
 from ..services.catalog import build_semantic_catalog
+from ..services.chart_data import coded_values
 from ..services.dimension_labels import label_dimensions
 from ..services.limits import semantic_query_row_cap
 from ..services.members import (
     build_members_payload,
     build_time_range_payload,
-    build_values_payload,
-    coded_value_columns,
-    coded_values_from_rows,
     labelled_key_columns,
     members_from_rows,
     temporal_columns,
     time_ranges_from_rows,
 )
+from ..services.relationship_lookup import base_tables, relationship_ends
 from ..services.relationships import relationship_is_approved_current
 from ..services.schema_graph import GRAPH_VERSION, graph_edges, table_node
 
@@ -119,30 +114,6 @@ class ConsumerRoutes:
             return []
         return [] if result.get("error") else time_ranges_from_rows(result.get("data", []), columns)
 
-    @staticmethod
-    def _coded_values(dataset: SqlaTable, entries: dict[str, ColumnDictionary]) -> dict[str, list[str]]:
-        """The stored values of each code column, read through ChartData as the caller; free text is left out."""
-        from superset.charts.schemas import ChartDataQueryContextSchema
-        from superset.commands.chart.data.get_data_command import ChartDataCommand
-
-        columns = coded_value_columns(dataset, entries)
-        if not columns:
-            return {}
-        try:
-            command = ChartDataCommand(ChartDataQueryContextSchema().load(build_values_payload(dataset, columns)))
-            command.validate()
-            results = command.run()["queries"]
-        except Exception as ex:
-            if not is_superset_access_error(ex):
-                logger.exception("Reading the coded values of %s failed", dataset.table_name)
-            return {}
-        coded = {}
-        for name, result in zip(columns, results):
-            values = None if result.get("error") else coded_values_from_rows(result.get("data", []), name)
-            if values:
-                coded[name] = values
-        return coded
-
     @expose("/semantic-catalog", methods=("GET",))
     @protect()
     @safe
@@ -167,7 +138,7 @@ class ConsumerRoutes:
             entry = column_repository.get_for_dataset_column(contract.from_dataset_id, contract.from_column)
             if entry is None:
                 continue
-            ends = self._relationship_ends(entry)
+            ends = relationship_ends(entry)
             if ends is not None:
                 relationships.append((contract, *ends))
         catalog = build_semantic_catalog(
@@ -207,7 +178,7 @@ class ConsumerRoutes:
         ensure_dictionary_tables()
         database = require_database(database_id)
         nodes, excluded = [], []
-        for dataset in self._base_tables(database_id):
+        for dataset in base_tables(database_id):
             if not can_access_dataset(dataset):
                 continue
             if self._has_row_level_security(dataset):
@@ -220,7 +191,7 @@ class ConsumerRoutes:
         current = []
         for contract in approved:
             entry = column_repository.get_for_dataset_column(contract.from_dataset_id, contract.from_column)
-            ends = self._relationship_ends(entry) if entry is not None else None
+            ends = relationship_ends(entry) if entry is not None else None
             if ends and relationship_is_approved_current(contract, *ends):
                 current.append(contract)
         return self.response(
@@ -241,13 +212,13 @@ class ConsumerRoutes:
         indicators = None
         if model and model["kind"] == "catalog":
             try:
-                indicators = self._read_indicators(dataset, model)
+                indicators = read_indicators(dataset, model)
             except Exception:
                 # The graph still serves the table; linking then cannot name its indicators.
                 logger.exception("Reading the indicators of %s for the schema graph failed", dataset.table_name)
         layer = data_layer_repository().get(dictionary.layer_id) if dictionary and dictionary.layer_id else None
-        coded_values = self._coded_values(dataset, entries)
-        return table_node(dataset, dictionary, entries, grains, coded_values, model, indicators, layer)
+        values_by_column = coded_values(dataset, entries)
+        return table_node(dataset, dictionary, entries, grains, values_by_column, model, indicators, layer)
 
     def _catalog_metric_details(self, dataset_ids: set[int]) -> Any:
         """Business definition, unit, steward and discoverable glossary terms for each catalog metric."""
@@ -260,7 +231,7 @@ class ConsumerRoutes:
             else {}
         )
         terms_by_metric: dict[int, list[dict[str, Any]]] = {}
-        for term in self._discoverable_glossary_terms():
+        for term in discoverable_glossary_terms():
             for link in term["links"]:
                 if link["kind"] == "metric" and link["metric_id"] is not None:
                     terms_by_metric.setdefault(link["metric_id"], []).append(

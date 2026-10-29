@@ -18,12 +18,20 @@ MODULES_PATH = PACKAGE_PATH / "modules"
 ROUTE_PATH = MODULES_PATH / "catalog" / "routes" / "semantic_layer.py"
 # SemanticLayerAPI's route mixins live in each module's routes/; ExpertRuleAPI is a separate API.
 ROUTE_PATHS = sorted(path for path in MODULES_PATH.glob("*/routes/*.py") if path.parts[-3] != "expert_rules")
+# Superset's own datasets, databases and users, read through the superset module's repositories.
+SUPERSET_SERVICE_PATHS = [MODULES_PATH / "superset" / "services" / name for name in ("datasets.py", "users.py")]
 # The helpers those routes share, split out of the former catalog support module.
 SHARED_SERVICE_PATHS = [
     MODULES_PATH / "data_dictionary" / "services" / "dictionary.py",
     MODULES_PATH / "business_model" / "services" / "layout.py",
     MODULES_PATH / "semantic_query" / "services" / "limits.py",
     MODULES_PATH / "semantic_query" / "services" / "dimension_labels.py",
+    MODULES_PATH / "semantic_query" / "services" / "metric_review.py",
+    MODULES_PATH / "semantic_query" / "services" / "relationship_lookup.py",
+    MODULES_PATH / "semantic_query" / "services" / "chart_data.py",
+    MODULES_PATH / "glossary" / "services" / "discovery.py",
+    MODULES_PATH / "data_dictionary" / "services" / "seeding.py",
+    *SUPERSET_SERVICE_PATHS,
 ]
 CORE_PATHS = [PACKAGE_PATH / "core" / "security.py", PACKAGE_PATH / "core" / "database.py"]
 FORMATTERS = [
@@ -31,9 +39,9 @@ FORMATTERS = [
     for name, value in vars(type_formatter).items()
     if inspect.isfunction(value) and value.__module__ == type_formatter.__name__
 ]
-SOURCE_PATHS = [PACKAGE_PATH / "api_support.py", *CORE_PATHS, *SHARED_SERVICE_PATHS, *ROUTE_PATHS]
+SOURCE_PATHS = [PACKAGE_PATH / "migrations.py", *CORE_PATHS, *SHARED_SERVICE_PATHS, *ROUTE_PATHS]
 DATASET_LOOKUPS = [
-    "get_dataset", "get_datasets", "datasets_by_name", "all_datasets", "datasets_on_database", "get_database",
+    "get_dataset", "get_datasets", "datasets_by_name", "datasets_on_database", "get_database",
     "active_users", "require_dataset", "require_database",
 ]
 # The shared checks the routes call and the decorator that turns their errors into responses.
@@ -78,7 +86,7 @@ def api_methods() -> dict[str, ast.FunctionDef]:
 
 
 def module_function(name: str) -> ast.FunctionDef:
-    """A module-level function of the catalog modules, core/security.py, core/database.py or api_support.py."""
+    """A module-level function of the routes, the shared services, core/security.py, core/database.py or migrations."""
     return next(
         node for tree in _trees() for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name
     )
@@ -133,7 +141,8 @@ def _compile_data_access(namespace: dict) -> None:
         namespace.setdefault(name, type(name, (), {}))
     database_functions = {
         node.name: node
-        for node in ast.parse((PACKAGE_PATH / "core" / "database.py").read_text(encoding="utf-8")).body
+        for path in SUPERSET_SERVICE_PATHS
+        for node in ast.parse(path.read_text(encoding="utf-8")).body
         if isinstance(node, ast.FunctionDef)
     }
     missing = database_functions.keys() - namespace.keys()

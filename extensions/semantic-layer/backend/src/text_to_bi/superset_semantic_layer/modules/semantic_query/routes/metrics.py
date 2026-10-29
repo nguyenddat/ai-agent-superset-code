@@ -8,22 +8,23 @@ from flask_login import current_user
 from superset import db, security_manager
 from superset.connectors.sqla.models import SqlaTable
 
-from ....api_support import second_reviewer_required, user_names
 from ....common.exceptions import SemanticLayerError
 from ....common.utils.type_formatter import iso_datetime
-from ....core.database import (
-    active_users,
-    datasets_on_database,
-    ensure_dictionary_tables,
-    get_dataset,
-    handle_errors,
-    require_dataset,
-    rollback_on_error,
-)
+from ....core.database import handle_errors, rollback_on_error
 from ....core.exceptions import DatabaseIdRequiredError, RequestBodyError
-from ....core.security import csrf_protected, is_admin, is_superset_access_error, require_admin, require_dataset_access
+from ....core.security import (
+    csrf_protected,
+    is_admin,
+    is_superset_access_error,
+    require_admin,
+    require_dataset_access,
+    second_reviewer_required,
+)
+from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.services.agent_ladder import AGENT_ORIGIN
 from ...data_dictionary.dependencies import column_dictionary_repository
+from ...superset.services.datasets import datasets_on_database, get_dataset, require_dataset
+from ...superset.services.users import active_users, user_names
 from ..dependencies import (
     metric_contract_event_repository,
     metric_contract_repository,
@@ -38,7 +39,7 @@ from ..exceptions import (
     MetricNotFoundError,
     MetricSelfApprovalError,
 )
-from ..models import MetricContract, MetricContractEvent, MetricDefinition
+from ..models import MetricContract, MetricDefinition
 from ..services.compiler import compile_semantic_query
 from ..services.contracts import (
     build_preview_contract,
@@ -51,10 +52,10 @@ from ..services.contracts import (
 )
 from ..services.limits import (
     METRIC_DEFINITION_MAX_LENGTH,
-    METRIC_REVIEW_REASON_MAX_LENGTH,
     METRIC_UNIT_MAX_LENGTH,
     semantic_query_row_cap,
 )
+from ..services.metric_review import metric_contract_for, metric_definition_for, record_metric_event, review_reason
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,6 @@ class MetricContractRoutes:
     def _dataset_metric(dataset: SqlaTable, metric_id: int):
         """Resolve only a metric actually attached to this dataset."""
         return next((metric for metric in dataset.metrics if metric.id == metric_id), None)
-
-    @staticmethod
-    def _contract_for(dataset_id: int, metric_id: int):
-        return metric_contract_repository().for_dataset_metric(dataset_id, metric_id)
 
     @staticmethod
     def _serialize_metric_contract(contract: MetricContract, dataset: SqlaTable, metric: Any) -> dict[str, Any]:
@@ -95,10 +92,6 @@ class MetricContractRoutes:
         return [{"id": user.id, "name": user.get_full_name().strip() or user.username} for user in active_users()]
 
     @staticmethod
-    def _metric_definition(dataset_id: int, metric_id: int) -> MetricDefinition | None:
-        return metric_definition_repository().for_dataset_metric(dataset_id, metric_id)
-
-    @staticmethod
     def _serialize_metric_definition(definition: MetricDefinition | None, user_name: Any) -> dict[str, Any] | None:
         if definition is None:
             return None
@@ -108,35 +101,6 @@ class MetricContractRoutes:
             "steward_id": definition.steward_id,
             "steward_name": user_name(definition.steward_id),
         }
-
-    @staticmethod
-    def _review_reason() -> str | None:
-        """The optional note or reason a reviewer sends with a metric decision, trimmed; blank means none."""
-        body = request.get_json(silent=True)
-        reason = body.get("reason") if isinstance(body, dict) else None
-        if reason is None:
-            return None
-        if not isinstance(reason, str) or len(reason) > METRIC_REVIEW_REASON_MAX_LENGTH:
-            limit = METRIC_REVIEW_REASON_MAX_LENGTH
-            raise MetricContractValidationError(f"Lý do phải là văn bản tối đa {limit} ký tự.")
-        return reason.strip() or None
-
-    @staticmethod
-    def _record_metric_event(
-        dataset_id: int, metric_id: int, action: str, reason: str | None = None, contract: Any = None
-    ) -> None:
-        """Append one review event. Callers hash the metric first: adding a row can autoflush the session."""
-        event = MetricContractEvent(
-            dataset_id=dataset_id,
-            metric_id=metric_id,
-            action=action,
-            actor_id=current_user.id,
-            reason=reason,
-            expression=contract.expression if contract is not None else None,
-            expression_hash=contract.expression_hash if contract is not None else None,
-            created_at=datetime.now(tz=timezone.utc),
-        )
-        metric_contract_event_repository().add(event, flush=False)
 
     @staticmethod
     def _query_dataset(dataset: SqlaTable) -> dict[str, Any]:
@@ -238,11 +202,11 @@ class MetricContractRoutes:
             raise MetricNotFoundError()
         if ineligibility := metric_contract_ineligibility(dataset, metric):
             raise MetricContractValidationError(ineligibility)
-        note = self._review_reason()
+        note = review_reason(request.get_json(silent=True))
         # The AI Agent answers with this definition, so a metric must say what it means before anyone reviews it.
-        if self._metric_definition(dataset_id, metric_id) is None:
+        if metric_definition_for(dataset_id, metric_id) is None:
             raise MetricContractValidationError("Nhập định nghĩa nghiệp vụ trước khi đề xuất metric.")
-        contract = self._contract_for(dataset_id, metric_id)
+        contract = metric_contract_for(dataset_id, metric_id)
         approved = contract is not None and contract.status == "approved"
         if approved and contract_is_approved_current(contract, dataset, metric):
             raise ApprovedContractExistsError()
@@ -264,7 +228,7 @@ class MetricContractRoutes:
         contract.approved_at = None
         contract.revoker_id = None
         contract.revoked_at = None
-        self._record_metric_event(dataset_id, metric_id, "candidate", note, contract)
+        record_metric_event(dataset_id, metric_id, "candidate", note, contract)
         db.session.commit()
         return self.response(201, contract=self._serialize_metric_contract(contract, dataset, metric))
 
@@ -280,7 +244,7 @@ class MetricContractRoutes:
         ensure_dictionary_tables()
         dataset = require_dataset(dataset_id)
         metric = self._dataset_metric(dataset, metric_id)
-        contract = self._contract_for(dataset_id, metric_id) if metric else None
+        contract = metric_contract_for(dataset_id, metric_id) if metric else None
         if metric is None or contract is None:
             raise MetricContractNotFoundError()
         if contract.status != "candidate":
@@ -292,11 +256,11 @@ class MetricContractRoutes:
             raise MetricContractValidationError(ineligibility)
         if contract.expression_hash != metric_contract_hash(dataset, metric):
             raise MetricContractValidationError("Metric changed; create a new candidate before approval.")
-        note = self._review_reason()
+        note = review_reason(request.get_json(silent=True))
         contract.status = "approved"
         contract.approver_id = current_user.id
         contract.approved_at = datetime.now(tz=timezone.utc)
-        self._record_metric_event(dataset_id, metric_id, "approve", note, contract)
+        record_metric_event(dataset_id, metric_id, "approve", note, contract)
         db.session.commit()
         return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
 
@@ -312,18 +276,18 @@ class MetricContractRoutes:
         ensure_dictionary_tables()
         dataset = require_dataset(dataset_id)
         metric = self._dataset_metric(dataset, metric_id)
-        contract = self._contract_for(dataset_id, metric_id) if metric else None
+        contract = metric_contract_for(dataset_id, metric_id) if metric else None
         if metric is None or contract is None:
             raise MetricContractNotFoundError()
         if contract.status == "revoked":
             raise MetricContractValidationError("Metric này đã bị thu hồi.")
-        reason = self._review_reason()
+        reason = review_reason(request.get_json(silent=True))
         if reason is None:
             raise MetricContractValidationError("Nhập lý do thu hồi.")
         contract.status = "revoked"
         contract.revoker_id = current_user.id
         contract.revoked_at = datetime.now(tz=timezone.utc)
-        self._record_metric_event(dataset_id, metric_id, "revoke", reason, contract)
+        record_metric_event(dataset_id, metric_id, "revoke", reason, contract)
         db.session.commit()
         return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
 
@@ -356,14 +320,14 @@ class MetricContractRoutes:
         valid_steward_id = isinstance(steward_id, int) and not isinstance(steward_id, bool)
         if steward_id is not None and (not valid_steward_id or security_manager.get_user_by_id(steward_id) is None):
             raise MetricContractValidationError("Người phụ trách không tồn tại.")
-        definition = self._metric_definition(dataset_id, metric_id)
+        definition = metric_definition_for(dataset_id, metric_id)
         if definition is None:
             definition = MetricDefinition(dataset_id=dataset_id, metric_id=metric_id)
         definition.business_definition = business_definition.strip()
         definition.unit = (unit or "").strip() or None
         definition.steward_id = steward_id
         metric_definition_repository().add(definition, flush=False)
-        self._record_metric_event(dataset_id, metric_id, "definition")
+        record_metric_event(dataset_id, metric_id, "definition")
         db.session.commit()
         return self.response(200, definition=self._serialize_metric_definition(definition, user_names()))
 
@@ -407,7 +371,7 @@ class MetricContractRoutes:
         dataset = require_dataset(dataset_id)
         require_dataset_access(dataset)
         metric = self._dataset_metric(dataset, metric_id)
-        contract = self._contract_for(dataset_id, metric_id) if metric else None
+        contract = metric_contract_for(dataset_id, metric_id) if metric else None
         if metric is None:
             raise ApprovedMetricContractRequiredError()
         body = request.get_json(silent=True)

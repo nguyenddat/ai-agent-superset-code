@@ -1,4 +1,4 @@
-from ..common.exceptions import NotAuthorizedError, NotFoundError, ValidationError
+from ..common.exceptions import NotAuthorizedError, ValidationError
 
 
 class AdminRequiredError(NotAuthorizedError):
@@ -11,14 +11,6 @@ class DatasetAccessError(NotAuthorizedError):
 
 class CsrfTokenError(NotAuthorizedError):
     message = "CSRF token không hợp lệ."
-
-
-class DatasetNotFoundError(NotFoundError):
-    message = "Dataset not found."
-
-
-class DatabaseNotFoundError(NotFoundError):
-    message = "Database not found."
 
 
 class DatasetIdRequiredError(ValidationError):

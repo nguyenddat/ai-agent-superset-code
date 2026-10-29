@@ -95,7 +95,7 @@ def _update_handler(payload, update_draft):
     compile_into(namespace, api)
     instance = namespace["HarnessAPI"]()
     instance._glossary_user_exists = lambda _user_id: True
-    instance._glossary_metric_approved = lambda _dataset, _metric: True
+    namespace["glossary_metric_approved"] = lambda _dataset, _metric: True
     instance._glossary_term = lambda term, revisions: {"id": term.id, "revisions": len(revisions)}
     return instance, current, GlossaryValidationError, GlossaryConflictError
 

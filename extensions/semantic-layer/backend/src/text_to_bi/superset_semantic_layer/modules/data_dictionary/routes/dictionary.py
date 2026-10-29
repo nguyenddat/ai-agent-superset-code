@@ -5,25 +5,17 @@ from typing import Any
 from flask import Response, request, stream_with_context
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from superset import db
-from superset.connectors.sqla.models import SqlaTable
 
-from ....agent_package.chat_models import get_chat_model
-from ....agent_package.column_dictionary import suggest_column_dictionary_batches, suggest_dataset_dictionary
 from ....common.exceptions import SemanticLayerError
 from ....common.utils.type_formatter import sse_event
-from ....core.database import (
-    datasets_by_name,
-    ensure_dictionary_tables,
-    get_dataset,
-    handle_errors,
-    is_internal_dataset,
-    require_dataset,
-    rollback_on_error,
-    seed_dictionary,
-)
+from ....core.database import handle_errors, rollback_on_error
 from ....core.exceptions import DatasetAccessError
 from ....core.security import csrf_protected, is_superset_access_error, require_admin
+from ....migrations import ensure_dictionary_tables
 from ...business_model.dependencies import data_layer_repository
+from ...superset.services.datasets import datasets_by_name, get_dataset, is_internal_dataset, require_dataset
+from ..autofill.chat_models import get_chat_model
+from ..autofill.column_dictionary import suggest_column_dictionary_batches, suggest_dataset_dictionary
 from ..dependencies import column_dictionary_repository, dataset_dictionary_repository, dataset_grain_repository
 from ..exceptions import (
     AutoFillUnavailableError,
@@ -43,11 +35,11 @@ from ..services.dictionary import (
     validate_dictionary_payload,
 )
 from ..services.indicators import (
-    build_indicators_payload,
     checked_indicator_model,
-    indicators_from_rows,
+    read_indicators,
     stored_indicator_model,
 )
+from ..services.seeding import seed_dictionary
 from ..services.time_semantics import (
     build_grain_profile_payload,
     checked_time_semantics,
@@ -447,19 +439,6 @@ class DataDictionaryRoutes:
             too_many_kinds=too_many,
         )
 
-    @staticmethod
-    def _read_indicators(dataset: SqlaTable, model: dict[str, Any]) -> dict[str, Any]:
-        """The indicators a catalog table names, read through ChartData as the caller. Raises on a failed query."""
-        from superset.charts.schemas import ChartDataQueryContextSchema
-        from superset.commands.chart.data.get_data_command import ChartDataCommand
-
-        command = ChartDataCommand(ChartDataQueryContextSchema().load(build_indicators_payload(dataset, model)))
-        command.validate()
-        result = command.run()["queries"][0]
-        if result.get("error"):
-            raise RuntimeError(result["error"])
-        return indicators_from_rows(result.get("data", []), model)
-
     @expose("/dataset/<int:dataset_id>/indicators", methods=("GET",))
     @protect()
     @safe
@@ -490,7 +469,7 @@ class DataDictionaryRoutes:
         if not model or model["kind"] != "catalog":
             raise NotIndicatorCatalogError()
         try:
-            return self.response(200, dataset_id=dataset_id, **self._read_indicators(dataset, model))
+            return self.response(200, dataset_id=dataset_id, **read_indicators(dataset, model))
         except Exception as ex:
             if is_superset_access_error(ex):
                 raise DatasetAccessError() from ex

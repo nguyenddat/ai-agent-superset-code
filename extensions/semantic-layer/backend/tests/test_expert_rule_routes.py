@@ -1,7 +1,5 @@
 import ast
-import functools
 import importlib.util
-import logging
 import sys
 import types
 from datetime import datetime, timezone
@@ -9,11 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from flask import Flask
+from sqlalchemy.exc import IntegrityError
 
 # The repositories import flask_appbuilder's Model; import it before the route loader stubs flask_appbuilder.api.
 import text_to_bi.superset_semantic_layer.common.base_repo  # noqa: F401
-from text_to_bi.superset_semantic_layer.common import exceptions as common_exceptions
-from text_to_bi.superset_semantic_layer.core import exceptions as core_exceptions
 from text_to_bi.superset_semantic_layer.modules.expert_rules.exceptions import (
     ExpertRuleConflictError,
     ExpertRuleSelfApprovalError,
@@ -30,7 +27,6 @@ ROUTE_PATH = (
     / "expert_rules.py"
 )
 DATABASE_PATH = Path(__file__).parents[1] / "src" / "text_to_bi" / "superset_semantic_layer" / "core" / "database.py"
-DATABASE_FUNCTIONS = {"get_dataset", "require_dataset", "rollback_on_error", "handle_errors"}
 ENDPOINTS = {
     "create_rule": ("/expert-rules", "POST"),
     "update_rule": ("/expert-rules/<int:rule_id>/draft", "PUT"),
@@ -179,26 +175,16 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     contracts = types.ModuleType("text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts")
     contracts.contract_is_approved_current = lambda *_: True
     contracts.metric_contract_hash = lambda *_: "live"
-    # core.database imports every model; take only the dataset lookups and the error wrappers, bound to the fake db.
-    database = types.ModuleType("text_to_bi.superset_semantic_layer.core.database")
-    database.__dict__.update(db=db, SqlaTable=sqla_module.SqlaTable, wraps=functools.wraps, logger=logging.getLogger())
-    for exceptions in (common_exceptions, core_exceptions):
-        database.__dict__.update({name: value for name, value in vars(exceptions).items() if name.endswith("Error")})
-    database_tree = ast.parse(DATABASE_PATH.read_text(encoding="utf-8"))
-    database_functions = [
-        node
-        for node in database_tree.body
-        if isinstance(node, ast.FunctionDef) and node.name in DATABASE_FUNCTIONS
-    ]
-    exec(compile(ast.Module(body=database_functions, type_ignores=[]), str(DATABASE_PATH), "exec"), database.__dict__)  # noqa: S102
-    for name, module in {
-        database.__name__: database,
+    core_models = types.ModuleType("superset.models.core")
+    core_models.Database = type("Database", (), {})
+    stubs = {
         "flask_appbuilder.api": api_module,
         "flask_login": login_module,
         "flask_wtf.csrf": csrf_module,
         "wtforms": wtforms_module,
         "superset": superset_module,
         "superset.connectors.sqla.models": sqla_module,
+        "superset.models.core": core_models,
         "superset.exceptions": exception_module,
         "superset_core.rest_api.api": rest_api_module,
         "superset_core.rest_api.decorators": rest_decorators,
@@ -207,14 +193,19 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
         glossary.__name__: glossary,
         metric.__name__: metric,
         contracts.__name__: contracts,
-    }.items():
+    }
+    for name, module in stubs.items():
         monkeypatch.setitem(sys.modules, name, module)
-    # The shared checks bind flask_login, CSRF and Superset when imported, so import them again with these stubs.
-    monkeypatch.delitem(sys.modules, "text_to_bi.superset_semantic_layer.api_support", raising=False)
-    monkeypatch.delitem(sys.modules, "text_to_bi.superset_semantic_layer.core.security", raising=False)
-    # Repositories bind their models when imported, so import them and their factories again with these stubs.
-    for name in [name for name in sys.modules if ".repositories." in name or name.endswith(".dependencies")]:
-        if name.startswith("text_to_bi.superset_semantic_layer.modules."):
+    # The shared checks bind flask_login, CSRF and Superset's db when imported, so import them again with these stubs.
+    for name in ("security", "database"):
+        monkeypatch.delitem(sys.modules, f"text_to_bi.superset_semantic_layer.core.{name}", raising=False)
+    # Repositories bind their models, and the services and routes bind the repository factories, when imported; import
+    # them again with these stubs.
+    rebound = (".repositories.", ".services.", ".routes.")
+    for name in list(sys.modules):
+        if name in stubs or not name.startswith("text_to_bi.superset_semantic_layer.modules."):
+            continue
+        if any(part in name for part in rebound) or name.endswith(".dependencies"):
             monkeypatch.delitem(sys.modules, name)
     spec = importlib.util.spec_from_file_location(route_name, ROUTE_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -367,6 +358,17 @@ def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):
             "occurred_at": event.occurred_at.isoformat(),
         }
     ]
+
+
+def test_a_name_collision_flushed_inside_the_service_is_refused_with_400(monkeypatch):
+    app = Flask(__name__)
+    route, _, session = _load_route(monkeypatch, allowed_datasets={7})
+    collision = IntegrityError("INSERT INTO text_to_bi_expert_rule", {}, Exception("duplicate normalized_name"))
+    route.create_draft = lambda *_: (_ for _ in ()).throw(collision)
+    with app.test_request_context("/", method="POST", json={}):
+        status, body = route.ExpertRuleAPI().create_rule()
+    assert (status, body) == (400, {"message": "Could not save the expert rule."})
+    assert session.rollback_calls == 1 and session.commit_calls == 0
 
 
 def test_self_approval_is_refused_with_403_and_rolled_back(monkeypatch):

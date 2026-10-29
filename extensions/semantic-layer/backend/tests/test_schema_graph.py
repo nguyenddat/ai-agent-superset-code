@@ -178,9 +178,9 @@ def _schema_graph_api(datasets, access, rls, contracts):
     api = namespace["SemanticLayerAPI"]()
     api.response = lambda status, **payload: (status, payload)
     api.response_400 = lambda **payload: (400, payload)
-    api._base_tables = lambda _database_id: datasets
+    namespace["base_tables"] = lambda _database_id: datasets
     api._schema_graph_node = lambda dataset: {"dataset_id": dataset.id, "table": dataset.table_name}
-    api._relationship_ends = lambda entry: (entry, entry)
+    namespace["relationship_ends"] = lambda entry: (entry, entry)
     return api
 
 

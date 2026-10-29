@@ -8,26 +8,28 @@ from flask_login import current_user
 from superset import db
 from superset.connectors.sqla.models import SqlaTable, SqlMetric
 
-from ....api_support import user_names
 from ....common.utils.type_formatter import iso_datetime
-from ....core.database import (
-    ensure_dictionary_tables,
-    get_datasets,
-    handle_errors,
-    is_internal_dataset,
-    require_dataset,
-    rollback_on_error,
-    seed_dictionary,
-)
+from ....core.database import handle_errors, rollback_on_error
 from ....core.exceptions import DatasetIdRequiredError
 from ....core.security import can_access_dataset, csrf_protected, require_admin, require_dataset_access
+from ....migrations import ensure_dictionary_tables
 from ...business_model.dependencies import lineage_edge_repository
 from ...business_model.models import LineageEdge
 from ...data_dictionary.dependencies import column_dictionary_repository, dataset_dictionary_repository
 from ...data_dictionary.models import ColumnDictionary
+from ...data_dictionary.services.seeding import seed_dictionary
 from ...semantic_query.dependencies import metric_contract_repository, metric_definition_repository
 from ...semantic_query.models import MetricContract, MetricDefinition
+from ...semantic_query.services.chart_data import coded_values
 from ...semantic_query.services.contracts import metric_contract_hash, metric_contract_state
+from ...semantic_query.services.metric_review import (
+    metric_contract_for,
+    metric_definition_for,
+    record_metric_event,
+    review_reason,
+)
+from ...superset.services.datasets import get_datasets, is_internal_dataset, require_dataset
+from ...superset.services.users import user_names
 from ..dependencies import dataset_proposal_repository
 from ..exceptions import (
     AgentLadderValidationError,
@@ -138,7 +140,7 @@ class AgentLadderRoutes:
                     "dataset_type": dictionary.dataset_type,
                     "description": dictionary.description,
                     "grain": dictionary.grain,
-                    "columns": source_columns(dataset, entries, referenced, self._coded_values(dataset, entries)),
+                    "columns": source_columns(dataset, entries, referenced, coded_values(dataset, entries)),
                     "metrics": [
                         source_metric(
                             metric,
@@ -185,7 +187,7 @@ class AgentLadderRoutes:
         question = asked_question(body)
 
         metric = matching_metric(dataset, draft.expression)
-        contract = self._contract_for(dataset_id, metric.id) if metric is not None else None
+        contract = metric_contract_for(dataset_id, metric.id) if metric is not None else None
         if contract is not None:
             state = metric_contract_state(contract, dataset, metric)
             if state == "approved":
@@ -207,7 +209,7 @@ class AgentLadderRoutes:
             )
             dataset.metrics.append(metric)
             db.session.flush()
-        definition = self._metric_definition(dataset_id, metric.id)
+        definition = metric_definition_for(dataset_id, metric.id)
         if definition is None:
             definition = MetricDefinition(
                 dataset_id=dataset_id,
@@ -231,13 +233,13 @@ class AgentLadderRoutes:
         )
         metric_contract_repository().add(contract, flush=False)
         note = f"AI Agent đề xuất khi trả lời: {question}" if question else "AI Agent đề xuất."
-        self._record_metric_event(dataset_id, metric.id, "candidate", note, contract)
+        record_metric_event(dataset_id, metric.id, "candidate", note, contract)
         db.session.commit()
         return self.response(201, metric=self._agent_metric(dataset, metric), provisional=True)
 
     def _agent_metric(self, dataset: SqlaTable, metric: Any) -> dict[str, Any]:
         """The metric in the shape of a semantic catalog metric, which the agent queries like an approved one."""
-        definition = self._metric_definition(dataset.id, metric.id)
+        definition = metric_definition_for(dataset.id, metric.id)
         return {
             "dataset_id": dataset.id,
             "metric_id": metric.id,
@@ -363,7 +365,7 @@ class AgentLadderRoutes:
     @handle_errors
     def reject_dataset_proposal(self, proposal_id: int):
         proposal = self._pending_proposal(proposal_id)
-        reason = self._review_reason()
+        reason = review_reason(request.get_json(silent=True))
         if reason is None:
             raise AgentLadderValidationError("Nhập lý do từ chối.")
         proposal.status, proposal.review_note = "rejected", reason
@@ -452,7 +454,7 @@ class AgentLadderRoutes:
         )
         metric_contract_repository().add(contract, flush=False)
         note = f"Tạo từ đề xuất dataset của AI Agent: {proposal.question or proposal.label}"
-        self._record_metric_event(dataset.id, metric.id, "candidate", note, contract)
+        record_metric_event(dataset.id, metric.id, "candidate", note, contract)
         proposal.status, proposal.dataset_id = "created", dataset.id
         proposal.reviewer_id, proposal.reviewed_on = current_user.id, datetime.now(tz=timezone.utc)
         db.session.commit()

@@ -7,17 +7,12 @@ from flask_appbuilder.api import expose, permission_name, protect, safe
 from superset import db
 
 from ....common.utils.type_formatter import compact_json
-from ....core.database import (
-    datasets_on_database,
-    ensure_dictionary_tables,
-    get_datasets,
-    handle_errors,
-    require_database,
-    rollback_on_error,
-)
+from ....core.database import handle_errors, rollback_on_error
 from ....core.exceptions import DatabaseIdRequiredError
 from ....core.security import csrf_protected, require_admin
+from ....migrations import ensure_dictionary_tables
 from ...data_dictionary.dependencies import dataset_dictionary_repository
+from ...superset.services.datasets import datasets_on_database, get_datasets, require_database
 from ..dependencies import (
     business_canvas_repository,
     business_domain_repository,

@@ -4,28 +4,26 @@ from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
 from superset import db, security_manager
-from superset.connectors.sqla.models import SqlaTable
 
-from ....api_support import second_reviewer_required, user_names
 from ....common.utils.type_formatter import iso_datetime
-from ....core.database import (
-    all_datasets,
-    ensure_dictionary_tables,
-    get_dataset,
-    handle_errors,
-    is_internal_dataset,
-    rollback_on_error,
-)
-from ....core.security import can_access_dataset, csrf_protected, require_admin
-from ...semantic_query.services.contracts import contract_is_approved_current
+from ....core.database import handle_errors, rollback_on_error
+from ....core.security import csrf_protected, require_admin, second_reviewer_required
+from ....migrations import ensure_dictionary_tables
+from ...superset.services.datasets import datasets_by_name, get_dataset, is_internal_dataset
+from ...superset.services.users import user_names
 from ..dependencies import (
     glossary_term_audit_event_repository,
-    glossary_term_link_repository,
     glossary_term_repository,
     glossary_term_revision_repository,
 )
 from ..exceptions import GlossaryTermNotFoundError
 from ..models import GlossaryTerm, GlossaryTermLink, GlossaryTermRevision
+from ..services.discovery import (
+    discoverable_glossary_terms,
+    glossary_link_target,
+    glossary_links,
+    glossary_metric_approved,
+)
 from ..services.glossary import (
     GlossaryValidationError,
     approve_revision,
@@ -67,7 +65,7 @@ class GlossaryRoutes:
         }
 
     def _glossary_term(self, term: GlossaryTerm, revisions: list[GlossaryTermRevision]) -> dict[str, Any]:
-        serialized = [self._glossary_revision(revision, self._glossary_links(revision.id)) for revision in revisions]
+        serialized = [self._glossary_revision(revision, glossary_links(revision.id)) for revision in revisions]
         current = next((revision for revision in serialized if revision["is_current"]), None)
         return {
             "id": term.id,
@@ -82,24 +80,8 @@ class GlossaryRoutes:
         return glossary_term_repository().get(term_id)
 
     @staticmethod
-    def _glossary_links(revision_id: int) -> list[GlossaryTermLink]:
-        return glossary_term_link_repository().for_revision(revision_id)
-
-    @staticmethod
     def _glossary_user_exists(user_id: int) -> bool:
         return security_manager.get_user_by_id(user_id) is not None
-
-    @staticmethod
-    def _glossary_link_target(link: GlossaryTermLink, dataset: SqlaTable) -> Any | None:
-        if link.kind == "dataset":
-            return None
-        if link.kind == "column":
-            return next((column for column in dataset.columns if column.column_name == link.column_name), None)
-        return next((metric for metric in dataset.metrics if metric.id == link.metric_id), None)
-
-    def _glossary_metric_approved(self, dataset: SqlaTable, metric: Any) -> bool:
-        """A term builds on a metric only while the metric's contract is approved for its current formula."""
-        return contract_is_approved_current(self._contract_for(dataset.id, metric.id), dataset, metric)
 
     def _glossary_link_is_live(self, link: GlossaryTermLink) -> bool:
         """The linked object is unchanged since the term was saved, and a linked metric is still approved."""
@@ -108,27 +90,27 @@ class GlossaryRoutes:
         if link.kind != "metric":
             return True
         dataset = get_dataset(link.dataset_id)
-        return self._glossary_metric_approved(dataset, self._glossary_link_target(link, dataset))
+        return glossary_metric_approved(dataset, glossary_link_target(link, dataset))
 
     def _glossary_live_fingerprint(self, link: GlossaryTermLink) -> str | None:
         dataset = get_dataset(link.dataset_id)
         if dataset is None:
             return None
-        target = self._glossary_link_target(link, dataset)
+        target = glossary_link_target(link, dataset)
         if link.kind != "dataset" and target is None:
             return None
         return glossary_link_fingerprint(dataset, link.kind, target)
 
     def _glossary_review_entry(self, term: GlossaryTerm, revision: GlossaryTermRevision, user_name: Any) -> dict:
         """A term's current revision with its review state, the people behind it and readable link labels."""
-        links = self._glossary_links(revision.id)
+        links = glossary_links(revision.id)
         entry = self._glossary_term(term, [revision])
         stale = not all(self._glossary_link_is_live(link) for link in links)
         author_id = revision_author_id(db.session, revision)
         current = entry["current_revision"]
         for serialized, link in zip(current["links"], links):
             dataset = get_dataset(link.dataset_id)
-            target = self._glossary_link_target(link, dataset) if dataset else None
+            target = glossary_link_target(link, dataset) if dataset else None
             serialized["dataset_name"] = dataset.table_name if dataset else None
             if link.kind == "dataset":
                 serialized["target_name"] = None
@@ -175,7 +157,7 @@ class GlossaryRoutes:
         """What a term may link to: each dataset with its physical active columns and its saved metrics."""
         require_admin()
         datasets = []
-        for dataset in all_datasets():
+        for dataset in datasets_by_name():
             if is_internal_dataset(dataset):
                 continue
             datasets.append(
@@ -191,7 +173,7 @@ class GlossaryRoutes:
                     "metrics": [
                         {"id": metric.id, "name": metric.verbose_name or metric.metric_name}
                         for metric in dataset.metrics
-                        if self._glossary_metric_approved(dataset, metric)
+                        if glossary_metric_approved(dataset, metric)
                     ],
                 }
             )
@@ -228,7 +210,7 @@ class GlossaryRoutes:
             current_user.id,
             get_dataset,
             self._glossary_user_exists,
-            self._glossary_metric_approved,
+            glossary_metric_approved,
         )
         db.session.commit()
         return self.response(201, term=self._glossary_term(revision.term, [revision]))
@@ -260,7 +242,7 @@ class GlossaryRoutes:
             current_user.id,
             get_dataset,
             self._glossary_user_exists,
-            self._glossary_metric_approved,
+            glossary_metric_approved,
         )
         db.session.commit()
         return self.response(200, term=self._glossary_term(revision.term, [revision]))
@@ -341,42 +323,5 @@ class GlossaryRoutes:
     def glossary_discovery(self):
         """Return only approved, current, fresh links to caller-authorized datasets."""
         ensure_dictionary_tables()
-        return self.response(200, terms=self._discoverable_glossary_terms())
+        return self.response(200, terms=discoverable_glossary_terms())
 
-    def _discoverable_glossary_terms(self) -> list[dict[str, Any]]:
-        """Approved current terms with only their fresh links to datasets the caller may access."""
-        rows = glossary_term_revision_repository().approved_current()
-        terms = []
-        for revision in rows:
-            visible_links = []
-            for link in self._glossary_links(revision.id):
-                dataset = get_dataset(link.dataset_id)
-                if dataset is None or not can_access_dataset(dataset):
-                    continue
-                target = self._glossary_link_target(link, dataset)
-                if link.kind != "dataset" and target is None:
-                    continue
-                if glossary_link_fingerprint(dataset, link.kind, target) != link.fingerprint:
-                    continue
-                if link.kind == "metric" and not self._glossary_metric_approved(dataset, target):
-                    continue
-                visible_links.append(
-                    {
-                        "kind": link.kind,
-                        "dataset_id": link.dataset_id,
-                        "column_name": link.column_name,
-                        "metric_id": link.metric_id,
-                    }
-                )
-            if not visible_links:
-                continue
-            terms.append(
-                {
-                    "term_id": revision.term_id,
-                    "canonical_name": revision.term.canonical_name,
-                    "definition": revision.definition,
-                    "synonyms": revision.synonyms or [],
-                    "links": visible_links,
-                }
-            )
-        return terms

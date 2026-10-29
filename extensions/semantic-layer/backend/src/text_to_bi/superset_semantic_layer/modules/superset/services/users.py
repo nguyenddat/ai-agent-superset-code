@@ -1,16 +1,14 @@
 from collections.abc import Callable
+from typing import Any
 
-from flask import current_app
 from superset import security_manager
 
+from ..dependencies import superset_user_repository
 
-def second_reviewer_required() -> bool:
-    """Whether a proposal's author must leave its approval to another administrator.
 
-    Off by default so a single administrator can approve their own work; a deployment with several reviewers
-    sets TEXT_TO_BI_REQUIRE_SECOND_REVIEWER = True in superset_config.
-    """
-    return bool(current_app.config.get("TEXT_TO_BI_REQUIRE_SECOND_REVIEWER", False))
+def active_users() -> list[Any]:
+    """Active Superset users, by username."""
+    return superset_user_repository().active()
 
 
 def user_names() -> Callable[[int | None], str | None]:

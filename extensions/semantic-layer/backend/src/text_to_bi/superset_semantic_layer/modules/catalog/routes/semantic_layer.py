@@ -2,8 +2,9 @@ from flask_appbuilder.api import expose, permission_name, protect, safe
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
-from ....core.database import ensure_dictionary_tables, handle_errors
+from ....core.database import handle_errors
 from ....core.security import require_admin
+from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.routes.agent import AgentLadderRoutes
 from ...business_model.routes.business_model import BusinessModelRoutes
 from ...data_dictionary.routes.dictionary import DataDictionaryRoutes

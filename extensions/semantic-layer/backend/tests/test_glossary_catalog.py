@@ -1,7 +1,7 @@
 import ast
 from types import SimpleNamespace
 
-from catalog_source import MODULES_PATH, api_methods, compile_into
+from catalog_source import MODULES_PATH, api_methods, compile_into, module_function
 
 REVISION_REPOSITORY_PATH = MODULES_PATH / "glossary" / "repositories" / "glossary_term_revision.py"
 
@@ -20,7 +20,7 @@ def _discovery_source():
     approved_current = next(
         node for node in ast.walk(repository) if isinstance(node, ast.FunctionDef) and node.name == "approved_current"
     )
-    nodes = (_discovery_method(), _route_method("_discoverable_glossary_terms"), approved_current)
+    nodes = (_discovery_method(), module_function("discoverable_glossary_terms"), approved_current)
     return "\n".join(ast.unparse(node) for node in nodes)
 
 
@@ -55,10 +55,9 @@ def _discovery_handler(revisions, datasets, links_by_revision, allowed_dataset_i
     """Execute the real discovery handler, without importing Superset."""
     method = _discovery_method()
     method.decorator_list = []
-    helper = _route_method("_discoverable_glossary_terms")
-    body = [method, helper]
+    helper = module_function("discoverable_glossary_terms")
     api = ast.ClassDef(
-        name="HarnessAPI", bases=[ast.Name(id="RestApi", ctx=ast.Load())], keywords=[], body=body, decorator_list=[]
+        name="HarnessAPI", bases=[ast.Name(id="RestApi", ctx=ast.Load())], keywords=[], body=[method], decorator_list=[]
     )
 
     def query(model):
@@ -75,12 +74,11 @@ def _discovery_handler(revisions, datasets, links_by_revision, allowed_dataset_i
         "ensure_dictionary_tables": lambda: None,
         "can_access_dataset": lambda dataset: dataset.id in allowed_dataset_ids,
         "glossary_link_fingerprint": lambda dataset, kind, target: f"{dataset.id}:{kind}:{getattr(target, 'id', '')}",
+        "glossary_links": lambda revision_id: links_by_revision.get(revision_id, []),
+        "glossary_link_target": lambda link, _dataset: link.target,
     }
-    compile_into(namespace, api)
-    instance = namespace["HarnessAPI"]()
-    instance._glossary_links = lambda revision_id: links_by_revision.get(revision_id, [])
-    instance._glossary_link_target = lambda link, _dataset: link.target
-    return instance
+    compile_into(namespace, helper, api)
+    return namespace["HarnessAPI"]()
 
 
 def test_discovery_is_authenticated_read_only_and_not_admin_gated():

@@ -11,10 +11,9 @@ from superset import db
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
-from ....api_support import second_reviewer_required, user_names
 from ....common.utils.type_formatter import compact_json, iso_datetime
-from ....core.database import get_dataset, handle_errors, rollback_on_error
-from ....core.security import can_access_dataset, csrf_protected, require_admin
+from ....core.database import handle_errors, rollback_on_error
+from ....core.security import can_access_dataset, csrf_protected, require_admin, second_reviewer_required
 from ...data_dictionary.dependencies import column_dictionary_repository, dataset_dictionary_repository
 from ...glossary.dependencies import (
     glossary_term_link_repository,
@@ -24,6 +23,8 @@ from ...glossary.dependencies import (
 from ...glossary.models import GlossaryTermLink
 from ...semantic_query.dependencies import metric_contract_repository
 from ...semantic_query.services.contracts import contract_is_approved_current, metric_contract_hash
+from ...superset.services.datasets import get_dataset
+from ...superset.services.users import user_names
 from ..dependencies import (
     expert_rule_audit_event_repository,
     expert_rule_link_repository,
@@ -166,15 +167,17 @@ class ExpertRuleAPI(RestApi):
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             raise ExpertRuleValidationError("Request body must be an object.")
-        if rule_id is None:
-            revision = operation(payload)
-        else:
+        if rule_id is not None:
             revision = self._revision(rule_id)
             if revision is None:
                 raise ExpertRuleNotFoundError()
-            result = operation(revision, payload)
-            revision = revision if result is None else result
+        # Repositories flush as they add rows, so a unique-name collision can surface inside the operation too.
         try:
+            if rule_id is None:
+                revision = operation(payload)
+            else:
+                result = operation(revision, payload)
+                revision = revision if result is None else result
             db.session.commit()
         except IntegrityError as ex:
             raise ExpertRuleValidationError("Could not save the expert rule.") from ex

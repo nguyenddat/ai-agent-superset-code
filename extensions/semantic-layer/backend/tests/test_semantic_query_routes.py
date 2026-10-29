@@ -131,8 +131,8 @@ def _route_api(datasets):
         "_serialize_relationship_contract", "create_metric_contract_candidate", "approve_metric_contract",
         "revoke_metric_contract", "execute_metric_contract", "create_relationship_contract_candidate",
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
-        "list_metric_contracts", "_active_users", "_metric_definition", "_serialize_metric_definition",
-        "_review_reason", "_record_metric_event", "save_metric_definition", "list_metric_contract_events",
+        "list_metric_contracts", "_active_users", "_serialize_metric_definition",
+        "save_metric_definition", "list_metric_contract_events",
         "create_agent_metric", "_agent_metric", "_relationship_contract_fields", "_snapshot_relationship_candidate",
     }
     shared = [
@@ -143,6 +143,10 @@ def _route_api(datasets):
             "second_reviewer_required",
             "can_access_dataset",
             "semantic_query_row_cap",
+            "metric_contract_for",
+            "metric_definition_for",
+            "review_reason",
+            "record_metric_event",
         )
     ]
     namespace = {
@@ -195,7 +199,7 @@ def _route_api(datasets):
     namespace["RelationshipRoutes"] = namespace["SemanticLayerAPI"]
     api = namespace["SemanticLayerAPI"]()
     # Proposing needs a business definition; tests about other rules start from a metric that has one.
-    api._metric_definition = lambda *_: SimpleNamespace(business_definition="Average air temperature.")
+    namespace["metric_definition_for"] = lambda *_: SimpleNamespace(business_definition="Average air temperature.")
     return api, namespace
 
 
@@ -220,7 +224,7 @@ def _install_chartdata_stubs(monkeypatch):
 def test_candidate_requires_admin_and_redacts_contract_details():
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
-    api._contract_for = lambda *_: None
+    namespace["metric_contract_for"] = lambda *_: None
     status, payload = api.create_metric_contract_candidate(dataset.id, 4)
     assert status == 201 and payload["contract"]["status"] == "candidate"
     assert "expression" not in payload["contract"] and "expression_hash" not in payload["contract"]
@@ -235,7 +239,7 @@ def test_new_candidates_carry_their_hash_before_joining_the_session():
     session = namespace["db"].session
     snapshots = []
     session.add = lambda item: None if isinstance(item, _MetricContractEvent) else snapshots.append(dict(vars(item)))
-    api._contract_for = lambda *_: None
+    namespace["metric_contract_for"] = lambda *_: None
     assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
     assert snapshots[0]["expression_hash"] == metric_contract_hash(dataset, dataset.metrics[0])
     assert snapshots[0]["owner_id"] == 3
@@ -252,7 +256,7 @@ def test_metric_contract_approve_and_revoke_lifecycle():
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
     holder = {}
-    api._contract_for = lambda *_: holder.get("contract")
+    namespace["metric_contract_for"] = lambda *_: holder.get("contract")
     assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
     holder["contract"] = namespace["db"].session.added[0]
     _as_user(namespace, 5)
@@ -286,7 +290,7 @@ def test_execute_denial_security_error_and_truncation_are_mapped(monkeypatch):
     api, namespace = _route_api({dataset.id: dataset})
     metric, contract = dataset.metrics[0], _MetricContract(dataset.id, 4)
     contract.status, contract.expression_hash = "approved", metric_contract_hash(dataset, metric)
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     namespace["can_access_dataset"] = lambda _: False
     assert api.execute_metric_contract(dataset.id, metric.id)[0] == 403
     namespace["can_access_dataset"] = lambda _: True
@@ -306,7 +310,7 @@ def test_execute_returns_the_superset_sql_to_administrators_only(monkeypatch):
     api, namespace = _route_api({dataset.id: dataset})
     metric, contract = dataset.metrics[0], _MetricContract(dataset.id, 4)
     contract.status, contract.expression_hash = "approved", metric_contract_hash(dataset, metric)
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     namespace["can_access_dataset"] = lambda _: True
     _install_chartdata_stubs(monkeypatch)
     executed_sql = "SELECT city, AVG(temperature) FROM weather WHERE tenant_id = 7 GROUP BY city"
@@ -400,7 +404,7 @@ def test_relationship_revoke_binds_explicit_contract_id_to_path_relationship():
     api._fk_entry = lambda dataset_id, column_id: entry if (dataset_id, column_id) == (source.dataset.id, 23) else None
     # Simulate a stale contract lookup: the caller supplies the immutable contract ID.
     api._relationship_contract_for = lambda *_: None
-    api._relationship_ends = lambda *_: None
+    namespace["relationship_ends"] = lambda *_: None
     contracts = {stale.id: stale, unrelated.id: unrelated, wrong_dataset.id: wrong_dataset}
     namespace["db"].session.get = lambda model, identifier: contracts.get(identifier)
 
@@ -544,9 +548,9 @@ def _proposed_contract(dataset, owner_id=3):
 
 def test_the_proposer_approves_alone_by_default():
     dataset = _dataset()
-    api, _ = _route_api({dataset.id: dataset})
+    api, namespace = _route_api({dataset.id: dataset})
     contract = _proposed_contract(dataset, owner_id=3)
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     assert api.approve_metric_contract(dataset.id, 4)[0] == 200
     assert contract.status == "approved" and contract.approver_id == 3
 
@@ -556,7 +560,7 @@ def test_the_proposer_cannot_approve_when_a_second_reviewer_is_required():
     api, namespace = _route_api({dataset.id: dataset})
     namespace["current_app"].config["TEXT_TO_BI_REQUIRE_SECOND_REVIEWER"] = True
     contract = _proposed_contract(dataset, owner_id=3)
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     status, payload = api.approve_metric_contract(dataset.id, 4)
     assert status == 403 and "không thể tự duyệt" in payload["message"] and contract.status == "candidate"
     _as_user(namespace, 5)
@@ -571,11 +575,11 @@ def test_proposing_again_makes_the_new_proposer_the_owner_and_needs_a_definition
     api, namespace = _route_api({dataset.id: dataset})
     contract = _proposed_contract(dataset, owner_id=3)
     contract.status = "revoked"
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     _as_user(namespace, 5)
     assert api.create_metric_contract_candidate(dataset.id, 4)[0] == 201
     assert contract.owner_id == 5 and contract.status == "candidate"
-    api._metric_definition = lambda *_: None
+    namespace["metric_definition_for"] = lambda *_: None
     status, payload = api.create_metric_contract_candidate(dataset.id, 4)
     assert status == 400 and "định nghĩa nghiệp vụ" in payload["message"]
 
@@ -584,7 +588,7 @@ def test_revoking_needs_a_reason_and_a_live_contract():
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
     contract = _proposed_contract(dataset)
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     _use_request_body(namespace, {"reason": "   "})
     assert api.revoke_metric_contract(dataset.id, 4)[0] == 400 and contract.status == "candidate"
     _use_request_body(namespace, {"reason": "x" * 2001})
@@ -597,7 +601,7 @@ def test_revoking_needs_a_reason_and_a_live_contract():
 def test_metric_definition_is_validated_saved_and_logged():
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
-    api._metric_definition = lambda *_: None
+    namespace["metric_definition_for"] = lambda *_: None
     known_user = SimpleNamespace(get_full_name=lambda: "Bao Steward", username="bao")
     namespace["security_manager"] = SimpleNamespace(get_user_by_id=lambda user_id: known_user if user_id == 9 else None)
     for body in (
@@ -665,7 +669,7 @@ def test_only_administrators_may_preview_a_candidate(monkeypatch):
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
     contract = _proposed_contract(dataset)
-    api._contract_for = lambda *_: contract
+    namespace["metric_contract_for"] = lambda *_: contract
     namespace["can_access_dataset"] = lambda _: True
     _install_chartdata_stubs(monkeypatch)
     grants = []
@@ -725,8 +729,8 @@ def _agent_metric_api(contract=None, dataset_type="aggregate"):
             "unique_metric_name": service.unique_metric_name,
         }
     )
-    api._metric_definition = lambda *_: None
-    api._contract_for = lambda *_: contract
+    namespace["metric_definition_for"] = lambda *_: None
+    namespace["metric_contract_for"] = lambda *_: contract
     namespace["can_access_dataset"] = lambda _: True
     return api, namespace, dataset
 
