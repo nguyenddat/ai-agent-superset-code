@@ -38,8 +38,13 @@ uv run python --version
 ```
 
 Run Python tools through `uv run` (for example `uv run pytest` or
-`uv run ruff check`); it finds the root project from any subdirectory. Add or
-change dependencies with `uv add` / `uv add --dev` so `uv.lock` stays current.
+`uv run ruff check`) from the repository root, for example
+`uv run pytest extensions/ai-agents/backend/tests`. `uv run` uses the nearest
+`pyproject.toml`, and each `extensions/*/backend/` has its own one for bundling
+and for Ruff's Python 3.10 target, so running it inside a backend directory
+creates a separate, empty `.venv` there; from anywhere else, or with
+`--project <repository root>`, it finds the root project. Add or change
+dependencies with `uv add` / `uv add --dev` so `uv.lock` stays current.
 
 Superset's application runtime runs inside the Docker image. The local uv
 environment is for development commands and extension packaging.
