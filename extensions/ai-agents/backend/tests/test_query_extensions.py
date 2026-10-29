@@ -2,13 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_ai_agent.modules.chat.query import QueryPlanError, combined_result, plan_query
-from text_to_bi.superset_ai_agent.modules.chat.semantic_source import SemanticCatalog
-from text_to_bi.superset_ai_agent.modules.definitions.conditions import (
+from text_to_bi.superset_ai_agent.modules.chat.exceptions import QueryPlanError
+from text_to_bi.superset_ai_agent.modules.chat.services.query import combined_result, plan_query
+from text_to_bi.superset_ai_agent.modules.definitions.services.conditions import (
     DefinitionConditions,
     structure_definitions,
     structured_conditions,
 )
+from text_to_bi.superset_ai_agent.modules.semantic_layer.services.catalog import SemanticCatalog
 
 COLUMNS = [
     {"name": "ngay", "label": "Ngày", "type": "DATE", "temporal": True, "groupby": True, "filterable": True},

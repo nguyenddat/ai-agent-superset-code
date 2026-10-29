@@ -29,7 +29,7 @@ card, one question at a time: the user picks an option (keys 1–N, Enter) or
 writes their own under "Khác", then sends every answer at once, or skips. The
 answers are saved per user and dashboard (`text_to_bi_agent_user_definition`)
 and the question is answered again with them. While saving, one model call per
-confirmed rule (`modules/definitions/conditions.py`, in parallel) turns its text
+confirmed rule (`modules/definitions/services/conditions.py`, in parallel) turns its text
 into checked filters on one dataset (`conditions`: column, label, operator,
 value), so every later question uses that exact threshold, as with an approved
 rule; a definition no filter can express keeps `conditions` NULL and is followed
@@ -95,7 +95,7 @@ numbers, and logs the question so administrators can fill the gaps:
      new one as an `ai_agent` candidate. The question is answered at once with a
      `provisional` result ("Tạm tính · chờ duyệt"), and still logged as
      `needs_review` until an administrator approves the metric. The result
-     carries `formula`: the expression and, from `modules/chat/formula.py`, a
+     carries `formula`: the expression and, from `modules/chat/services/formula.py`, a
      sentence of text and column parts ("Đếm số Mã lần nạp, chỉ tính các dòng
      có Trạng thái là “THAT_BAI”") that the page shows with data dictionary
      labels and switches to column names on request; a formula beyond the
@@ -122,7 +122,7 @@ numbers, and logs the question so administrators can fill the gaps:
      (`suggestions`), and no query runs. A failure here is reported but does not
      stop the answer.
 5. Otherwise `query_metrics` checks the plan against the catalog
-   (`modules/chat/query.py`): only listed columns, filterable or groupable as
+   (`modules/chat/services/query.py`): only listed columns, filterable or groupable as
    used, and the supported operators. An approved expert rule's filters come
    from the rule's own conditions, never from the model's copy of them, and a
    rule with a condition no filter can express stops the query. A user's
@@ -177,15 +177,18 @@ extensions/ai-agents/
 ├── extension.json
 ├── backend/
 │   ├── src/text_to_bi/superset_ai_agent/
-│   │   ├── entrypoint.py
-│   │   ├── core/config.py                # environment settings: OpenRouter, internal Superset URL
-│   │   ├── core/chat_models.py           # OpenRouter model built from core/config.py
-│   │   ├── models/question_log.py        # question log, handling, chat session and user definition tables
+│   │   ├── entrypoint.py                 # registers the APIs and the /ai-agent/ page
+│   │   ├── migrations.py                 # ensure_agent_tables: creates and upgrades every module's tables
+│   │   ├── common/                       # BaseModel, BaseRepository, AgentError and its abstract roots, formatter
+│   │   ├── core/                         # Settings, OpenRouter chat model, admin and CSRF checks, handle_errors
 │   │   └── modules/
-│   │       ├── chat/                     # pipeline, prompts, catalog reader, query planner, /chat/stream
-│   │       ├── definitions/              # users' definitions: their own, and the admin review
-│   │       ├── questions/                # /questions/review, /questions/<id>/handling
-│   │       └── sessions/                 # /sessions API and the /ai-agent/ page view
+│   │       ├── chat/                     # pipeline, prompts, query planner, formula text, /chat/stream
+│   │       ├── sessions/                 # conversations: /sessions API and the /ai-agent/ page view
+│   │       ├── questions/                # the question log, /questions/review, /questions/<id>/handling
+│   │       ├── definitions/              # users' definitions: their own, their conditions, the admin review
+│   │       ├── schema_link/              # join paths and SQL over base tables, the analysis lab
+│   │       ├── semantic_layer/           # the Semantic Layer read and called over HTTP as the user, no tables
+│   │       └── superset/                 # Superset's dashboards and users: read only, no tables
 │   └── tests/
 └── frontend/
     ├── src/index.tsx
@@ -197,6 +200,14 @@ extensions/ai-agents/
     ├── src/shared/api/chat.ts
     └── webpack.config.js
 ```
+
+The backend follows the layers and module layout of `docs/handbook/kien-truc.md`
+and the error, transaction and CSRF rules of `docs/handbook/hanh-vi.md`, as the
+Semantic Layer does. A module that owns tables has `models/`, `repositories/`,
+`dependencies.py`, `exceptions.py`, `services/` and `routes/`; `semantic_layer`
+and `superset` only have services. The tests cover the services that import
+neither Flask nor Superset, so keep pure logic (parsing, planning, the pipeline)
+apart from the services that use a repository.
 
 ## API
 
@@ -263,8 +274,9 @@ into the Superset containers. Keep that file out of commits and bundles.
 ## Schema link (in progress)
 
 `modules/schema_link/` answers over base tables when no metric can
-(`docs/specs/schema-link.md`). `graph.py` reads the Semantic Layer's
-`/schema-graph` (as the user, cached 60 seconds); `goal.py` checks a goal
+(`docs/specs/schema-link.md`). Its `services/graph.py` holds the Semantic Layer's
+`/schema-graph`, read as the user through the `semantic_layer` module and cached
+60 seconds; `goal.py` checks a goal
 (measures, group by, filters, kinds of rows) against it, turning an indicator
 code such as `nhiet_do_c` into the values table's column, the catalog's code
 filter and its aggregation; `paths.py` finds the join tree, Dijkstra from the

@@ -1,6 +1,6 @@
 import pytest
 
-from text_to_bi.superset_ai_agent.modules.chat.formula import answers_anything, doubtful_result, told_formula
+from text_to_bi.superset_ai_agent.modules.chat.services.formula import answers_anything, doubtful_result, told_formula
 
 COLUMNS = [
     {"name": "trang_thai", "label": "Trạng thái"},
@@ -27,7 +27,10 @@ def test_a_filtered_count_reads_as_a_sentence_with_business_labels_or_column_nam
         "COUNT(CASE WHEN nhiet_do >= 35 AND loai_quan_sat IN ('DU_BAO_NGAY', 'HIEN_TAI') THEN 1 END)",
         "Đếm số dòng có nhiet_do từ 35 trở lên và Loại quan sát thuộc “DU_BAO_NGAY”, “HIEN_TAI”",
     ),
-    ("SUM(CASE WHEN nhiet_do < 0 OR trang_thai IS NULL THEN 1 END)", "Đếm số dòng có nhiet_do nhỏ hơn 0 hoặc Trạng thái trống"),
+    (
+        "SUM(CASE WHEN nhiet_do < 0 OR trang_thai IS NULL THEN 1 END)",
+        "Đếm số dòng có nhiet_do nhỏ hơn 0 hoặc Trạng thái trống",
+    ),
     ("SUM(CASE WHEN nhiet_do <= 0 THEN nhiet_do END)", "Tổng nhiet_do, chỉ tính các dòng có nhiet_do không quá 0"),
 ])
 def test_contract_formulas_read_in_plain_vietnamese(expression, sentence):

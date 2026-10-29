@@ -15,6 +15,6 @@ commit với code.
 ## Phạm vi
 
 - Quy ước code áp dụng cho toàn repository: Python và TypeScript của cả hai extension, script, DAG Airflow.
-- Kiến trúc và hành vi mô tả backend Semantic Layer (`extensions/semantic-layer/backend`), là cấu trúc chuẩn. Backend
-  AI Agent hiện có cấu trúc riêng (xem `extensions/ai-agents/AGENTS.md`); code mới ở đó theo quy ước code của
-  handbook, và khi tái cấu trúc thì đi về cùng các lớp như Semantic Layer.
+- Kiến trúc và hành vi áp dụng cho cả hai backend: Semantic Layer (`extensions/semantic-layer/backend`) và AI Agent
+  (`extensions/ai-agents/backend`). Hai extension đóng gói riêng nên mỗi bên có `common` và `core` của mình; chỗ hai
+  bên khác tên (lớp lỗi gốc, hàm migration) được ghi rõ ở từng mục.

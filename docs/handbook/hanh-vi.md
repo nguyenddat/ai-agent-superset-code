@@ -1,7 +1,7 @@
 # Hành vi chung của API
 
-Mô tả cách backend Semantic Layer trả lỗi, giữ transaction và kiểm tra quyền. Mọi route mới theo đúng các quy tắc này để
-client nhận cùng một kiểu phản hồi ở mọi nơi.
+Mô tả cách backend Semantic Layer và AI Agent trả lỗi, giữ transaction và kiểm tra quyền. Mọi route mới theo đúng các
+quy tắc này để client nhận cùng một kiểu phản hồi ở mọi nơi.
 
 ## Exception
 
@@ -16,7 +16,10 @@ mang `status` và `message` mặc định:
 | `NotFoundError` | 404 | Bản ghi được nêu không tồn tại |
 | `ConflictError` | 409 | Xung đột trạng thái: revision đã đổi, đã có contract được duyệt |
 | `TooManyRequestsError` | 429 | Vượt giới hạn số mục đang chờ duyệt |
-| `ServiceUnavailableError` | 503 | Dịch vụ ngoài (OpenRouter) chưa sẵn sàng |
+| `ServiceUnavailableError` | 503 | Dịch vụ ngoài (OpenRouter, Semantic Layer với AI Agent) chưa sẵn sàng |
+
+AI Agent dùng gốc `AgentError` thay cho `SemanticLayerError` và chỉ có `ValidationError`, `NotAuthorizedError`,
+`NotFoundError`, `ServiceUnavailableError`.
 
 Quy tắc:
 
@@ -44,8 +47,9 @@ def approve_glossary(self, term_id: int):
     ...
 ```
 
-- `handle_errors` (`core/database.py`) bắt `SemanticLayerError`, rollback session và trả `status` cùng `message` của
-  lỗi. Nó phải nằm trong cùng, sát `def`: `@safe` của Superset và `rollback_on_error` biến mọi exception thành 500.
+- `handle_errors` (`core/database.py`) bắt `SemanticLayerError` (AI Agent: `AgentError`), rollback session và trả
+  `status` cùng `message` của lỗi. Nó phải nằm trong cùng, sát `def`: `@safe` của Superset và `rollback_on_error` biến
+  mọi exception thành 500.
 - `rollback_on_error` bắt lỗi ngoài dự kiến, ghi log, rollback và trả 500 "Could not save the change.", không lộ chi
   tiết lỗi.
 - Route chỉ đọc (GET) không cần `csrf_protected` và `rollback_on_error`, nhưng vẫn có `handle_errors`.
@@ -70,7 +74,7 @@ def approve_glossary(self, term_id: int):
 
 ## Bảng và migration
 
-- Route đầu tiên đụng tới bảng của extension gọi `ensure_dictionary_tables()` (`migrations.py`). Hàm tạo và nâng cấp
-  bảng một lần cho mỗi process, giữ PostgreSQL advisory lock để các worker không chạy song song, và không thử lại
-  trong 30 giây sau một lần lỗi.
+- Route đầu tiên đụng tới bảng của extension gọi `ensure_dictionary_tables()` (AI Agent: `ensure_agent_tables()`) trong
+  `migrations.py`. Hàm tạo và nâng cấp bảng một lần cho mỗi process, giữ PostgreSQL advisory lock để các worker không
+  chạy song song, và không thử lại trong 30 giây sau một lần lỗi.
 - `ExpertRuleAPI` không chạy DDL; bảng của nó được tạo trong cùng migration đó.

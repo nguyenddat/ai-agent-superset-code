@@ -3,16 +3,14 @@ from functools import lru_cache
 from langchain_openai import ChatOpenAI
 
 from .config import settings
+from .exceptions import ChatModelNotConfiguredError
 
 
 @lru_cache(maxsize=1)
 def get_chat_model() -> ChatOpenAI:
-    """The OpenRouter chat model every agent step uses; the key comes from the Superset container environment."""
+    """The OpenRouter chat model every agent step uses; raises ChatModelNotConfiguredError without an API key."""
     if not settings.OPENROUTER_API_KEY:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY chưa được cấu hình. Đặt biến này trong file .env ở thư mục gốc repo "
-            "rồi khởi động lại dịch vụ superset."
-        )
+        raise ChatModelNotConfiguredError()
     return ChatOpenAI(
         model=settings.OPENROUTER_MODEL,
         temperature=0.0,

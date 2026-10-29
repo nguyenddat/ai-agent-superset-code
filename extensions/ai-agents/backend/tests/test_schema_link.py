@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from text_to_bi.superset_ai_agent.modules.schema_link.analysis import analyze
-from text_to_bi.superset_ai_agent.modules.schema_link.graph import FANOUT_COST, SchemaGraph
-from text_to_bi.superset_ai_agent.modules.schema_link.paths import (
-    NoJoinPath,
+from text_to_bi.superset_ai_agent.modules.schema_link.exceptions import NoJoinPathError
+from text_to_bi.superset_ai_agent.modules.schema_link.services.analysis import analyze
+from text_to_bi.superset_ai_agent.modules.schema_link.services.graph import FANOUT_COST, SchemaGraph
+from text_to_bi.superset_ai_agent.modules.schema_link.services.paths import (
     join_tree,
     shortest_path_tree,
     steiner_tree,
@@ -98,7 +98,7 @@ def test_dreyfus_wagner_shares_a_hub_that_separate_shortest_paths_would_not():
 def test_a_table_no_approved_relationship_reaches_raises_no_join_path():
     graph = _graph([1, 2, 3], [(50, 1, 2)])
 
-    with pytest.raises(NoJoinPath) as raised:
+    with pytest.raises(NoJoinPathError) as raised:
         join_tree(graph, 1, [1, 3])
     assert raised.value.unreachable == [3]
 

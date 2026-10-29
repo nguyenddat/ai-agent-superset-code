@@ -1,7 +1,7 @@
 import pytest
 
-from text_to_bi.superset_ai_agent.modules.chat.query import (
-    QueryPlanError,
+from text_to_bi.superset_ai_agent.modules.chat.exceptions import QueryPlanError
+from text_to_bi.superset_ai_agent.modules.chat.services.query import (
     combined_result,
     plan_query,
     result_for_answer,

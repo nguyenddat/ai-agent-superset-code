@@ -4,15 +4,19 @@ from datetime import date
 import pytest
 from test_agent_pipeline import CATALOG, FakeModel, FakeSemanticLayer
 
-from text_to_bi.superset_ai_agent.modules.chat import pipeline
-from text_to_bi.superset_ai_agent.modules.chat.semantic_source import DataModelSources, MetricQueryError
+from text_to_bi.superset_ai_agent.modules.chat.services import pipeline
+from text_to_bi.superset_ai_agent.modules.semantic_layer.exceptions import SemanticLayerRefusedError
+from text_to_bi.superset_ai_agent.modules.semantic_layer.services.data_model import DataModelSources
 
 AGGREGATE = {
     "id": 12, "name": "fact_tong_hop_thoi_tiet", "label": "Tổng hợp thời tiết",
     "columns": [
         {"name": "ngay", "label": "Ngày", "type": "DATE", "temporal": True, "groupby": True, "filterable": True},
         {"name": "thanh_pho_key", "type": "INTEGER", "groupby": True, "filterable": True},
-        {"name": "loai_quan_sat", "label": "Loại quan sát", "type": "VARCHAR(30)", "values": ["DU_BAO_NGAY", "HIEN_TAI"]},
+        {
+            "name": "loai_quan_sat", "label": "Loại quan sát", "type": "VARCHAR(30)",
+            "values": ["DU_BAO_NGAY", "HIEN_TAI"],
+        },
         {"name": "gio_giat_toi_da_kmh", "label": "Gió giật tối đa", "unit": "km/h", "groupby": True,
          "filterable": True},
     ],
@@ -159,7 +163,7 @@ def test_no_aggregate_column_for_it_falls_back_to_a_proposal_for_administrators(
 
 
 def test_a_metric_the_semantic_layer_refuses_becomes_a_proposal_with_the_reason():
-    builder = FakeBuilder(error=MetricQueryError("Một metric cùng công thức đang chờ quản trị viên xử lý."))
+    builder = FakeBuilder(error=SemanticLayerRefusedError("Một metric cùng công thức đang chờ quản trị viên xử lý."))
     outcome, events, _ = _run({"Understanding": _understanding(), "MetricDraft": _draft()}, builder)
     assert "propose_missing_items" not in _steps(events)
     assert outcome.query_error.startswith("Một metric cùng công thức")
@@ -199,7 +203,8 @@ def test_with_no_aggregate_for_it_a_dataset_over_base_tables_goes_to_administrat
 
 def test_a_dataset_the_semantic_layer_refuses_still_reaches_administrators_as_a_metric_proposal():
     builder = FakeBuilder()
-    builder.propose_dataset = lambda draft: (_ for _ in ()).throw(MetricQueryError("SQL chỉ được đọc dữ liệu."))
+    refusal = SemanticLayerRefusedError("SQL chỉ được đọc dữ liệu.")
+    builder.propose_dataset = lambda draft: (_ for _ in ()).throw(refusal)
     answers = {
         "Understanding": _understanding(),
         "MetricDraft": pipeline.MetricDraft(dataset_id=None),

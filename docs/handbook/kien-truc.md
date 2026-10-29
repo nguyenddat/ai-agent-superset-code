@@ -1,6 +1,8 @@
 # Kiến trúc backend
 
-Mô tả backend Semantic Layer: `extensions/semantic-layer/backend/src/text_to_bi/superset_semantic_layer/`.
+Mô tả backend Semantic Layer: `extensions/semantic-layer/backend/src/text_to_bi/superset_semantic_layer/`. Backend AI
+Agent (`extensions/ai-agents/backend/src/text_to_bi/superset_ai_agent/`) theo cùng các lớp và cấu trúc module; chỗ khác
+nằm ở mục [Backend AI Agent](#backend-ai-agent).
 
 ## Các lớp
 
@@ -71,6 +73,29 @@ modules/<module>/
   `semantic_query/services/metric_review.py` hay `discoverable_glossary_terms` trong `glossary/services/discovery.py`.
   `SemanticLayerAPI` ghép các mixin, nhưng không mixin nào được dựa vào method của mixin khác.
 - **Gọi giữa các module** đi qua service, repository factory, model hoặc exception của module kia, không đi qua route.
+
+## Backend AI Agent
+
+Cùng các lớp `common`, `core`, `modules` và cùng cấu trúc một module. Khác Semantic Layer ở mấy điểm:
+
+- Không có module ghép route: mỗi module có lớp `RestApi` riêng trong `routes/`, và `entrypoint.py` import chúng.
+- Lớp lỗi gốc là `AgentError` (`common/exceptions/`); chỉ có `ValidationError`, `NotAuthorizedError`,
+  `NotFoundError` và `ServiceUnavailableError` vì AI Agent không có vòng đời duyệt.
+- `migrations.py` có `ensure_agent_tables()`, tạo bảng của `sessions`, `questions`, `definitions`.
+
+| Module | Nghiệp vụ |
+| --- | --- |
+| `chat` | Trả lời một câu hỏi: pipeline, prompt, lập kế hoạch truy vấn, diễn giải công thức, `/chat/stream` |
+| `sessions` | Cuộc trò chuyện của người dùng và trang `/ai-agent/` |
+| `questions` | Nhật ký câu hỏi và cách quản trị viên xử lý câu `needs_review` |
+| `definitions` | Cách hiểu của người dùng, điều kiện suy ra từ đó, và màn duyệt của quản trị viên |
+| `schema_link` | Đường join và SQL trên base table, phòng thử phân tích của quản trị viên |
+| `semantic_layer` | Đọc và gọi Semantic Layer qua HTTP với cookie của người dùng: catalog, data model, chạy metric; không có bảng |
+| `superset` | Dashboard và người dùng của Superset: chỉ đọc, không có bảng riêng |
+
+- Mọi lời gọi HTTP sang Semantic Layer đi qua `modules/semantic_layer/services/`; module khác không tự gọi `requests`.
+- Test cục bộ không có Superset: service thuần (phân tích request, lập kế hoạch, pipeline) không import repository hay
+  `superset`, để test import được.
 
 ## Superset 6.1 và Python 3.10
 

@@ -397,7 +397,8 @@ function SmallMultiples({ title, unit, labels, series }: {
       <div className="ai-result-multiples-grid">
         {series.map(item => (
           <TimeChart
-            key={item.name} kind="line" title={item.name} unit={unit} labels={labels} series={[item]} domain={domain} panel
+            key={item.name} kind="line" title={item.name} unit={unit} labels={labels} series={[item]} domain={domain}
+            panel
           />
         ))}
       </div>

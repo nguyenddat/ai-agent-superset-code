@@ -3,8 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from text_to_bi.superset_ai_agent.modules.chat import pipeline
-from text_to_bi.superset_ai_agent.modules.chat.semantic_source import SemanticCatalog, flatten_catalog, rule_filters
+from text_to_bi.superset_ai_agent.modules.chat.services import pipeline
+from text_to_bi.superset_ai_agent.modules.semantic_layer.services.catalog import (
+    SemanticCatalog,
+    flatten_catalog,
+    rule_filters,
+)
 
 
 class FakeModel:
@@ -194,9 +198,9 @@ def test_a_query_the_catalog_does_not_allow_becomes_a_query_error():
 
 
 def test_a_refused_metric_query_is_reported_and_still_answered():
-    from text_to_bi.superset_ai_agent.modules.chat.semantic_source import MetricQueryError
+    from text_to_bi.superset_ai_agent.modules.semantic_layer.exceptions import SemanticLayerRefusedError
 
-    semantic_layer = FakeSemanticLayer(error=MetricQueryError("Metric chưa được duyệt."))
+    semantic_layer = FakeSemanticLayer(error=SemanticLayerRefusedError("Metric chưa được duyệt."))
     outcome, events, _ = _run(_answers(), run_metric=semantic_layer)
 
     failed = [data for name, data in events if name == "tool_end" and data["status"] == "error"]
